@@ -1,17 +1,27 @@
-def target_function(n):
-    # Constant Folding
-    x = 24 * 60 * 60
+
+def formal_calculation(x, y):
+    """
+    Formal example showcasing:
+    1. Constant Folding: 10 * 30 * 2
+    2. Dead Code: i = 0 that is never used, or if False block
+    3. Unused variables
+    4. Simple arithmetic simplification
+    """
+    # Constant folding candidate
+    a = 10 * 30 * 2
     
-    # Dead Code Elimination
+    # Dead code candidate
+    unused_var = 999
+    
+    # Simple simplification
+    result = x + 0
+    result = result * 1
+    
     if False:
-        print("This should be removed")
+        print("This will never run")
+        result += 1000
         
-    # Strength Reduction
-    y = n ** 2
+    # Another constant folding
+    b = a + 40
     
-    # Loop Unrolling
-    res = 0
-    for i in range(3):
-        res += i
-        
-    return x + y + res
+    return result + b + (y * 0)

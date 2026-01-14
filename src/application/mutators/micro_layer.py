@@ -381,27 +381,144 @@ class ConstantFoldingTransformer(NodeTransformer):
 
 
 class ConstantPropagationTransformer(NodeTransformer):
-    """Propagates constant values through variable assignments."""
+    """
+    Enhanced constant propagation with scope-aware tracking.
+    
+    Features:
+    - Maintains a scope stack for function/class boundaries
+    - Invalidates constants on reassignment to non-constants
+    - Properly handles nested scopes
+    - Checks all enclosing scopes for constant lookup
+    """
     
     def __init__(self):
         self.changed = False
-        self.constants = {}  # var_name -> constant_value
+        self.scope_stack = [{}]  # Stack of {var_name -> Constant}
+    
+    def _push_scope(self):
+        """Push a new scope onto the stack."""
+        self.scope_stack.append({})
+    
+    def _pop_scope(self):
+        """Pop the current scope from the stack."""
+        if len(self.scope_stack) > 1:
+            self.scope_stack.pop()
+    
+    def _set_constant(self, var_name: str, value: schema.Constant):
+        """Set a constant in the current scope."""
+        self.scope_stack[-1][var_name] = value
+    
+    def _invalidate_constant(self, var_name: str):
+        """Remove constant tracking when reassigned to non-constant."""
+        self.scope_stack[-1].pop(var_name, None)
+    
+    def _lookup_constant(self, var_name: str) -> Optional[schema.Constant]:
+        """Look up a constant, checking from innermost to outermost scope."""
+        for scope in reversed(self.scope_stack):
+            if var_name in scope:
+                return scope[var_name]
+        return None
+    
+    def visit_FunctionDef(self, node: schema.FunctionDef) -> schema.Statement:
+        """Create new scope for function body."""
+        self._push_scope()
+        
+        # Parameters shadow any outer constants
+        for arg in node.args.args:
+            self._invalidate_constant(arg.arg)
+        
+        node = self.generic_visit(node)
+        self._pop_scope()
+        return node
+    
+    def visit_AsyncFunctionDef(self, node: schema.AsyncFunctionDef) -> schema.Statement:
+        """Create new scope for async function body."""
+        self._push_scope()
+        
+        for arg in node.args.args:
+            self._invalidate_constant(arg.arg)
+        
+        node = self.generic_visit(node)
+        self._pop_scope()
+        return node
+    
+    def visit_ClassDef(self, node: schema.ClassDef) -> schema.Statement:
+        """Create new scope for class body."""
+        self._push_scope()
+        node = self.generic_visit(node)
+        self._pop_scope()
+        return node
+    
+    def visit_For(self, node: schema.For) -> schema.Statement:
+        """Loop variables can change, so invalidate them."""
+        # Invalidate the loop variable
+        if isinstance(node.target, schema.Name):
+            self._invalidate_constant(node.target.id)
+        
+        return self.generic_visit(node)
     
     def visit_Assign(self, node: schema.Assign) -> schema.Statement:
-        node = self.generic_visit(node)
+        # First, propagate constants in the RHS
+        node.value = self.visit(node.value)
         
-        # Track constant assignments
-        if (len(node.targets) == 1 and isinstance(node.targets[0], schema.Name) and
-            isinstance(node.value, schema.Constant)):
+        # Then track the assignment
+        if len(node.targets) == 1 and isinstance(node.targets[0], schema.Name):
             var_name = node.targets[0].id
-            self.constants[var_name] = node.value
+            
+            if isinstance(node.value, schema.Constant):
+                # Track constant assignment
+                self._set_constant(var_name, node.value)
+            else:
+                # Invalidate on non-constant assignment
+                self._invalidate_constant(var_name)
         
         return node
     
+    def visit_AugAssign(self, node: schema.AugAssign) -> schema.Statement:
+        """Augmented assignment (x += 1) may invalidate constants."""
+        if isinstance(node.target, schema.Name):
+            var_name = node.target.id
+            
+            # Check if we can compute the new constant value
+            current = self._lookup_constant(var_name)
+            if current and isinstance(node.value, schema.Constant):
+                try:
+                    new_val = self._compute_aug_assign(current.value, node.op, node.value.value)
+                    if new_val is not None:
+                        self._set_constant(var_name, schema.Constant(
+                            value=new_val,
+                            kind=type(new_val).__name__
+                        ))
+                        return node
+                except Exception:
+                    pass
+            
+            # Can't track, invalidate
+            self._invalidate_constant(var_name)
+        
+        return self.generic_visit(node)
+    
+    def _compute_aug_assign(self, left, op: str, right):
+        """Compute the result of augmented assignment if possible."""
+        ops = {
+            '+': lambda a, b: a + b,
+            '-': lambda a, b: a - b,
+            '*': lambda a, b: a * b,
+            '/': lambda a, b: a / b if b != 0 else None,
+            '//': lambda a, b: a // b if b != 0 else None,
+            '%': lambda a, b: a % b if b != 0 else None,
+        }
+        if op in ops:
+            return ops[op](left, right)
+        return None
+    
     def visit_Name(self, node: schema.Name) -> schema.Expression:
-        if node.ctx == "Load" and node.id in self.constants:
-            self.changed = True
-            return copy.deepcopy(self.constants[node.id])
+        """Replace Name with constant if tracked."""
+        if node.ctx == "Load":
+            const = self._lookup_constant(node.id)
+            if const:
+                self.changed = True
+                return copy.deepcopy(const)
         return node
 
 

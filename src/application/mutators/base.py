@@ -192,9 +192,71 @@ class MutationOrchestrator:
 
 
 # Utility functions for common mutation patterns
+
+class LazyIRWrapper:
+    """
+    Wraps IR with copy-on-write semantics.
+    
+    Delays the deep copy until the IR is actually accessed for modification,
+    reducing unnecessary copying overhead when mutations don't produce changes.
+    
+    Usage:
+        wrapper = LazyIRWrapper(original_ir)
+        ir = wrapper.get_mutable()  # Deep copy happens here
+        # ... mutate ir ...
+        if wrapper.was_modified:
+            return ir
+    """
+    
+    __slots__ = ('_original', '_copied', '_was_accessed')
+    
+    def __init__(self, original: schema.Module):
+        self._original = original
+        self._copied = None
+        self._was_accessed = False
+    
+    def get_mutable(self) -> schema.Module:
+        """Get a mutable copy of the IR (performs deep copy on first call)."""
+        if self._copied is None:
+            self._copied = copy.deepcopy(self._original)
+        self._was_accessed = True
+        return self._copied
+    
+    def get_readonly(self) -> schema.Module:
+        """Get readonly access to the original IR (no copy)."""
+        return self._original
+    
+    @property
+    def was_modified(self) -> bool:
+        """Check if the mutable IR was accessed."""
+        return self._was_accessed
+    
+    @property
+    def ir(self) -> schema.Module:
+        """Alias for get_mutable() for convenience."""
+        return self.get_mutable()
+
+
 def safe_deepcopy_ir(ir: schema.Module) -> schema.Module:
     """Safely create a deep copy of IR for mutation."""
     return copy.deepcopy(ir)
+
+
+def mutate_ir(ir: schema.Module) -> LazyIRWrapper:
+    """
+    Create a lazy copy wrapper for mutation.
+    
+    This is the preferred way to start a mutation as it delays
+    deep copying until absolutely necessary.
+    
+    Usage:
+        wrapper = mutate_ir(original_ir)
+        mutated = wrapper.ir  # Copy happens here
+        transformer.visit(mutated)
+        if transformer.changed:
+            return mutated
+    """
+    return LazyIRWrapper(ir)
 
 
 def create_mutation_result(ir: schema.Module, strategy_name: str, layer: MutationLayer,

@@ -134,7 +134,7 @@ sys.path.insert(0, '{os.getcwd()}') # Prioritize CWD
 
 
 try:
-    from src.green_gym.monitor import EnergyMonitor
+    from src.infrastructure.execution.monitor import EnergyMonitor
 except ImportError:
     print("Error: Could not import EnergyMonitor. Check PYTHONPATH.", file=sys.stderr)
     sys.exit(1)

@@ -21,7 +21,15 @@ class TestCodeGenerator:
         ir = Module(body=Block(statements=[
             FunctionDef(
                 name="add",
-                args=["a", "b"],
+                args=Arguments(
+                    posonlyargs=[],
+                    args=[Arg(arg="a"), Arg(arg="b")],
+                    vararg=None,
+                    kwonlyargs=[],
+                    kw_defaults=[],
+                    kwarg=None,
+                    defaults=[]
+                ),
                 body=Block(statements=[
                     Return(value=BinaryOp(
                         left=Name(id="a", ctx="Load"),

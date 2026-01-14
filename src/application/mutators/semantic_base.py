@@ -87,5 +87,38 @@ Fix the code and return ONLY the corrected Python code.
                     logger.warning(f"Final parse failed: {e}")
         return None
 
+    def _validate_imports(self, new_ir: schema.Module, allowed_imports: Set[str]) -> bool:
+        """Ensure no new unauthorized imports are added."""
+        new_imports = self._get_imports(new_ir)
+        
+        # Comprehensive standard library whitelist
+        STDLIB_WHITELIST = {
+            'math', 'itertools', 'functools', 'collections', 'heapq', 'bisect',
+            'typing', 'random', 'time', 'datetime', 're', 'sys', 'os', 'copy',
+            'statistics', 'operator', 'string', 'json', 'uuid', 'pathlib'
+        }
+        
+        for imp in new_imports:
+            if imp not in allowed_imports and imp not in STDLIB_WHITELIST:
+                logger.warning(f"Mutation rejected using unauthorized import: {imp}")
+                return False
+        return True
+
+    def _mutate_with_prompt(self, code: str, prompt: str, allowed_imports: Set[str]) -> Optional[schema.Module]:
+        """Generic mutation helper with CoT and repair."""
+        try:
+            response = self.llm.complete(prompt).strip()
+            optimized_code = self._clean_code(response)
+            
+            if optimized_code and optimized_code != code:
+                # Use the retry/repair logic from _safe_parse
+                new_ir = self._safe_parse(optimized_code)
+                if new_ir:
+                    if self._validate_imports(new_ir, allowed_imports):
+                        return new_ir
+        except Exception as e:
+            logger.error(f"Mutation failed: {e}")
+        return None
+
     def mutate(self, ir: schema.Module):
         raise NotImplementedError

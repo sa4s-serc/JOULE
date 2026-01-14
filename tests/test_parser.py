@@ -31,9 +31,10 @@ def add(a, b):
         func = ir.body.statements[0]
         assert isinstance(func, FunctionDef)
         assert func.name == "add"
-        assert len(func.args) == 2
-        assert "a" in func.args
-        assert "b" in func.args
+        # Check args using Arguments schema
+        assert len(func.args.args) == 2
+        assert func.args.args[0].arg == "a"
+        assert func.args.args[1].arg == "b"
     
     def test_parse_assignment(self):
         """Test parsing assignments."""

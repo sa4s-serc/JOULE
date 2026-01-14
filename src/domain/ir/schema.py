@@ -11,8 +11,8 @@ This enables:
 - Deterministic code generation
 - Safe program transformations
 """
-from typing import List, Optional, Union, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional, Union, Literal, Any
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 # --- Base Nodes ---
 
@@ -30,7 +30,7 @@ class IRNode(BaseModel):
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
     
-    model_config = ConfigDict(frozen=False)  # Allow mutations during transformation
+    model_config = ConfigDict(frozen=False, validate_assignment=True)  # Allow mutations during transformation, but keep them valid
 
 class Expression(IRNode):
     """
@@ -186,6 +186,22 @@ class Arguments(IRNode):
     kw_defaults: List[Optional[Expression]] = Field(default_factory=list)
     kwarg: Optional[Arg] = None
     defaults: List[Expression] = Field(default_factory=list)
+
+    @model_validator(mode='before')
+    @classmethod
+    def handle_list(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            return {"args": [Arg(arg=a) if isinstance(a, str) else a for a in v]}
+        return v
+
+    def __len__(self):
+        return len(self.args)
+
+    def __getitem__(self, idx):
+        return self.args[idx]
+
+    def __iter__(self):
+        return iter(self.args)
 
 class Keyword(IRNode):
     arg: Optional[str]
