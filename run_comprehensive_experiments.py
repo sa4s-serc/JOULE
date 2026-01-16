@@ -136,7 +136,8 @@ def run_experiment(exp_config, base_dir):
     # Run experiment
     start_time = time.time()
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        # Increased timeout to 1200s to handle heavier tests
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
         duration = time.time() - start_time
         
         # Save output

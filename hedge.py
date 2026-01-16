@@ -471,7 +471,10 @@ def _display_results(solutions, engine, duration, experiment_dir, args):
         best = min(solutions, key=lambda s: s.metrics.get("energy_joules", float('inf')))
         best_code = codegen.generate(best.ir)
         
-        output_path = args.target.replace(".py", "_optimized.py")
+        if args.output_file:
+            output_path = args.output_file
+        else:
+            output_path = args.target.replace(".py", "_optimized.py")
         with open(output_path, 'w') as f:
             f.write(best_code)
         
@@ -665,6 +668,7 @@ Examples:
     optimize_parser.add_argument('--llm-provider', type=str, default='gemini', choices=['openai', 'gemini'], help='LLM provider')
     optimize_parser.add_argument('--llm-model', type=str, default=None, help='LLM model (optional)')
     optimize_parser.add_argument('--no-context', action='store_true', help='Disable context-aware mutations')
+    optimize_parser.add_argument('--output-file', type=str, default=None, help='Path to save the optimized code')
     optimize_parser.add_argument('--save-ir', action='store_true', help='Save IR snapshots')
     optimize_parser.add_argument('--experiment-dir', type=str, default=None, help='Experiment directory')
     optimize_parser.add_argument('--visualize', action='store_true', help='Generate visualizations after optimization')

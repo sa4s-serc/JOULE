@@ -17,4 +17,6 @@ def test_fib_small():
 
 def test_fib_timing():
     # This is just to ensure it works, HEDGE will measure the speedup
-    assert run_fib(15) == 610
+    # fib(30) is approx 832040, takes ~0.3s
+    # fib(32) is approx 2178309, takes ~1s
+    assert run_fib(32) == 2178309

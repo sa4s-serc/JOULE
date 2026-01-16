@@ -146,6 +146,9 @@ sys.modules['complex_target'] = candidate
 sys.modules['target_complex'] = candidate
 sys.modules['target'] = candidate
 sys.modules['target_opt'] = candidate
+sys.modules['target_fib'] = candidate
+sys.modules['target_search'] = candidate
+sys.modules['target_formal'] = candidate
 
 {test_code_str}
 
