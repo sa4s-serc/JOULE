@@ -1,9 +1,24 @@
+"""
+LLM Client - Unified interface for LLM providers.
+
+Supports:
+- OpenAI (GPT-4o and variants)
+- Google Gemini
+
+Features:
+- Automatic retry with exponential backoff
+- Rate limit handling
+- Consistent error handling
+"""
 import os
+import time
+import random
 import logging
 from typing import List, Optional
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
+
 
 class LLMClient(ABC):
     """Base class for LLM clients."""
@@ -13,80 +28,148 @@ class LLMClient(ABC):
         """Generate a completion for the given prompt."""
         pass
 
+
+class RetryConfig:
+    """Configuration for retry behavior."""
+    
+    __slots__ = ('max_retries', 'base_delay', 'max_delay', 'jitter')
+    
+    def __init__(
+        self, 
+        max_retries: int = 5, 
+        base_delay: float = 2.0, 
+        max_delay: float = 60.0,
+        jitter: float = 1.0
+    ):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.jitter = jitter
+    
+    def get_delay(self, attempt: int) -> float:
+        """Calculate delay with exponential backoff and jitter."""
+        delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+        return delay + (random.random() * self.jitter)
+
+
 class OpenAIClient(LLMClient):
-    def __init__(self, api_key: str, model: str = "gpt-4o"):
+    """OpenAI API client with retry support."""
+    
+    def __init__(
+        self, 
+        api_key: str, 
+        model: str = "gpt-4o",
+        retry_config: Optional[RetryConfig] = None
+    ):
         try:
             from openai import OpenAI
             self.client = OpenAI(api_key=api_key)
             self.model = model
+            self.retry_config = retry_config or RetryConfig()
         except ImportError:
-            logger.error("openai package not installed. Please install it with `pip install openai`.")
+            logger.error("openai package not installed. Run: pip install openai")
             raise
 
     def complete(self, prompt: str, stop: Optional[List[str]] = None) -> str:
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert code optimization assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                stop=stop,
-                temperature=0.2
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"OpenAI API call failed: {e}")
-            return ""
+        for attempt in range(self.retry_config.max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert code optimization assistant."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    stop=stop,
+                    temperature=0.2
+                )
+                return response.choices[0].message.content or ""
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                is_rate_limit = "429" in error_str or "rate" in error_str or "quota" in error_str
+                
+                if is_rate_limit and attempt < self.retry_config.max_retries - 1:
+                    delay = self.retry_config.get_delay(attempt)
+                    logger.warning(f"OpenAI rate limit (attempt {attempt+1}). Retrying in {delay:.1f}s...")
+                    time.sleep(delay)
+                    continue
+                    
+                logger.error(f"OpenAI API call failed: {e}")
+                return ""
+        
+        return ""
+
 
 class GeminiClient(LLMClient):
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash-exp"):
+    """Google Gemini API client with retry support."""
+    
+    def __init__(
+        self, 
+        api_key: str, 
+        model: str = "gemini-2.0-flash-exp",
+        retry_config: Optional[RetryConfig] = None
+    ):
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel(model)
+            self.retry_config = retry_config or RetryConfig()
         except ImportError:
-            logger.error("google-generativeai package not installed. Please install it with `pip install google-generativeai`.")
+            logger.error("google-generativeai not installed. Run: pip install google-generativeai")
             raise
 
     def complete(self, prompt: str, stop: Optional[List[str]] = None) -> str:
-        import time
-        import random
-        
-        max_retries = 5
-        base_delay = 5
-        
-        for attempt in range(max_retries):
+        for attempt in range(self.retry_config.max_retries):
             try:
-                # Gemini's stop_sequences are passed in generation_config
                 generation_config = {}
                 if stop:
                     generation_config["stop_sequences"] = stop
                 
                 response = self.model.generate_content(
                     prompt,
-                    generation_config=generation_config
+                    generation_config=generation_config if generation_config else None
                 )
-                return response.text
+                return response.text or ""
+                
             except Exception as e:
                 error_str = str(e).lower()
-                if "429" in error_str or "quota" in error_str:
-                    if attempt < max_retries - 1:
-                        # Parse retry delay from error if possible, otherwise use backoff
-                        # (Simple backoff for now)
-                        delay = base_delay * (2 ** attempt) + (random.random() * 1.0)
-                        logger.warning(f"Gemini API rate limit hit (Attempt {attempt+1}/{max_retries}). Retrying in {delay:.2f}s...")
-                        time.sleep(delay)
-                        continue
+                is_rate_limit = "429" in error_str or "quota" in error_str or "resource" in error_str
+                
+                if is_rate_limit and attempt < self.retry_config.max_retries - 1:
+                    delay = self.retry_config.get_delay(attempt)
+                    logger.warning(f"Gemini rate limit (attempt {attempt+1}). Retrying in {delay:.1f}s...")
+                    time.sleep(delay)
+                    continue
+                    
                 logger.error(f"Gemini API call failed: {e}")
                 return ""
+        
         return ""
 
-def create_llm_client(provider: str, api_key: str, model: str = None) -> LLMClient:
-    """Factory function to create LLM clients."""
-    if provider.lower() == "openai":
-        return OpenAIClient(api_key, model or "gpt-4o")
-    elif provider.lower() == "gemini":
-        return GeminiClient(api_key, model or "gemini-2.0-flash-exp")
+
+def create_llm_client(
+    provider: str, 
+    api_key: str, 
+    model: Optional[str] = None,
+    retry_config: Optional[RetryConfig] = None
+) -> LLMClient:
+    """
+    Factory function to create LLM clients.
+    
+    Args:
+        provider: "openai" or "gemini"
+        api_key: API key for the provider
+        model: Optional model name override
+        retry_config: Optional retry configuration
+        
+    Returns:
+        Configured LLM client
+    """
+    provider_lower = provider.lower()
+    
+    if provider_lower == "openai":
+        return OpenAIClient(api_key, model or "gpt-4o", retry_config)
+    elif provider_lower == "gemini":
+        return GeminiClient(api_key, model or "gemini-2.0-flash-exp", retry_config)
     else:
-        raise ValueError(f"Unknown LLM provider: {provider}")
+        raise ValueError(f"Unknown LLM provider: {provider}. Use 'openai' or 'gemini'.")

@@ -13,7 +13,7 @@ from typing import List, Optional, Set
 from src.application.mutators.base import LayeredMutator, MutationLayer, MutationResult, safe_deepcopy_ir, create_mutation_result
 from src.application.mutators.semantic_base import LLMMutatorBase
 from src.domain.ir import schema
-from src.domain.ir.utils import NodeTransformer
+from src.domain.ir.utils import NodeTransformer, find_nodes
 
 logger = logging.getLogger(__name__)
 

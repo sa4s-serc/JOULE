@@ -163,9 +163,21 @@ if __name__ == "__main__":
             globals()['test']()
             success = True
         else:
-            # If no test function, we assume the script body was the test
-            # and if we reached here, it didn't crash.
-            success = True
+            # Look for test_* functions
+            test_funcs = [f for name, f in globals().items() 
+                          if name.startswith('test_') and callable(f)]
+            
+            if test_funcs:
+                print(f"Found {{len(test_funcs)}} test functions: {{[f.__name__ for f in test_funcs]}}")
+                for func in test_funcs:
+                    print(f"Running {{func.__name__}}...")
+                    func()
+                success = True
+            else:
+                # If no test function, we assume the script body was the test
+                # and if we reached here, it didn't crash.
+                print("No specific test functions found, assuming script body was the test.")
+                success = True
             
     except Exception:
         traceback.print_exc()

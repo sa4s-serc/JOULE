@@ -7,14 +7,15 @@ semantics-preserving transformations.
 import random
 import copy
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+
 from src.domain.interfaces import Mutator
 from src.domain.ir import schema
 from src.domain.ir.context import MutationContext
-from src.domain.ir.utils import NodeTransformer
-from typing import List, Tuple, Optional
+from src.domain.ir.utils import NodeTransformer, find_nodes
 
 logger = logging.getLogger(__name__)
+
 
 class StructuralMutator(Mutator):
     """
@@ -26,7 +27,11 @@ class StructuralMutator(Mutator):
     Strategies:
     1. Reorder independent statements
     2. Swap commutative operands
-    3. Rename variables consistently
+    3. Convert to augmented assignment
+    4. Strength reduction
+    5. Fast membership (list -> set)
+    6. Algebraic simplification
+    7. Loop optimization
     """
     
     def __init__(self, use_context: bool = True):
@@ -37,85 +42,43 @@ class StructuralMutator(Mutator):
         self.use_context = use_context
     
     def mutate(self, ir: schema.Module) -> List[Tuple[schema.Module, str]]:
-        """
-        Apply structural mutations to the IR.
-        
-        Args:
-            ir: The input IR module
-            
-        Returns:
-            List of (mutated_ir, strategy_name) tuples
-        """
+        """Apply structural mutations to the IR."""
         variants = []
         
         # Build context if enabled
-        context = None
-        if self.use_context:
+        context = self._build_context(ir) if self.use_context else None
+        
+        # Define mutation strategies
+        strategies = [
+            ("Structural_ReorderStatements", lambda: self._mutate_reorder(ir, context)),
+            ("Structural_SwapOperands", lambda: self._mutate_swap_operands(ir, context)),
+            ("Structural_AugAssign", lambda: self._mutate_aug_assign(ir)),
+            ("Structural_StrengthReduction", lambda: self._mutate_strength_reduction(ir)),
+            ("Structural_FastMembership", lambda: self._mutate_fast_membership(ir)),
+            ("Structural_AlgebraicSimplification", lambda: self._mutate_algebraic_simplification(ir)),
+            ("Structural_LoopOptimization", lambda: self._mutate_loop_optimization(ir)),
+        ]
+        
+        for name, mutate_fn in strategies:
             try:
-                context = MutationContext(ir)
-                logger.debug(f"Built mutation context with {len(context.symbol_table)} symbols")
+                variant = mutate_fn()
+                if variant:
+                    variants.append((variant, name))
+                    logger.debug(f"Created {name} variant")
             except Exception as e:
-                logger.warning(f"Failed to build context: {e}. Proceeding without context.")
-        
-        # Strategy 1: Reorder independent statements
-        try:
-            variant = self._mutate_reorder(ir, context)
-            if variant:
-                variants.append((variant, "Structural_ReorderStatements"))
-                logger.debug("Successfully created reorder variant")
-        except Exception as e:
-            logger.error(f"Reorder mutation failed: {e}")
-        
-        # Strategy 2: Swap binary operands (commutative ops)
-        try:
-            variant = self._mutate_swap_operands(ir, context)
-            if variant:
-                variants.append((variant, "Structural_SwapOperands"))
-                logger.debug("Successfully created swap variant")
-        except Exception as e:
-            logger.error(f"Swap mutation failed: {e}")
-
-        # Strategy 3: Augmented Assignment
-        try:
-            variant = self._mutate_aug_assign(ir)
-            if variant:
-                variants.append((variant, "Structural_AugAssign"))
-        except Exception as e:
-            logger.error(f"AugAssign mutation failed: {e}")
-
-        # Strategy 5: Strength Reduction
-        try:
-            variant = self._mutate_strength_reduction(ir)
-            if variant:
-                variants.append((variant, "Structural_StrengthReduction"))
-        except Exception as e:
-            logger.error(f"StrengthReduction mutation failed: {e}")
-
-        # Strategy 6: Fast Membership (List -> Set)
-        try:
-            variant = self._mutate_fast_membership(ir)
-            if variant:
-                variants.append((variant, "Structural_FastMembership"))
-        except Exception as e:
-            logger.error(f"FastMembership mutation failed: {e}")
-
-        # Strategy 7: Algebraic Simplification
-        try:
-            variant = self._mutate_algebraic_simplification(ir)
-            if variant:
-                variants.append((variant, "Structural_AlgebraicSimplification"))
-        except Exception as e:
-            logger.error(f"AlgebraicSimplification mutation failed: {e}")
-
-        # Strategy 8: Loop Optimization
-        try:
-            variant = self._mutate_loop_optimization(ir)
-            if variant:
-                variants.append((variant, "Structural_LoopOptimization"))
-        except Exception as e:
-            logger.error(f"LoopOptimization mutation failed: {e}")
+                logger.error(f"{name} mutation failed: {e}")
             
         return variants
+    
+    def _build_context(self, ir: schema.Module) -> Optional[MutationContext]:
+        """Build mutation context with error handling."""
+        try:
+            context = MutationContext(ir)
+            logger.debug(f"Built context with {len(context.symbol_table)} symbols")
+            return context
+        except Exception as e:
+            logger.warning(f"Failed to build context: {e}")
+            return None
 
     def _mutate_strength_reduction(self, ir: schema.Module) -> Optional[schema.Module]:
         """Replace expensive operations with cheaper ones (e.g. x**2 -> x*x)."""
@@ -145,36 +108,24 @@ class StructuralMutator(Mutator):
         transformer.visit(new_ir)
         return new_ir if transformer.changed else None
 
-    
-    def _mutate_reorder(self, ir: schema.Module, context=None) -> schema.Module:
+    def _mutate_reorder(self, ir: schema.Module, context: Optional[MutationContext]) -> Optional[schema.Module]:
         """
         Reorder consecutive independent statements.
         
         Uses dependency analysis if context is provided to ensure
         the reordering is semantics-preserving.
-        
-        Args:
-            ir: The IR module
-            context: Optional MutationContext for dependency analysis
-            
-        Returns:
-            Mutated IR or None if no safe reordering is possible
         """
         new_ir = copy.deepcopy(ir)
         
-        # Find all blocks in the IR
-        blocks = self._find_blocks(new_ir)
-        
-        # Filter blocks with at least 2 statements
+        # Find all blocks using utility function
+        blocks = find_nodes(new_ir, schema.Block)
         candidates = [blk for blk in blocks if len(blk.statements) >= 2]
         
         if not candidates:
             return None
         
         # Try multiple times to find a valid swap
-        max_attempts = 10
-        for _ in range(max_attempts):
-            # Pick a random block and two statements
+        for _ in range(10):
             block = random.choice(candidates)
             if len(block.statements) < 2:
                 continue
@@ -183,14 +134,12 @@ class StructuralMutator(Mutator):
             
             # If we have context, check if swap is safe
             if context:
-                stmt1 = block.statements[idx1]
-                stmt2 = block.statements[idx2]
+                stmt1, stmt2 = block.statements[idx1], block.statements[idx2]
                 
-                # Check 1: Purity (avoid reordering side effects)
+                # Check purity and dependencies
                 if not context.is_pure(stmt1) or not context.is_pure(stmt2):
                     continue
 
-                # Check 2: Data Dependencies
                 stmt1_defs = context.get_defined_vars(stmt1)
                 stmt1_uses = context.get_used_vars(stmt1)
                 stmt2_defs = context.get_defined_vars(stmt2)
@@ -198,7 +147,7 @@ class StructuralMutator(Mutator):
                 
                 # Check for conflicts
                 if stmt1_defs & stmt2_uses or stmt2_defs & stmt1_uses or stmt1_defs & stmt2_defs:
-                    continue  # Not safe to swap, try again
+                    continue
             
             # Perform the swap
             block.statements[idx1], block.statements[idx2] = block.statements[idx2], block.statements[idx1]
@@ -206,29 +155,24 @@ class StructuralMutator(Mutator):
         
         return None
     
-    def _mutate_swap_operands(self, ir: schema.Module, context=None) -> schema.Module:
+    def _mutate_swap_operands(self, ir: schema.Module, context: Optional[MutationContext]) -> Optional[schema.Module]:
         """Swap operands in commutative binary operations."""
         new_ir = copy.deepcopy(ir)
         
-        # Build local context if not provided (though usually it is)
+        # Build local context if not provided
         if not context and self.use_context:
-            try:
-                context = MutationContext(new_ir)
-            except:
-                 pass
+            context = self._build_context(new_ir)
 
-        # Find all binary operations
-        binops = self._find_binops(new_ir)
+        # Find all binary operations using utility function
+        binops = find_nodes(new_ir, schema.BinaryOp)
         
         # Filter commutative operations
-        commutative = ['+', '*', '==', '!=', 'and', 'or', '^', '&', '|']
+        commutative = {'+', '*', '==', '!=', 'and', 'or', '^', '&', '|'}
         candidates = []
         for op in binops:
             if op.op in commutative:
-                # Safety check: Operands must be pure
-                if context:
-                    if not context.is_pure(op.left) or not context.is_pure(op.right):
-                        continue
+                if context and (not context.is_pure(op.left) or not context.is_pure(op.right)):
+                    continue
                 candidates.append(op)
         
         if not candidates:
@@ -240,10 +184,10 @@ class StructuralMutator(Mutator):
         
         return new_ir
 
-    def _mutate_aug_assign(self, ir: schema.Module) -> schema.Module:
+    def _mutate_aug_assign(self, ir: schema.Module) -> Optional[schema.Module]:
         """Replace x = x + y with x += y."""
         new_ir = copy.deepcopy(ir)
-        blocks = self._find_blocks(new_ir)
+        blocks = find_nodes(new_ir, schema.Block)
         
         candidates = []
         for block in blocks:
@@ -251,12 +195,15 @@ class StructuralMutator(Mutator):
                 if isinstance(stmt, schema.Assign) and len(stmt.targets) == 1:
                     target = stmt.targets[0]
                     if isinstance(target, schema.Name) and isinstance(stmt.value, schema.BinaryOp):
-                        # Check if target is used in binary op
-                        # x = x + y or x = y + x
-                        if isinstance(stmt.value.left, schema.Name) and stmt.value.left.id == target.id:
-                            candidates.append((block, i, stmt, stmt.value.op, stmt.value.right))
-                        elif isinstance(stmt.value.right, schema.Name) and stmt.value.right.id == target.id and stmt.value.op in ['+', '*']:
-                            candidates.append((block, i, stmt, stmt.value.op, stmt.value.left))
+                        left, right = stmt.value.left, stmt.value.right
+                        op = stmt.value.op
+                        
+                        # x = x + y
+                        if isinstance(left, schema.Name) and left.id == target.id:
+                            candidates.append((block, i, stmt, op, right))
+                        # x = y + x (only for commutative ops)
+                        elif isinstance(right, schema.Name) and right.id == target.id and op in ('+', '*'):
+                            candidates.append((block, i, stmt, op, left))
                             
         if not candidates:
             return None
@@ -268,101 +215,6 @@ class StructuralMutator(Mutator):
             value=value
         )
         return new_ir
-
-    def _mutate_range(self, ir: schema.Module) -> schema.Module:
-        """Replace range(0, n) with range(n)."""
-        new_ir = copy.deepcopy(ir)
-        calls = self._find_calls(new_ir)
-        
-        candidates = []
-        for call in calls:
-            if isinstance(call.func, schema.Name) and call.func.id == 'range' and len(call.args) == 2:
-                if isinstance(call.args[0], schema.Constant) and call.args[0].value == 0:
-                    candidates.append(call)
-                    
-        if not candidates:
-            return None
-            
-        call = random.choice(candidates)
-        call.args = [call.args[1]]
-        return new_ir
-
-    def _find_calls(self, node) -> List[schema.Call]:
-        """Recursively find all Call nodes."""
-        calls = []
-        if isinstance(node, schema.Call):
-            calls.append(node)
-            
-        if hasattr(node, '__dict__'):
-            for key, value in node.__dict__.items():
-                if isinstance(value, list):
-                    for item in value:
-                        if hasattr(item, '__dict__'):
-                            calls.extend(self._find_calls(item))
-                elif hasattr(value, '__dict__'):
-                    calls.extend(self._find_calls(value))
-        return calls
-    
-    def _find_blocks(self, node) -> List[schema.Block]:
-        """Recursively find all Block nodes in the IR tree."""
-        blocks = []
-        
-        if isinstance(node, schema.Block):
-            blocks.append(node)
-            for stmt in node.statements:
-                blocks.extend(self._find_blocks(stmt))
-        elif isinstance(node, schema.FunctionDef):
-            blocks.extend(self._find_blocks(node.body))
-        elif isinstance(node, (schema.If, schema.While, schema.For)):
-            blocks.extend(self._find_blocks(node.body))
-            if hasattr(node, 'orelse') and node.orelse:
-                blocks.extend(self._find_blocks(node.orelse))
-        elif isinstance(node, schema.Module):
-            blocks.extend(self._find_blocks(node.body))
-        
-        return blocks
-    
-    def _find_binops(self, node) -> List[schema.BinaryOp]:
-        """Recursively find all BinaryOp nodes in the IR tree."""
-        binops = []
-        
-        if isinstance(node, schema.BinaryOp):
-            binops.append(node)
-            binops.extend(self._find_binops(node.left))
-            binops.extend(self._find_binops(node.right))
-        elif isinstance(node, schema.UnaryOp):
-            binops.extend(self._find_binops(node.operand))
-        elif isinstance(node, schema.Call):
-            for arg in node.args:
-                binops.extend(self._find_binops(arg))
-        elif isinstance(node, schema.Assign):
-            binops.extend(self._find_binops(node.value))
-        elif isinstance(node, schema.AugAssign):
-            binops.extend(self._find_binops(node.value))
-            binops.extend(self._find_binops(node.target))
-        elif isinstance(node, schema.Return):
-            if node.value:
-                binops.extend(self._find_binops(node.value))
-        elif isinstance(node, schema.If):
-            binops.extend(self._find_binops(node.test))
-            binops.extend(self._find_binops(node.body))
-            if node.orelse:
-                binops.extend(self._find_binops(node.orelse))
-        elif isinstance(node, schema.While):
-            binops.extend(self._find_binops(node.test))
-            binops.extend(self._find_binops(node.body))
-        elif isinstance(node, schema.For):
-            binops.extend(self._find_binops(node.iter))
-            binops.extend(self._find_binops(node.body))
-        elif isinstance(node, schema.Block):
-            for stmt in node.statements:
-                binops.extend(self._find_binops(stmt))
-        elif isinstance(node, schema.FunctionDef):
-            binops.extend(self._find_binops(node.body))
-        elif isinstance(node, schema.Module):
-            binops.extend(self._find_binops(node.body))
-        
-        return binops
         
 
 class StrengthReductionTransformer(NodeTransformer):

@@ -12,7 +12,7 @@ import logging
 from typing import List, Optional, Set
 from src.application.mutators.base import LayeredMutator, MutationLayer, MutationResult, safe_deepcopy_ir, create_mutation_result
 from src.domain.ir import schema
-from src.domain.ir.utils import NodeTransformer
+from src.domain.ir.utils import NodeTransformer, collect_names
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +379,27 @@ class NestedLoopReducer(NodeTransformer):
             inner_loop = node.body.statements[0]
             
             # Check if loops are independent
-            if (isinstance(node.target, schema.Name) and 
+            # Must ensure outer loop variables are not used in inner loop iterable
+            
+            # Get outer loop variables
+            outer_vars = set()
+            if isinstance(node.target, schema.Name):
+                outer_vars.add(node.target.id)
+            elif isinstance(node.target, schema.TupleExpr):
+                # Handle tuple unpacking in for loop target
+                for elt in node.target.elts:
+                    if isinstance(elt, schema.Name):
+                        outer_vars.add(elt.id)
+            
+            # Check dependency
+            # We check if any of outer_vars appear in inner_loop.iter
+            inner_iter_vars = collect_names(inner_loop.iter, ctx_filter="Load")
+            
+            # If there is an intersection, loops are dependent -> cannot use product
+            is_dependent = not outer_vars.isdisjoint(inner_iter_vars)
+            
+            if (not is_dependent and
+                isinstance(node.target, schema.Name) and 
                 isinstance(inner_loop.target, schema.Name) and
                 node.target.id != inner_loop.target.id):
                 
