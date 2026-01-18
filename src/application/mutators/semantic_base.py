@@ -8,6 +8,7 @@ consolidating common functionality like:
 - Import validation with whitelist
 - Parse/repair loops
 - Response caching for API efficiency
+- Comment sanitization for security
 """
 import hashlib
 import logging
@@ -16,6 +17,7 @@ from src.domain.interfaces import Mutator
 from src.domain.ir import schema
 from src.infrastructure.parsing.python_parser import PythonParser
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+from src.utils.comment_sanitizer import sanitize_code_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +241,21 @@ Fix the code and return ONLY the corrected Python code, no explanations.
             Mutated IR module or None if mutation failed/invalid
         """
         try:
-            response = self._complete_with_cache(prompt)
+            # SECURITY: Sanitize code before sending to LLM
+            sanitization_result = sanitize_code_for_llm(code)
+            
+            if not sanitization_result.is_safe:
+                logger.warning(f"Code contains sensitive patterns, skipping LLM mutation: {sanitization_result.sensitive_patterns_found}")
+                return None
+            
+            if sanitization_result.removed_comments:
+                logger.info(f"Removed {len(sanitization_result.removed_comments)} comments before LLM transmission")
+            
+            # Use sanitized code in prompt
+            sanitized_code = sanitization_result.sanitized_code
+            sanitized_prompt = prompt.replace(code, sanitized_code)
+            
+            response = self._complete_with_cache(sanitized_prompt)
             optimized_code = self._clean_code(response)
             
             if optimized_code and optimized_code != code:

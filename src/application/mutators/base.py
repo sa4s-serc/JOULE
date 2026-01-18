@@ -108,15 +108,17 @@ class LayeredMutator(Mutator):
         return self.layer.value.title()
 
 
+# Legacy orchestrator - replaced by orchestrator_v2.py
+# Kept for backward compatibility
 class MutationOrchestrator:
     """
-    Orchestrates mutations across different layers in hierarchical order.
+    DEPRECATED: Use EnhancedMutationOrchestrator from orchestrator_v2.py instead.
     
-    Applies mutations from high-level (semantic) to low-level (micro) layers,
-    allowing higher-level changes to be refined by lower-level optimizations.
+    Legacy orchestrator for mutations across different layers.
     """
     
     def __init__(self):
+        logger.warning("MutationOrchestrator is deprecated. Use EnhancedMutationOrchestrator instead.")
         self.mutators_by_layer = {layer: [] for layer in MutationLayer}
         self.layer_order = [
             MutationLayer.SEMANTIC,
@@ -132,21 +134,11 @@ class MutationOrchestrator:
     
     def apply_layered_mutations(self, ir: schema.Module, 
                               enabled_layers: Optional[Set[MutationLayer]] = None) -> List[Tuple[schema.Module, str]]:
-        """
-        Apply mutations in hierarchical order across enabled layers.
-        
-        Args:
-            ir: Input IR module
-            enabled_layers: Set of layers to apply (None = all layers)
-            
-        Returns:
-            List of (mutated_ir, strategy_name) tuples
-        """
+        """Apply mutations in hierarchical order across enabled layers."""
         if enabled_layers is None:
             enabled_layers = set(MutationLayer)
         
         all_variants = []
-        current_ir = ir
         
         for layer in self.layer_order:
             if layer not in enabled_layers:
@@ -159,21 +151,13 @@ class MutationOrchestrator:
             
             for mutator in mutators:
                 try:
-                    variants = mutator.mutate(current_ir)
+                    variants = mutator.mutate(ir)
                     layer_variants.extend(variants)
                     logger.debug(f"{mutator.__class__.__name__} produced {len(variants)} variants")
                 except Exception as e:
                     logger.error(f"Mutator {mutator.__class__.__name__} failed: {e}")
             
-            # For hierarchical application, we can either:
-            # 1. Apply all variants from this layer to next layer (exponential growth)
-            # 2. Select best variants from this layer for next layer (controlled growth)
-            # 
-            # For now, we'll collect all variants and let the evolution engine handle selection
             all_variants.extend(layer_variants)
-            
-            # Optionally, we could select the best variant from this layer as input to next layer
-            # This would create a true hierarchical pipeline but might miss good combinations
         
         return all_variants
     

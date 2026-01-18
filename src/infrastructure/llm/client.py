@@ -106,7 +106,7 @@ class GeminiClient(LLMClient):
     def __init__(
         self, 
         api_key: str, 
-        model: str = "gemini-2.0-flash-exp",
+        model: str = "gemini-2.5-flash",
         retry_config: Optional[RetryConfig] = None
     ):
         try:
@@ -129,7 +129,12 @@ class GeminiClient(LLMClient):
                     prompt,
                     generation_config=generation_config if generation_config else None
                 )
-                return response.text or ""
+                # Safely handle response text extraction
+                if (response.candidates and 
+                    response.candidates[0].content and 
+                    response.candidates[0].content.parts):
+                    return response.text
+                return ""
                 
             except Exception as e:
                 error_str = str(e).lower()
@@ -170,6 +175,6 @@ def create_llm_client(
     if provider_lower == "openai":
         return OpenAIClient(api_key, model or "gpt-4o", retry_config)
     elif provider_lower == "gemini":
-        return GeminiClient(api_key, model or "gemini-2.0-flash-exp", retry_config)
+        return GeminiClient(api_key, model or "gemini-2.5-flash", retry_config)
     else:
         raise ValueError(f"Unknown LLM provider: {provider}. Use 'openai' or 'gemini'.")

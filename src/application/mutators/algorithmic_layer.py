@@ -10,14 +10,15 @@ These mutators focus on:
 import copy
 import logging
 from typing import List, Optional, Set
-from src.application.mutators.base import LayeredMutator, MutationLayer, MutationResult, safe_deepcopy_ir, create_mutation_result
+from src.application.mutators.ir_mutator_base import IROnlyMutator, IRTransformerBase
+from src.application.mutators.base import MutationLayer, MutationResult, create_mutation_result, safe_deepcopy_ir
 from src.domain.ir import schema
 from src.domain.ir.utils import NodeTransformer, collect_names
 
 logger = logging.getLogger(__name__)
 
 
-class DataStructureOptimizer(LayeredMutator):
+class DataStructureOptimizer(IROnlyMutator):
     """
     Optimizes data structure selection for better algorithmic performance.
     
@@ -36,114 +37,61 @@ class DataStructureOptimizer(LayeredMutator):
             "DataStructure_SearchOptimization"
         ]
     
-    def _apply_mutations(self, ir: schema.Module) -> List[MutationResult]:
+    def _apply_ir_mutations(self, ir: schema.Module) -> List[MutationResult]:
         """Apply data structure optimization mutations."""
         results = []
         
         # Strategy 1: Membership Testing Optimization (list -> set)
         if self._is_strategy_enabled("DataStructure_MembershipOptimization"):
-            variant = self._optimize_membership_testing(ir)
-            if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="DataStructure_MembershipOptimization",
-                    layer=MutationLayer.ALGORITHMIC,
-                    confidence=0.95,
-                    description="Optimized membership testing from O(n) to O(1) using sets"
-                ))
+            transformer = self._create_ir_transformer(MembershipOptimizationTransformer)
+            result = self._apply_transformer(
+                ir, transformer,
+                "DataStructure_MembershipOptimization",
+                "Optimized membership testing from O(n) to O(1) using sets",
+                confidence=0.95
+            )
+            if result:
+                results.append(result)
         
         # Strategy 2: Access Pattern Optimization
         if self._is_strategy_enabled("DataStructure_AccessPatternOptimization"):
-            variant = self._optimize_access_patterns(ir)
-            if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="DataStructure_AccessPatternOptimization",
-                    layer=MutationLayer.ALGORITHMIC,
-                    confidence=0.8,
-                    description="Optimized data access patterns for better cache locality"
-                ))
+            transformer = self._create_ir_transformer(AccessPatternOptimizer)
+            result = self._apply_transformer(
+                ir, transformer,
+                "DataStructure_AccessPatternOptimization",
+                "Optimized data access patterns for better cache locality",
+                confidence=0.8
+            )
+            if result:
+                results.append(result)
         
         # Strategy 3: Insertion/Deletion Optimization
         if self._is_strategy_enabled("DataStructure_InsertionOptimization"):
-            variant = self._optimize_insertions_deletions(ir)
-            if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="DataStructure_InsertionOptimization",
-                    layer=MutationLayer.ALGORITHMIC,
-                    confidence=0.85,
-                    description="Optimized insertion/deletion operations using appropriate data structures"
-                ))
+            transformer = self._create_ir_transformer(InsertionDeletionOptimizer)
+            result = self._apply_transformer(
+                ir, transformer,
+                "DataStructure_InsertionOptimization",
+                "Optimized insertion/deletion operations using appropriate data structures",
+                confidence=0.85
+            )
+            if result:
+                results.append(result)
         
         # Strategy 4: Search Operation Optimization
         if self._is_strategy_enabled("DataStructure_SearchOptimization"):
-            variant = self._optimize_search_operations(ir)
-            if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="DataStructure_SearchOptimization",
-                    layer=MutationLayer.ALGORITHMIC,
-                    confidence=0.9,
-                    description="Optimized search operations using efficient algorithms and data structures"
-                ))
+            transformer = self._create_ir_transformer(SearchOptimizationTransformer)
+            result = self._apply_transformer(
+                ir, transformer,
+                "DataStructure_SearchOptimization",
+                "Optimized search operations using efficient algorithms and data structures",
+                confidence=0.9
+            )
+            if result:
+                results.append(result)
         
         return results
-    
-    def _optimize_membership_testing(self, ir: schema.Module) -> Optional[schema.Module]:
-        """Convert list membership testing to set-based for O(1) lookup."""
-        new_ir = safe_deepcopy_ir(ir)
-        transformer = MembershipOptimizationTransformer()
-        transformer.visit(new_ir)
-        return new_ir if transformer.changed else None
-    
-    def _optimize_access_patterns(self, ir: schema.Module) -> Optional[schema.Module]:
-        """Optimize data access patterns for better performance."""
-        new_ir = safe_deepcopy_ir(ir)
-        transformer = AccessPatternOptimizer()
-        transformer.visit(new_ir)
-        return new_ir if transformer.changed else None
-    
-    def _optimize_insertions_deletions(self, ir: schema.Module) -> Optional[schema.Module]:
-        """Optimize insertion and deletion operations."""
-        new_ir = safe_deepcopy_ir(ir)
-        transformer = InsertionDeletionOptimizer()
-        transformer.visit(new_ir)
-        
-        if transformer.changed:
-            # Add collections import if deque was used
-            if transformer.needs_collections_import:
-                self._ensure_import(new_ir, 'collections')
-        
-        return new_ir if transformer.changed else None
-    
-    def _optimize_search_operations(self, ir: schema.Module) -> Optional[schema.Module]:
-        """Optimize search operations using efficient algorithms."""
-        new_ir = safe_deepcopy_ir(ir)
-        transformer = SearchOptimizationTransformer()
-        transformer.visit(new_ir)
-        
-        if transformer.changed:
-            if transformer.needs_bisect_import:
-                self._ensure_import(new_ir, 'bisect')
-        
-        return new_ir if transformer.changed else None
-    
-    def _ensure_import(self, ir: schema.Module, module_name: str):
-        """Ensure a module is imported."""
-        # Check if already imported
-        for stmt in ir.body.statements:
-            if isinstance(stmt, schema.Import):
-                for alias in stmt.names:
-                    if alias.name == module_name:
-                        return
-        
-        # Add import at the beginning
-        import_stmt = schema.Import(names=[schema.Alias(name=module_name)])
-        ir.body.statements.insert(0, import_stmt)
 
-
-class ComplexityReducer(LayeredMutator):
+class ComplexityReducer(IROnlyMutator):
     """
     Reduces algorithmic complexity through better algorithm selection.
     
@@ -162,7 +110,7 @@ class ComplexityReducer(LayeredMutator):
             "Complexity_MathematicalOptimization"
         ]
     
-    def _apply_mutations(self, ir: schema.Module) -> List[MutationResult]:
+    def _apply_ir_mutations(self, ir: schema.Module) -> List[MutationResult]:
         """Apply complexity reduction mutations."""
         results = []
         
@@ -266,8 +214,7 @@ class ComplexityReducer(LayeredMutator):
         ir.body.statements.insert(0, import_stmt)
 
 
-# Transformer implementations
-class MembershipOptimizationTransformer(NodeTransformer):
+class MembershipOptimizationTransformer(IRTransformerBase):
     """Optimizes membership testing operations."""
     
     def __init__(self):

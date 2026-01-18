@@ -30,7 +30,7 @@ from src.domain.ir.serialization import IRSerializer
 from src.infrastructure.parsing.python_parser import PythonParser
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
 from src.application.engine.crossover import CrossoverManager
-from src.application.mutators.base import MutationOrchestrator, MutationLayer
+from src.application.mutators import MutationOrchestrator, MutationLayer, OrchestrationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,7 @@ class EvolutionaryEngine:
         self,
         mutators: List[Mutator],
         runner: CodeRunner,
+        config: Optional[EngineConfig] = None,
         generations: int = 10,
         population_size: int = 5,
         experiment_dir: Optional[Path] = None,
@@ -168,7 +169,7 @@ class EvolutionaryEngine:
     ):
         self.mutators = mutators
         self.runner = runner
-        self.config = EngineConfig(
+        self.config = config or EngineConfig(
             generations=generations,
             population_size=population_size,
             save_ir_snapshots=save_ir_snapshots
@@ -333,7 +334,7 @@ class EvolutionaryEngine:
         self, 
         initial_code: str, 
         test_code: str, 
-        progress_callback: Optional[Callable[[int], None]] = None
+        progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> List[Solution]:
         """
         Main optimization loop.
@@ -414,8 +415,7 @@ class EvolutionaryEngine:
             for variant_ir, parent, strategy in candidates:
                 success, metrics, _ = self._evaluate(variant_ir, test_code)
                 
-                if progress_callback:
-                    progress_callback(1)
+
                 
                 if success:
                     new_sol = Solution(
@@ -431,6 +431,9 @@ class EvolutionaryEngine:
                     if self.archive.update(new_sol):
                         self.statistics.record_improvement(strategy)
                         logger.info(f"New Pareto solution! [{strategy}] {metrics}")
+                
+                if progress_callback:
+                    progress_callback(gen, len(self.archive.solutions))
             
             logger.info(f"Generation {gen} complete. Archive: {len(self.archive.solutions)}")
         

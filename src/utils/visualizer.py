@@ -46,9 +46,10 @@ class ResultVisualizer:
             self.generate_evolution_progress()
             self.generate_mutation_effectiveness()
             self.generate_metrics_comparison()
+            self.generate_metrics_history()
             
             # Generate HTML report
-            self.generate_html_report()
+            self.generate_comprehensive_report()
             
             logger.info(f"✓ All visualizations saved to {self.output_dir}")
         except Exception as e:
@@ -76,7 +77,21 @@ class ResultVisualizer:
             # Create figure
             plt.figure(figsize=(10, 6))
             scatter = plt.scatter(energies, times, c=range(len(energies)), 
-                                 cmap='viridis', s=100, alpha=0.6, edgecolors='black')
+                                 cmap='viridis', s=100, alpha=0.6, edgecolors='black', zorder=2)
+            
+            # Add trajectory path to show movement
+            if len(energies) > 1:
+                plt.plot(energies, times, color='gray', alpha=0.3, linestyle='--', zorder=1, label='Optimization Path')
+                
+                # Mark Start and Current Best
+                plt.scatter(energies[0], times[0], c='red', s=150, marker='X', label='Initial', zorder=3)
+                
+                # Find best energy solution
+                min_energy = min(energies)
+                best_idx = energies.index(min_energy)
+                plt.scatter(energies[best_idx], times[best_idx], c='lime', s=150, marker='*', label='Best Energy', zorder=3)
+                
+                plt.legend()
             
             # Annotations
             for i, (e, t, m) in enumerate(zip(energies, times, mutations)):
@@ -240,7 +255,56 @@ class ResultVisualizer:
         except Exception as e:
             logger.error(f"Failed to generate metrics comparison: {e}")
     
-    def generate_html_report(self):
+    def generate_metrics_history(self):
+        """Generate metrics history over iterations."""
+        try:
+            import matplotlib.pyplot as plt
+            
+            results_file = self.results_dir / "pareto_results.json"
+            if not results_file.exists():
+                return
+            
+            with open(results_file) as f:
+                results = json.load(f)
+                
+            iterations = range(1, len(results) + 1)
+            energies = [r['metrics'].get('energy_joules', 0) for r in results]
+            times = [r['metrics'].get('duration_seconds', 0) for r in results]
+            
+            # Create figure with secondary y-axis
+            fig, ax1 = plt.subplots(figsize=(12, 6))
+            
+            # Plot Energy
+            color = '#e74c3c'  # Red
+            ax1.set_xlabel('Iteration/Generation')
+            ax1.set_ylabel('Energy (Joules)', color=color, fontweight='bold')
+            l1 = ax1.plot(iterations, energies, color=color, marker='o', label='Energy', alpha=0.8)
+            ax1.tick_params(axis='y', labelcolor=color)
+            ax1.grid(True, alpha=0.3)
+            
+            # Plot Time
+            ax2 = ax1.twinx()
+            color = '#3498db'  # Blue
+            ax2.set_ylabel('Time (Seconds)', color=color, fontweight='bold')
+            l2 = ax2.plot(iterations, times, color=color, marker='s', linestyle='--', label='Time', alpha=0.8)
+            ax2.tick_params(axis='y', labelcolor=color)
+            
+            # Combine legends
+            lns = l1 + l2
+            labs = [l.get_label() for l in lns]
+            ax1.legend(lns, labs, loc='upper right')
+            
+            plt.title('Metrics Improvement Over Generations', fontsize=14, fontweight='bold')
+            
+            output_file = self.output_dir / "metrics_history.png"
+            plt.savefig(output_file, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"✓ Metrics history chart saved to {output_file}")
+        except Exception as e:
+            logger.error(f"Failed to generate metrics history: {e}")
+    
+    def generate_comprehensive_report(self):
         """Generate comprehensive HTML report."""
         try:
             # Load all data
@@ -435,6 +499,10 @@ class ResultVisualizer:
                 <div class="visualization">
                     <h3>Metrics Comparison</h3>
                     <img src="metrics_comparison.png" alt="Metrics Comparison">
+                </div>
+                <div class="visualization">
+                    <h3>History & Improvement</h3>
+                    <img src="metrics_history.png" alt="Metrics History">
                 </div>
             </div>
             

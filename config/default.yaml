@@ -1,0 +1,83 @@
+# HEDGE Default Configuration
+# ===========================
+
+# Optimization settings
+optimization:
+  default_level: "standard"
+  default_generations: 10
+  default_population_size: 8
+  default_timeout: 30
+  
+  # Layer-specific settings
+  layers:
+    semantic:
+      enabled: true
+      confidence_threshold: 0.7
+      max_retries: 3
+    algorithmic:
+      enabled: true
+      complexity_threshold: 10
+    syntactic:
+      enabled: true
+      pythonic_only: false
+    micro:
+      enabled: true
+      aggressive_folding: false
+
+# LLM Configuration
+llm:
+  default_provider: "gemini"
+  
+  openai:
+    model: "gpt-4"
+    temperature: 0.1
+    max_tokens: 2000
+    
+  gemini:
+    model: "gemini-pro"
+    temperature: 0.1
+    
+  # Fallback behavior
+  fallback_on_error: true
+  cache_responses: true
+
+# Execution settings
+execution:
+  runner_type: "green_gym"
+  energy_monitoring: true
+  memory_limit_mb: 512
+  parallel_evaluation: false
+  
+# Output and visualization
+output:
+  experiment_base_dir: "experiments"
+  auto_visualize: false
+  save_ir_snapshots: false
+  save_intermediate_results: true
+  
+  # Visualization settings
+  visualization:
+    theme: "auto"
+    interactive_plots: true
+    export_formats: ["html", "png"]
+    
+# UI and CLI settings
+ui:
+  show_progress: true
+  verbose_by_default: false
+  color_output: true
+  banner_enabled: true
+  
+# Performance settings
+performance:
+  cache_enabled: true
+  cache_size_mb: 100
+  parallel_mutations: false
+  batch_size: 5
+  
+# Logging configuration
+logging:
+  level: "INFO"
+  file_logging: false
+  log_file: "hedge.log"
+  structured_logging: false

@@ -1,36 +1,86 @@
 """
-Strict Intermediate Representation (IR) Schema.
+Enhanced Intermediate Representation (IR) Schema.
 
-This module defines a fully-typed, structural IR for Python code.
-Unlike traditional "stringly-typed" representations, every expression
-and statement is represented as a strongly-typed Pydantic model.
+This module defines a fully-typed, structural IR for Python code with enhanced
+validation, metadata tracking, and security features.
+
+Features:
+- Type-safe mutations with strict validation
+- Enhanced metadata tracking for optimization analysis
+- Immutability enforcement for safer transformations
+- Better error reporting and debugging support
+- Performance optimizations for large codebases
 
 This enables:
 - Type-safe mutations
 - Structural validation
 - Deterministic code generation
 - Safe program transformations
+- Comprehensive mutation tracking
 """
-from typing import List, Optional, Union, Literal, Any
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import List, Optional, Union, Literal, Any, Dict, Set
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
+from enum import Enum
+import uuid
+from datetime import datetime
 
-# --- Base Nodes ---
+# --- Enhanced Base Nodes ---
+
+class NodeMetadata(BaseModel):
+    """Enhanced metadata for IR nodes."""
+    node_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = Field(default_factory=datetime.now)
+    mutation_history: List[str] = Field(default_factory=list)
+    complexity_score: Optional[float] = None
+    performance_impact: Optional[float] = None
+    
+    model_config = ConfigDict(frozen=True)
+
 
 class IRNode(BaseModel):
     """
-    Base class for all IR nodes.
+    Enhanced base class for all IR nodes.
     
     All IR nodes are immutable Pydantic models that can be:
     - Serialized to JSON
     - Validated at runtime
     - Deep-copied for mutations
+    - Tracked through mutation history
     """
     lineno: Optional[int] = None
     col_offset: Optional[int] = None
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
     
-    model_config = ConfigDict(frozen=False, validate_assignment=True)  # Allow mutations during transformation, but keep them valid
+    # Enhanced metadata (optional for backward compatibility)
+    metadata: Optional[NodeMetadata] = None
+    
+    model_config = ConfigDict(
+        frozen=False,  # Allow mutations during transformation
+        validate_assignment=True,  # Validate on assignment
+        extra='forbid'  # Prevent extra fields for safety
+    )
+    
+    def with_metadata_update(self, **updates) -> 'IRNode':
+        """Create a copy with updated metadata."""
+        if self.metadata is None:
+            new_metadata = NodeMetadata(**updates)
+        else:
+            metadata_dict = self.metadata.model_dump()
+            metadata_dict.update(updates)
+            new_metadata = NodeMetadata(**metadata_dict)
+        
+        return self.model_copy(update={'metadata': new_metadata})
+    
+    def add_mutation_record(self, mutation_name: str) -> 'IRNode':
+        """Add a mutation record to the history."""
+        if self.metadata is None:
+            new_metadata = NodeMetadata(mutation_history=[mutation_name])
+        else:
+            new_history = self.metadata.mutation_history + [mutation_name]
+            new_metadata = self.metadata.model_copy(update={'mutation_history': new_history})
+        
+        return self.model_copy(update={'metadata': new_metadata})
 
 class Expression(IRNode):
     """

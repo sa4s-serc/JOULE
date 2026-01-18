@@ -8,14 +8,15 @@ These mutators operate at the highest abstraction level, focusing on:
 """
 import logging
 from typing import List, Optional, Set
-from src.application.mutators.base import LayeredMutator, MutationLayer, MutationResult, safe_deepcopy_ir, create_mutation_result
+from src.application.mutators.ir_mutator_base import IROnlyMutator
+from src.application.mutators.base import MutationLayer, MutationResult, create_mutation_result
 from src.application.mutators.semantic_base import LLMMutatorBase
 from src.domain.ir import schema
 
 logger = logging.getLogger(__name__)
 
 
-class AlgorithmicIntentMutator(LayeredMutator, LLMMutatorBase):
+class AlgorithmicIntentMutator(IROnlyMutator, LLMMutatorBase):
     """
     Focuses on high-level algorithmic improvements and intent optimization.
     
@@ -23,8 +24,8 @@ class AlgorithmicIntentMutator(LayeredMutator, LLMMutatorBase):
     alternatives that maintain the same intent but with better characteristics.
     """
     
-    def __init__(self, llm_client, enabled_strategies: Optional[Set[str]] = None):
-        LayeredMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
+    def __init__(self, llm_client=None, enabled_strategies: Optional[Set[str]] = None):
+        IROnlyMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
         LLMMutatorBase.__init__(self, llm_client)
     
     def get_available_strategies(self) -> List[str]:
@@ -34,7 +35,7 @@ class AlgorithmicIntentMutator(LayeredMutator, LLMMutatorBase):
             "AlgorithmicIntent_ArchitecturalImprovement"
         ]
     
-    def _apply_mutations(self, ir: schema.Module) -> List[MutationResult]:
+    def _apply_ir_mutations(self, ir: schema.Module) -> List[MutationResult]:
         """Apply semantic-level algorithmic mutations."""
         results = []
         code = self.codegen.generate(ir)
@@ -166,7 +167,7 @@ Return ONLY the architecturally improved code that maintains functionality.
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
 
-class ProgramIntentMutator(LayeredMutator, LLMMutatorBase):
+class ProgramIntentMutator(IROnlyMutator, LLMMutatorBase):
     """
     Focuses on understanding and optimizing program intent and logic flow.
     
@@ -174,8 +175,8 @@ class ProgramIntentMutator(LayeredMutator, LLMMutatorBase):
     suggests alternative approaches that achieve the same goal more efficiently.
     """
     
-    def __init__(self, llm_client, enabled_strategies: Optional[Set[str]] = None):
-        LayeredMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
+    def __init__(self, llm_client=None, enabled_strategies: Optional[Set[str]] = None):
+        IROnlyMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
         LLMMutatorBase.__init__(self, llm_client)
     
     def get_available_strategies(self) -> List[str]:
@@ -185,7 +186,7 @@ class ProgramIntentMutator(LayeredMutator, LLMMutatorBase):
             "ProgramIntent_PurposeAlignment"
         ]
     
-    def _apply_mutations(self, ir: schema.Module) -> List[MutationResult]:
+    def _apply_ir_mutations(self, ir: schema.Module) -> List[MutationResult]:
         """Apply program intent optimization mutations."""
         results = []
         code = self.codegen.generate(ir)
