@@ -9,33 +9,10 @@ from rich.table import Table
 from rich.panel import Panel
 
 from cli.utils.banner import print_success, print_error, print_info, print_warning
+from src.utils.config import load_config, merge_config, save_config, CONFIG_FILE, DEFAULT_CONFIG
 
 console = Console()
 
-CONFIG_FILE = Path.home() / ".hedge" / "config.json"
-DEFAULT_CONFIG = {
-    "llm": {
-        "default_provider": "gemini",
-        "openai_model": "gpt-4",
-        "gemini_model": "gemini-pro"
-    },
-    "optimization": {
-        "default_level": "standard",
-        "default_generations": 10,
-        "default_population_size": 8,
-        "default_timeout": 30
-    },
-    "output": {
-        "auto_visualize": False,
-        "save_ir_snapshots": False,
-        "experiment_base_dir": "experiments"
-    },
-    "ui": {
-        "theme": "auto",
-        "show_progress": True,
-        "verbose_by_default": False
-    }
-}
 
 @click.group()
 def config_cmd():
@@ -48,7 +25,7 @@ def show_config(section):
     """Show current configuration."""
     console.print("\n[bold cyan]HEDGE Configuration[/bold cyan]\n")
     
-    config = _load_config()
+    config = load_config()
     
     if section:
         if section in config:
@@ -66,7 +43,7 @@ def show_config(section):
 @click.argument('value', type=str)
 def set_config(key, value):
     """Set a configuration value."""
-    config = _load_config()
+    config = load_config()
     
     # Parse nested key (e.g., "llm.default_provider")
     keys = key.split('.')
@@ -83,7 +60,7 @@ def set_config(key, value):
     current[keys[-1]] = parsed_value
     
     # Save configuration
-    _save_config(config)
+    save_config(config)
     
     print_success(f"Set {key} = {parsed_value}")
     return 0
@@ -92,7 +69,7 @@ def set_config(key, value):
 @click.argument('key', type=str)
 def get_config(key):
     """Get a configuration value."""
-    config = _load_config()
+    config = load_config()
     
     # Parse nested key
     keys = key.split('.')
@@ -117,7 +94,7 @@ def reset_config(confirm):
             console.print("Configuration reset cancelled.")
             return 0
     
-    _save_config(DEFAULT_CONFIG)
+    save_config(DEFAULT_CONFIG)
     print_success("Configuration reset to defaults")
     return 0
 
@@ -127,7 +104,7 @@ def init_config():
     console.print("\n[bold cyan]HEDGE Configuration Setup[/bold cyan]")
     console.print("[dim]Configure HEDGE for optimal performance.[/dim]\n")
     
-    config = _load_config()
+    config = load_config()
     
     # Welcome and overview
     console.print(Panel(
@@ -223,7 +200,7 @@ def init_config():
     config['ui']['theme'] = theme
     
     # Save configuration
-    _save_config(config)
+    save_config(config)
     
     # Success summary
     console.print("\n" + "="*60)
@@ -252,7 +229,7 @@ def validate_config():
     """Validate current configuration."""
     console.print("\n[bold cyan]Validating Configuration[/bold cyan]\n")
     
-    config = _load_config()
+    config = load_config()
     issues = []
     
     # Validate LLM configuration
@@ -290,38 +267,6 @@ def validate_config():
     else:
         print_success("Configuration is valid!")
         return 0
-
-def _load_config():
-    """Load configuration from file or return defaults."""
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE) as f:
-                config = json.load(f)
-            # Merge with defaults to ensure all keys exist
-            return _merge_config(DEFAULT_CONFIG, config)
-        except Exception as e:
-            print_warning(f"Error loading config: {e}. Using defaults.")
-    
-    return DEFAULT_CONFIG.copy()
-
-def _save_config(config):
-    """Save configuration to file."""
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
-
-def _merge_config(default, user):
-    """Merge user config with defaults."""
-    result = default.copy()
-    
-    for key, value in user.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _merge_config(result[key], value)
-        else:
-            result[key] = value
-    
-    return result
 
 def _parse_value(value_str):
     """Parse string value to appropriate type."""

@@ -52,3 +52,4 @@ docs/.doctrees/
 .cache/
 
 ablation_complex/
+.hedge_cache/

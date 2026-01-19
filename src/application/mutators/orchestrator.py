@@ -1,5 +1,5 @@
 """
-Enhanced Mutation Orchestrator - Intelligent Hierarchical Coordination
+Mutation Orchestrator - Intelligent Hierarchical Coordination
 
 This is the main orchestrator for HEDGE's mutation system, providing:
 - Early pruning to prevent exponential growth

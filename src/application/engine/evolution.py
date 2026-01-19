@@ -1,24 +1,28 @@
 """
-Evolutionary Engine - IR-Only Optimization System
+Evolutionary Engine - High-Performance IR-Only Optimization System
 
 This is the core orchestration layer that coordinates:
 - IR parsing and validation
-- Mutation generation
+- Mutation generation with parallel processing
 - Code reconstruction
 - Evaluation and Pareto optimization
+- Intelligent mutation selection
+- Memory-optimized IR handling
 
 Key principles:
 1. IR is the single source of truth
 2. All mutations are validated before evaluation
 3. Code is reconstructed from IR (never cached)
 4. Comprehensive metrics and instrumentation
+5. Parallel processing for optimal performance
 """
 import logging
 import uuid
 import hashlib
 import math
 import random
-from typing import List, Dict, Tuple, Optional, Set, Callable
+import time
+from typing import List, Dict, Tuple, Optional, Set, Callable, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,23 +31,33 @@ from src.domain.ir.schema import Module
 from src.domain.ir.validators import IRValidator
 from src.domain.ir.metrics import IRMetricsCollector, MutationStatistics
 from src.domain.ir.serialization import IRSerializer
+from src.domain.ir.lazy_wrapper import create_lazy_wrapper, get_memory_stats
 from src.infrastructure.parsing.python_parser import PythonParser
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+from src.infrastructure.llm.batch_client import BatchLLMClient, BatchRequest, create_batch_llm_client
 from src.application.engine.crossover import CrossoverManager
-from src.application.mutators import MutationOrchestrator, MutationLayer, OrchestrationConfig
+from src.application.mutators.base import MutationLayer
+from src.application.mutators.parallel_orchestrator import ParallelMutationOrchestrator, ParallelConfig
+from src.application.mutators.intelligent_selector import get_intelligent_selector
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class Solution:
-    """Represents a candidate solution in the evolutionary search."""
+    """Enhanced solution with lazy IR wrapper."""
     ir: Module
     metrics: Dict[str, float]
     variant_id: str
     parent_id: str
     mutation_type: str
     generation: int
+    lazy_wrapper: Optional[Any] = None  # LazyIRWrapper
+    
+    def __post_init__(self):
+        """Initialize lazy wrapper if not provided."""
+        if self.lazy_wrapper is None:
+            self.lazy_wrapper = create_lazy_wrapper(self.ir)
 
 
 @dataclass
@@ -56,39 +70,101 @@ class EngineConfig:
     min_mutator_prob: float = 0.2
     save_ir_snapshots: bool = False
     
+    # Performance optimizations
+    enable_parallel_mutations: bool = True
+    enable_intelligent_selection: bool = True
+    enable_batch_llm: bool = True
+    enable_memory_optimization: bool = True
     
+    # Resource limits
+    max_memory_usage_mb: int = 2048
+    max_concurrent_mutations: int = 8
+    llm_batch_size: int = 5
+    
+    # Adaptive parameters
+    adaptive_population_size: bool = True
+    adaptive_mutation_rate: bool = True
+    early_stopping_patience: int = 5
+
+
 class ParetoArchive:
-    """
-    Maintains a set of non-dominated solutions with diversity preservation.
-    
-    Uses NSGA-II style crowding distance for diversity maintenance.
-    """
-    
-    __slots__ = ('solutions', 'max_size', '_objectives')
+    """Pareto archive with memory optimization and diversity preservation."""
     
     def __init__(self, max_size: int = 50, objectives: Tuple[str, ...] = ("energy_joules", "duration_seconds")):
         self.solutions: List[Solution] = []
         self.max_size = max_size
         self._objectives = objectives
+        self._solution_hashes: Set[str] = set()
+    
+    def _get_solution_hash(self, solution: Solution) -> str:
+        """Get hash for solution deduplication."""
+        ir_dict = solution.ir.model_dump(exclude={'metadata'})
+        return hashlib.sha256(str(sorted(ir_dict.items())).encode()).hexdigest()[:16]
     
     def _get_objective(self, sol: Solution, obj: str) -> float:
         """Get objective value with default for missing metrics."""
         return sol.metrics.get(obj, float('inf'))
     
     def _dominates(self, sol_a: Solution, sol_b: Solution) -> bool:
-        """Check if sol_a dominates sol_b (better in at least one, no worse in all)."""
+        """Check if sol_a dominates sol_b."""
         dominated_in_one = False
         
         for obj in self._objectives:
             a_val = self._get_objective(sol_a, obj)
             b_val = self._get_objective(sol_b, obj)
             
-            if a_val > b_val:  # Worse in this objective
+            if a_val > b_val:
                 return False
-            if a_val < b_val:  # Better in this objective
+            if a_val < b_val:
                 dominated_in_one = True
         
         return dominated_in_one
+    
+    def update(self, new_solution: Solution) -> bool:
+        """Add solution if non-dominated and not duplicate."""
+        # Check for duplicates
+        solution_hash = self._get_solution_hash(new_solution)
+        if solution_hash in self._solution_hashes:
+            return False
+        
+        # Check if dominated by existing solution
+        for sol in self.solutions:
+            if self._dominates(sol, new_solution):
+                return False
+        
+        # Remove solutions dominated by new one
+        self.solutions = [s for s in self.solutions if not self._dominates(new_solution, s)]
+        
+        # Update hash set
+        self._solution_hashes = {self._get_solution_hash(s) for s in self.solutions}
+        
+        # Add new solution
+        self.solutions.append(new_solution)
+        self._solution_hashes.add(solution_hash)
+        
+        # Maintain diversity if over capacity
+        if len(self.solutions) > self.max_size:
+            self._prune_crowded()
+        
+        return True
+    
+    def _prune_crowded(self):
+        """Remove most crowded solutions."""
+        if len(self.solutions) <= self.max_size:
+            return
+        
+        distances = self._crowding_distance(self.solutions)
+        self.solutions.sort(key=lambda s: distances[s.variant_id])
+        num_remove = len(self.solutions) - self.max_size
+        
+        # Remove most crowded solutions
+        removed_solutions = self.solutions[:num_remove]
+        self.solutions = self.solutions[num_remove:]
+        
+        # Update hash set
+        for sol in removed_solutions:
+            sol_hash = self._get_solution_hash(sol)
+            self._solution_hashes.discard(sol_hash)
     
     def _crowding_distance(self, solutions: List[Solution]) -> Dict[str, float]:
         """Calculate crowding distance for diversity preservation."""
@@ -99,14 +175,11 @@ class ParetoArchive:
         distances = {sol.variant_id: 0.0 for sol in solutions}
         
         for obj in self._objectives:
-            # Sort by objective
             sorted_sols = sorted(solutions, key=lambda s: self._get_objective(s, obj))
             
-            # Boundary solutions get infinite distance
             distances[sorted_sols[0].variant_id] = float('inf')
             distances[sorted_sols[-1].variant_id] = float('inf')
             
-            # Calculate range
             obj_min = self._get_objective(sorted_sols[0], obj)
             obj_max = self._get_objective(sorted_sols[-1], obj)
             obj_range = obj_max - obj_min
@@ -119,42 +192,18 @@ class ParetoArchive:
                         distances[sorted_sols[i].variant_id] += (next_val - prev_val) / obj_range
         
         return distances
-    
-    def update(self, new_solution: Solution) -> bool:
-        """Add solution if non-dominated, maintaining diversity."""
-        # Check if dominated by existing solution
-        for sol in self.solutions:
-            if self._dominates(sol, new_solution):
-                return False
-        
-        # Remove solutions dominated by new one
-        self.solutions = [s for s in self.solutions if not self._dominates(new_solution, s)]
-        self.solutions.append(new_solution)
-        
-        # Maintain diversity if over capacity
-        if len(self.solutions) > self.max_size:
-            self._prune_crowded()
-        
-        return True
-    
-    def _prune_crowded(self):
-        """Remove most crowded solutions to maintain max_size."""
-        if len(self.solutions) <= self.max_size:
-            return
-        
-        distances = self._crowding_distance(self.solutions)
-        # Sort ascending by distance, remove most crowded
-        self.solutions.sort(key=lambda s: distances[s.variant_id])
-        num_remove = len(self.solutions) - self.max_size
-        self.solutions = self.solutions[num_remove:]
 
 
 class EvolutionaryEngine:
     """
-    Main evolutionary optimization engine.
+    High-performance evolutionary optimization engine with advanced features.
     
-    Enforces IR-Only mutations with strict validation.
-    Provides comprehensive instrumentation and metrics.
+    Features:
+    - Parallel mutation processing with intelligent coordination
+    - ML-driven mutation selection based on code patterns
+    - Memory-optimized IR handling with copy-on-write
+    - Batch LLM processing for semantic mutations
+    - Advanced performance monitoring and adaptive optimization
     """
     
     def __init__(
@@ -162,36 +211,73 @@ class EvolutionaryEngine:
         mutators: List[Mutator],
         runner: CodeRunner,
         config: Optional[EngineConfig] = None,
-        generations: int = 10,
-        population_size: int = 5,
-        experiment_dir: Optional[Path] = None,
-        save_ir_snapshots: bool = False
+        llm_client=None,
+        experiment_dir: Optional[Path] = None
     ):
         self.mutators = mutators
         self.runner = runner
-        self.config = config or EngineConfig(
-            generations=generations,
-            population_size=population_size,
-            save_ir_snapshots=save_ir_snapshots
-        )
+        self.config = config or EngineConfig()
         self.experiment_dir = experiment_dir
+        self.llm_client = llm_client
         
         # Core components
         self.parser = PythonParser()
         self.codegen = PythonCodeGenerator()
-        self.validator = IRValidator()
+        self.validator = IRValidator(strict=False)
         self.metrics_collector = IRMetricsCollector()
+        self.crossover_manager = CrossoverManager()
+        
+        # Enhanced components
+        if self.config.enable_parallel_mutations:
+            parallel_config = ParallelConfig(
+                max_workers=self.config.max_concurrent_mutations,
+                max_memory_usage_mb=self.config.max_memory_usage_mb,
+                adaptive_scaling=True
+            )
+            self.orchestrator = ParallelMutationOrchestrator(parallel_config)
+        else:
+            self.orchestrator = None
+        
+        if self.config.enable_intelligent_selection:
+            self.intelligent_selector = get_intelligent_selector()
+        else:
+            self.intelligent_selector = None
+        
+        if self.config.enable_batch_llm and llm_client:
+            provider = "openai" if "OpenAI" in llm_client.__class__.__name__ else "gemini"
+            model_name = getattr(llm_client, 'model_name', "gpt-4" if provider == "openai" else "gemini-2.5-flash")
+            
+            self.batch_llm_client = create_batch_llm_client(
+                provider=provider,
+                model=model_name,
+                api_key=getattr(llm_client, 'api_key', None),
+                max_concurrent_requests=self.config.llm_batch_size
+            )
+            if self.batch_llm_client is None:
+                logger.warning("Batch LLM client creation failed, disabling batch processing")
+        else:
+            self.batch_llm_client = None
         
         # State
         self.archive = ParetoArchive(max_size=self.config.archive_max_size)
         self.cache: Dict[str, Dict[str, float]] = {}
         self.statistics = MutationStatistics()
-        self.crossover_manager = CrossoverManager()
-        self.mutation_orchestrator = MutationOrchestrator()
-        self.enabled_layers: Optional[Set[MutationLayer]] = None
+        self.generation = 0
+        self.best_solution: Optional[Solution] = None
+        self.stagnation_counter = 0
+        
+        # Performance tracking
+        self.performance_history: List[Dict[str, float]] = []
         
         # Setup experiment directory
         self._setup_experiment_dir()
+        
+        logger.info(f"Initialized EvolutionaryEngine:")
+        logger.info(f"  Mutators: {len(mutators)}")
+        logger.info(f"  Parallel mutations: {self.config.enable_parallel_mutations}")
+        logger.info(f"  Intelligent selection: {self.config.enable_intelligent_selection}")
+        logger.info(f"  Batch LLM: {self.config.enable_batch_llm}")
+        logger.info(f"  Memory optimization: {self.config.enable_memory_optimization}")
     
     def _setup_experiment_dir(self):
         """Initialize experiment directory structure."""
@@ -199,9 +285,12 @@ class EvolutionaryEngine:
             self.experiment_dir.mkdir(parents=True, exist_ok=True)
             if self.config.save_ir_snapshots:
                 (self.experiment_dir / "ir_snapshots").mkdir(exist_ok=True)
+            (self.experiment_dir / "performance_logs").mkdir(exist_ok=True)
     
-    def _evaluate(self, ir: Module, test_code: str) -> Tuple[bool, Dict[str, float], str]:
-        """Evaluate solution: reconstruct code, run tests, cache results."""
+    def _evaluate(self, solution: Solution, test_code: str) -> Tuple[bool, Dict[str, float], str]:
+        """Evaluate solution with caching and memory optimization."""
+        # Use lazy wrapper for memory efficiency
+        ir = solution.lazy_wrapper.ir if solution.lazy_wrapper else solution.ir
         code = self.codegen.generate(ir)
         code_hash = hashlib.md5(code.encode()).hexdigest()
         
@@ -224,77 +313,305 @@ class EvolutionaryEngine:
         return 1.0 / (energy * duration)
     
     def _select_parents(self, parents: List[Solution], num_select: int) -> List[Solution]:
-        """Select parents using fitness-proportionate selection."""
+        """Select parents using tournament selection."""
         if not parents:
             return []
         
-        fitness_scores = [self._compute_fitness(p) for p in parents]
-        total_fitness = sum(fitness_scores)
-        probs = [s / total_fitness for s in fitness_scores]
-        
-        indices = random.choices(range(len(parents)), weights=probs, k=num_select)
-        return [parents[i] for i in indices]
-    
-    def _select_mutators(self) -> List[Mutator]:
-        """Adaptively select mutators based on past performance."""
-        if not self.statistics.mutator_stats:
-            return self.mutators
-        
-        scores = {}
-        for m in self.mutators:
-            name_prefix = m.__class__.__name__.replace("Mutator", "")
-            total_improved = 0
-            total_attempts = 0
-            
-            for strat, data in self.statistics.mutator_stats.items():
-                if strat.startswith(name_prefix):
-                    total_improved += data["improved"]
-                    total_attempts += data["total"]
-            
-            rate = total_improved / total_attempts if total_attempts > 0 else 0.0
-            scores[m] = rate + 0.01  # Ensure non-zero
-        
-        if not scores:
-            return self.mutators
-        
-        # Select based on relative performance
-        max_score = max(scores.values())
         selected = []
+        tournament_size = min(3, len(parents))
         
-        for m in self.mutators:
-            prob = self.config.min_mutator_prob + (1 - self.config.min_mutator_prob) * (scores[m] / max_score)
-            if random.random() < prob:
-                selected.append(m)
+        for _ in range(num_select):
+            tournament = random.sample(parents, tournament_size)
+            winner = max(tournament, key=self._compute_fitness)
+            selected.append(winner)
         
-        return selected or [random.choice(self.mutators)]
+        return selected
     
-    def _generate_mutations(self, parent: Solution) -> List[Tuple[Module, str]]:
-        """Generate mutation variants from a parent."""
-        variants = []
-        active_mutators = self._select_mutators()
+    def _generate_mutations_enhanced(
+        self, 
+        parents: List[Solution], 
+        enabled_layers: Optional[Set[MutationLayer]] = None
+    ) -> List[Solution]:
+        """Generate mutations using enhanced orchestration."""
+        all_variants = []
         
-        for mutator in active_mutators:
+        for parent in parents:
             try:
-                for variant_ir, strategy_name in mutator.mutate(parent.ir):
-                    self.statistics.record_attempt(strategy_name)
+                # Use intelligent selection if enabled
+                if self.intelligent_selector:
+                    selected_mutators = self.intelligent_selector.select_mutators(
+                        parent.ir, enabled_layers, max_mutators=10, llm_client=self.llm_client
+                    )
                     
-                    val_result = self.validator.validate(variant_ir)
-                    if val_result.valid:
-                        self.statistics.record_success(strategy_name)
-                        variants.append((variant_ir, strategy_name))
-                    else:
-                        logger.debug(f"Variant rejected: {val_result.errors}")
-                        self.statistics.failed_validations += 1
+                    # Apply selected mutations
+                    for mutator, strategy, confidence in selected_mutators:
+                        variants = mutator.mutate(parent.ir)
+                        for variant_ir, variant_strategy in variants:
+                            if variant_strategy == strategy:
+                                # Validate variant
+                                val_result = self.validator.validate(variant_ir)
+                                if val_result.valid:
+                                    solution = Solution(
+                                        ir=variant_ir,
+                                        metrics={},
+                                        variant_id=str(uuid.uuid4()),
+                                        parent_id=parent.variant_id,
+                                        mutation_type=f"{mutator.__class__.__name__}:{strategy}",
+                                        generation=self.generation + 1
+                                    )
+                                    all_variants.append(solution)
+                                    
+                                    # Record outcome for learning
+                                    self.intelligent_selector.record_mutation_outcome(
+                                        parent.ir, mutator, strategy, True, confidence
+                                    )
+                                else:
+                                    # Record failed outcome
+                                    if self.intelligent_selector:
+                                        self.intelligent_selector.record_mutation_outcome(
+                                            parent.ir, mutator, strategy, False, 0.0
+                                        )
+                
+                # Use parallel orchestration if enabled
+                elif self.orchestrator:
+                    mutation_results = self.orchestrator.orchestrate_parallel_mutations(
+                        parent.ir, enabled_layers, self.batch_llm_client
+                    )
+                    
+                    for result in mutation_results:
+                        val_result = self.validator.validate(result.ir)
+                        if val_result.valid:
+                            solution = Solution(
+                                ir=result.ir,
+                                metrics={},
+                                variant_id=str(uuid.uuid4()),
+                                parent_id=parent.variant_id,
+                                mutation_type=result.strategy_name,
+                                generation=self.generation + 1
+                            )
+                            all_variants.append(solution)
+                
+                # Fallback to traditional mutation
+                else:
+                    for mutator in self.mutators:
+                        variants = mutator.mutate(parent.ir)
+                        for variant_ir, strategy_name in variants:
+                            val_result = self.validator.validate(variant_ir)
+                            if val_result.valid:
+                                solution = Solution(
+                                    ir=variant_ir,
+                                    metrics={},
+                                    variant_id=str(uuid.uuid4()),
+                                    parent_id=parent.variant_id,
+                                    mutation_type=strategy_name,
+                                    generation=self.generation + 1
+                                )
+                                all_variants.append(solution)
+                
             except Exception as e:
-                logger.error(f"Mutator {mutator.__class__.__name__} failed: {e}")
+                logger.error(f"Mutation generation failed for parent {parent.variant_id}: {e}")
         
-        return variants
+        return all_variants
     
-    def _generate_crossovers(self, parents: List[Solution]) -> List[Tuple[Module, str]]:
-        """Generate crossover offspring from parents."""
-        if len(parents) < 2:
+    def _adaptive_population_size(self) -> int:
+        """Calculate adaptive population size based on performance."""
+        if not self.config.adaptive_population_size:
+            return self.config.population_size
+        
+        base_size = self.config.population_size
+        
+        # Increase population if stagnating
+        if self.stagnation_counter > 2:
+            return min(base_size * 2, 20)
+        
+        # Decrease if converging quickly
+        if len(self.archive.solutions) > base_size and self.generation > 3:
+            diversity = self._calculate_diversity()
+            if diversity < 0.1:  # Low diversity
+                return max(base_size // 2, 3)
+        
+        return base_size
+    
+    def _calculate_diversity(self) -> float:
+        """Calculate population diversity."""
+        if len(self.archive.solutions) < 2:
+            return 1.0
+        
+        # Simple diversity measure based on fitness variance
+        fitness_scores = [self._compute_fitness(sol) for sol in self.archive.solutions]
+        if not fitness_scores:
+            return 1.0
+        
+        mean_fitness = sum(fitness_scores) / len(fitness_scores)
+        variance = sum((f - mean_fitness) ** 2 for f in fitness_scores) / len(fitness_scores)
+        
+        return min(1.0, variance / (mean_fitness ** 2 + 1e-9))
+    
+    def _log_performance_metrics(self):
+        """Log performance metrics and memory usage."""
+        memory_stats = get_memory_stats()
+        
+        performance_data = {
+            'generation': self.generation,
+            'archive_size': len(self.archive.solutions),
+            'cache_size': len(self.cache),
+            'stagnation_counter': self.stagnation_counter,
+            'memory_saved_mb': memory_stats.get('memory_saved_mb', 0),
+            'copy_ratio': memory_stats.get('copy_ratio', 0),
+            'sharing_efficiency': memory_stats.get('sharing_efficiency', 0)
+        }
+        
+        if self.orchestrator and hasattr(self.orchestrator, 'get_performance_stats'):
+            orchestrator_stats = self.orchestrator.get_performance_stats()
+            performance_data.update(orchestrator_stats.get('execution_stats', {}))
+        
+        self.performance_history.append(performance_data)
+        
+        logger.info(f"Generation {self.generation} performance:")
+        logger.info(f"  Archive size: {len(self.archive.solutions)}")
+        logger.info(f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
+        logger.info(f"  Copy efficiency: {memory_stats.get('sharing_efficiency', 0):.1%}")
+        
+        if self.best_solution:
+            best_energy = self.best_solution.metrics.get('energy_joules', 0)
+            best_time = self.best_solution.metrics.get('duration_seconds', 0)
+            logger.info(f"  Best solution: {best_energy:.6f}J, {best_time:.6f}s")
+    
+    def optimize(
+        self,
+        initial_code: str,
+        test_code: str,
+        enabled_layers: Optional[Set[MutationLayer]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> List[Solution]:
+        """
+        Main optimization loop with advanced features.
+        
+        Args:
+            initial_code: Source code to optimize
+            test_code: Test harness code
+            enabled_layers: Set of enabled mutation layers
+            progress_callback: Optional progress callback
+            
+        Returns:
+            List of optimized solutions from Pareto archive
+        """
+        start_time = time.time()
+        
+        # Parse initial code
+        try:
+            initial_ir = self.parser.parse(initial_code)
+            val_result = self.validator.validate(initial_ir)
+            if not val_result.valid:
+                raise ValueError(f"Initial code validation failed: {val_result.errors}")
+        except Exception as e:
+            logger.error(f"Failed to parse initial code: {e}")
             return []
         
+        # Evaluate baseline
+        success, baseline_metrics, output = self._evaluate(
+            Solution(
+                ir=initial_ir,
+                metrics={},
+                variant_id="baseline",
+                parent_id="",
+                mutation_type="baseline",
+                generation=0
+            ),
+            test_code
+        )
+        
+        if not success:
+            logger.error(f"Baseline evaluation failed: {output}")
+            return []
+        
+        # Create initial solution
+        initial_solution = Solution(
+            ir=initial_ir,
+            metrics=baseline_metrics,
+            variant_id="initial",
+            parent_id="",
+            mutation_type="initial",
+            generation=0
+        )
+        
+        self.archive.update(initial_solution)
+        self.best_solution = initial_solution
+        
+        logger.info(f"Baseline metrics: {baseline_metrics}")
+        
+        # Evolution loop
+        for generation in range(self.config.generations):
+            self.generation = generation
+            generation_start = time.time()
+            
+            # Adaptive population size
+            current_pop_size = self._adaptive_population_size()
+            
+            # Select parents
+            parents = self._select_parents(self.archive.solutions, current_pop_size)
+            
+            # Generate mutations
+            variants = self._generate_mutations_enhanced(parents, enabled_layers)
+            
+            # Generate crossovers
+            if len(parents) >= 2 and random.random() < self.config.crossover_rate:
+                crossover_variants = self._generate_crossovers(parents)
+                variants.extend(crossover_variants)
+            
+            # Evaluate variants
+            improved_count = 0
+            for variant in variants:
+                success, metrics, output = self._evaluate(variant, test_code)
+                
+                if success:
+                    variant.metrics = metrics
+                    
+                    # Update archive
+                    if self.archive.update(variant):
+                        improved_count += 1
+                        
+                        # Update best solution
+                        if not self.best_solution or self._compute_fitness(variant) > self._compute_fitness(self.best_solution):
+                            self.best_solution = variant
+                            self.stagnation_counter = 0
+                        
+                        # Save IR snapshot
+                        if self.config.save_ir_snapshots:
+                            self._save_ir_snapshot(variant)
+            
+            # Update stagnation counter
+            if improved_count == 0:
+                self.stagnation_counter += 1
+            
+            # Log progress
+            generation_time = time.time() - generation_start
+            logger.info(f"Generation {generation}: {improved_count}/{len(variants)} improvements in {generation_time:.2f}s")
+            
+            # Progress callback
+            if progress_callback:
+                progress_callback(generation + 1, self.config.generations)
+            
+            # Log performance metrics
+            self._log_performance_metrics()
+            
+            # Early stopping
+            if self.stagnation_counter >= self.config.early_stopping_patience:
+                logger.info(f"Early stopping after {self.stagnation_counter} generations without improvement")
+                break
+        
+        total_time = time.time() - start_time
+        logger.info(f"Optimization completed in {total_time:.2f}s")
+        logger.info(f"Final archive size: {len(self.archive.solutions)}")
+        
+        # Save performance history
+        if self.experiment_dir:
+            self._save_performance_history()
+        
+        return self.archive.solutions
+    
+    def _generate_crossovers(self, parents: List[Solution]) -> List[Solution]:
+        """Generate crossover variants."""
         variants = []
         num_crossovers = min(len(parents) // 2, 3)
         
@@ -303,15 +620,17 @@ class EvolutionaryEngine:
             
             try:
                 for child_ir in self.crossover_manager.perform_crossover(parent1.ir, parent2.ir):
-                    self.statistics.record_attempt("Crossover")
-                    
                     val_result = self.validator.validate(child_ir)
                     if val_result.valid:
-                        self.statistics.record_success("Crossover")
-                        variants.append((child_ir, "Crossover"))
-                    else:
-                        logger.debug(f"Crossover rejected: {val_result.errors}")
-                        self.statistics.failed_validations += 1
+                        solution = Solution(
+                            ir=child_ir,
+                            metrics={},
+                            variant_id=str(uuid.uuid4()),
+                            parent_id=f"{parent1.variant_id}+{parent2.variant_id}",
+                            mutation_type="Crossover",
+                            generation=self.generation + 1
+                        )
+                        variants.append(solution)
             except Exception as e:
                 logger.error(f"Crossover failed: {e}")
         
@@ -326,123 +645,46 @@ class EvolutionaryEngine:
         filepath = self.experiment_dir / "ir_snapshots" / filename
         
         try:
-            IRSerializer.save(solution.ir, filepath)
+            self.serializer.save(solution.ir, filepath)
         except Exception as e:
             logger.error(f"Failed to save IR snapshot: {e}")
     
-    def optimize(
-        self, 
-        initial_code: str, 
-        test_code: str, 
-        progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> List[Solution]:
-        """
-        Main optimization loop.
+    def _save_performance_history(self):
+        """Save performance history to file."""
+        if not self.experiment_dir:
+            return
         
-        Args:
-            initial_code: Source code to optimize
-            test_code: Test harness code
-            progress_callback: Optional callback for progress reporting
-            
-        Returns:
-            List of Pareto-optimal solutions
-        """
-        # Parse and validate baseline
-        logger.info("Parsing baseline code...")
         try:
-            baseline_ir = self.parser.parse(initial_code)
+            import json
+            filepath = self.experiment_dir / "performance_logs" / "performance_history.json"
+            
+            with open(filepath, 'w') as f:
+                json.dump(self.performance_history, f, indent=2)
+            
+            logger.info(f"Saved performance history to {filepath}")
         except Exception as e:
-            logger.error(f"Failed to parse baseline: {e}")
-            return []
-        
-        val_result = self.validator.validate(baseline_ir)
-        if not val_result.valid:
-            logger.error(f"Baseline validation failed: {val_result.errors}")
-            return []
-        
-        # Evaluate baseline
-        logger.info("Evaluating baseline...")
-        try:
-            success, metrics, output = self._evaluate(baseline_ir, test_code)
-        except Exception as e:
-            logger.error(f"Baseline evaluation failed: {e}")
-            return []
-        
-        if not success:
-            logger.error(f"Baseline execution failed: {output}")
-            return []
-        
-        # Initialize archive with baseline
-        root_id = str(uuid.uuid4())
-        baseline = Solution(
-            ir=baseline_ir,
-            metrics=metrics,
-            variant_id=root_id,
-            parent_id="ROOT",
-            mutation_type="BASELINE",
-            generation=0
-        )
-        self.archive.update(baseline)
-        self._save_ir_snapshot(baseline)
-        logger.info(f"Baseline metrics: {metrics}")
-        
-        # Evolutionary loop
-        for gen in range(1, self.config.generations + 1):
-            logger.info(f"Generation {gen}/{self.config.generations}...")
-            
-            parents = self.archive.solutions
-            if not parents:
-                break
-            
-            # Select parents and generate candidates
-            selected = self._select_parents(parents, len(parents))
-            candidates = []
-            
-            # Mutations
-            for parent in selected:
-                for variant_ir, strategy in self._generate_mutations(parent):
-                    candidates.append((variant_ir, parent, strategy))
-            
-            # Crossovers
-            for variant_ir, strategy in self._generate_crossovers(selected):
-                candidates.append((variant_ir, selected[0], strategy))
-            
-            if not candidates:
-                logger.info("No valid variants. Stopping.")
-                break
-            
-            # Evaluate candidates
-            for variant_ir, parent, strategy in candidates:
-                success, metrics, _ = self._evaluate(variant_ir, test_code)
-                
-
-                
-                if success:
-                    new_sol = Solution(
-                        ir=variant_ir,
-                        metrics=metrics,
-                        variant_id=str(uuid.uuid4()),
-                        parent_id=parent.variant_id,
-                        mutation_type=strategy,
-                        generation=gen
-                    )
-                    self._save_ir_snapshot(new_sol)
-                    
-                    if self.archive.update(new_sol):
-                        self.statistics.record_improvement(strategy)
-                        logger.info(f"New Pareto solution! [{strategy}] {metrics}")
-                
-                if progress_callback:
-                    progress_callback(gen, len(self.archive.solutions))
-            
-            logger.info(f"Generation {gen} complete. Archive: {len(self.archive.solutions)}")
-        
-        return self.archive.solutions
+            logger.error(f"Failed to save performance history: {e}")
     
-    def set_enabled_layers(self, enabled_layers: Set[MutationLayer]):
-        """Set which mutation layers are enabled."""
-        self.enabled_layers = enabled_layers
-    
-    def apply_layered_mutations(self, ir: Module) -> List[Tuple[Module, str]]:
-        """Apply mutations using the layered orchestrator."""
-        return self.mutation_orchestrator.apply_layered_mutations(ir, self.enabled_layers)
+    def get_optimization_summary(self) -> Dict[str, Any]:
+        """Get comprehensive optimization summary."""
+        memory_stats = get_memory_stats()
+        
+        summary = {
+            'generations_completed': self.generation,
+            'total_solutions': len(self.archive.solutions),
+            'best_solution_metrics': self.best_solution.metrics if self.best_solution else {},
+            'cache_efficiency': len(self.cache),
+            'memory_optimization': memory_stats,
+            'stagnation_counter': self.stagnation_counter
+        }
+        
+        if self.intelligent_selector:
+            summary['learning_stats'] = self.intelligent_selector.get_learning_stats()
+        
+        if self.orchestrator and hasattr(self.orchestrator, 'get_performance_stats'):
+            summary['parallel_stats'] = self.orchestrator.get_performance_stats()
+        
+        if self.batch_llm_client:
+            summary['llm_stats'] = self.batch_llm_client.get_stats()
+        
+        return summary

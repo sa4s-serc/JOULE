@@ -120,7 +120,7 @@ class MutatorRegistry:
         
         logger.info(f"Registered mutator '{name}' with {len(info.strategies)} strategies")
     
-    def get_mutator(self, name: str, enabled_strategies: Optional[Set[str]] = None) -> Optional[LayeredMutator]:
+    def get_mutator(self, name: str, enabled_strategies: Optional[Set[str]] = None, llm_client=None) -> Optional[LayeredMutator]:
         """Get a mutator instance by name."""
         if name not in self._mutators:
             return None
@@ -129,12 +129,51 @@ class MutatorRegistry:
         if not info.enabled:
             return None
         
-        return info.mutator_class(enabled_strategies=enabled_strategies)
+        # Try to create instance with appropriate parameters
+        try:
+            import inspect
+            sig = inspect.signature(info.mutator_class.__init__)
+            params = list(sig.parameters.keys())[1:]  # Skip 'self'
+            
+            # Handle different constructor patterns
+            if 'llm_client' in params and params[0] == 'llm_client':
+                # LLM client is first positional argument
+                if llm_client is not None:
+                    if 'enabled_strategies' in params:
+                        return info.mutator_class(llm_client, enabled_strategies=enabled_strategies or set())
+                    else:
+                        return info.mutator_class(llm_client)
+                else:
+                    # Skip mutators that require LLM client when none provided
+                    logger.debug(f"Skipping mutator {name}: requires llm_client but none provided")
+                    return None
+            else:
+                # Standard keyword arguments
+                kwargs = {}
+                if 'enabled_strategies' in params:
+                    kwargs['enabled_strategies'] = enabled_strategies or set()
+                if 'llm_client' in params and llm_client is not None:
+                    kwargs['llm_client'] = llm_client
+                
+                return info.mutator_class(**kwargs)
+        except Exception as e:
+            logger.warning(f"Failed to create mutator {name}: {e}")
+            return None
     
     def get_layer_mutators(self, layer: MutationLayer) -> List[str]:
         """Get all mutator names for a specific layer."""
         return [name for name in self._layer_mutators[layer] 
                 if self._mutators[name].enabled]
+    
+    def get_mutators_for_layer(self, layer: MutationLayer, llm_client=None) -> List[LayeredMutator]:
+        """Get all mutator instances for a specific layer."""
+        instances = []
+        for name in self._layer_mutators[layer]:
+            if self._mutators[name].enabled:
+                mutator = self.get_mutator(name, llm_client=llm_client)
+                if mutator:
+                    instances.append(mutator)
+        return instances
     
     def get_strategy_mutator(self, strategy: str) -> Optional[str]:
         """Get the mutator name that provides a specific strategy."""

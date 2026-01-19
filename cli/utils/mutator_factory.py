@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def create_mutators(level: str = 'standard', 
                    layers: Optional[str] = None,
-                   llm_provider: str = 'gemini',
+                   llm_provider: Optional[str] = None,
                    llm_model: Optional[str] = None,
                    exclude_mutators: Optional[str] = None,
                    progress=None,
@@ -26,8 +26,8 @@ def create_mutators(level: str = 'standard',
     Args:
         level: Optimization level (micro, basic, standard, advanced, aggressive)
         layers: Comma-separated list of specific layers to enable
-        llm_provider: LLM provider for semantic layers
-        llm_model: Custom LLM model name
+        llm_provider: LLM provider (loads from config if None)
+        llm_model: Custom LLM model name (loads from config if None)
         exclude_mutators: Comma-separated list of mutators to exclude
         progress: Rich progress instance for updates
         task: Progress task ID for updates
@@ -44,16 +44,16 @@ def create_mutators(level: str = 'standard',
     use_llm = any(layer in enabled_layers for layer in [MutationLayer.SEMANTIC])
     
     if use_llm:
-        api_key = os.getenv(f"{llm_provider.upper()}_API_KEY")
-        if api_key:
-            llm = create_llm_client(llm_provider, api_key, llm_model)
+        try:
+            # create_llm_client will handle its own config if llm_provider/llm_model are None
+            llm = create_llm_client(llm_provider, None, llm_model)
             if progress:
                 progress.update(task, description="✓ LLM client initialized")
-        else:
-            logger.warning(f"API key not found for {llm_provider}. Disabling semantic layer.")
+        except Exception as e:
+            logger.warning(f"LLM client initialization failed: {e}. Disabling semantic layer.")
             enabled_layers.discard(MutationLayer.SEMANTIC)
             if progress:
-                progress.update(task, description="⚠ Semantic layer disabled (no API key)")
+                progress.update(task, description="⚠ Semantic layer disabled")
     
     # Create mutators
     mutators = []

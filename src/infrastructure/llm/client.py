@@ -64,7 +64,9 @@ class OpenAIClient(LLMClient):
         try:
             from openai import OpenAI
             self.client = OpenAI(api_key=api_key)
+            self.api_key = api_key
             self.model = model
+            self.model_name = model
             self.retry_config = retry_config or RetryConfig()
         except ImportError:
             logger.error("openai package not installed. Run: pip install openai")
@@ -112,7 +114,9 @@ class GeminiClient(LLMClient):
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
+            self.api_key = api_key
             self.model = genai.GenerativeModel(model)
+            self.model_name = model
             self.retry_config = retry_config or RetryConfig()
         except ImportError:
             logger.error("google-generativeai not installed. Run: pip install google-generativeai")
@@ -153,8 +157,8 @@ class GeminiClient(LLMClient):
 
 
 def create_llm_client(
-    provider: str, 
-    api_key: str, 
+    provider: Optional[str] = None, 
+    api_key: Optional[str] = None, 
     model: Optional[str] = None,
     retry_config: Optional[RetryConfig] = None
 ) -> LLMClient:
@@ -162,14 +166,33 @@ def create_llm_client(
     Factory function to create LLM clients.
     
     Args:
-        provider: "openai" or "gemini"
-        api_key: API key for the provider
-        model: Optional model name override
+        provider: "openai" or "gemini" (loads from config if None)
+        api_key: API key (loads from environment if None)
+        model: Optional model name override (loads from config if None)
         retry_config: Optional retry configuration
         
     Returns:
         Configured LLM client
     """
+    # Load defaults from config if needed
+    if provider is None or model is None:
+        try:
+            from src.utils.config import get_llm_config
+            llm_cfg = get_llm_config()
+            provider = provider or llm_cfg['provider']
+            model = model or llm_cfg['model']
+        except ImportError:
+            # Fallback if config utility is missing
+            provider = provider or "gemini"
+            model = model or ("gemini-2.5-flash" if provider == "gemini" else "gpt-4o")
+
+    # Get API key from environment if not provided
+    if api_key is None:
+        api_key = os.getenv(f"{provider.upper()}_API_KEY")
+        
+    if not api_key:
+        raise ValueError(f"API key not found for {provider}. Set {provider.upper()}_API_KEY environment variable.")
+
     provider_lower = provider.lower()
     
     if provider_lower == "openai":

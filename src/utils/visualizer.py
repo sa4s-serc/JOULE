@@ -54,6 +54,41 @@ class ResultVisualizer:
             logger.info(f"✓ All visualizations saved to {self.output_dir}")
         except Exception as e:
             logger.error(f"Failed to generate visualizations: {e}")
+
+    def create_visualizations(self, solutions: List[Any], summary: Dict[str, Any]):
+        """
+        Create visualizations from engine results.
+        
+        Args:
+            solutions: List of Solution objects
+            summary: Optimization summary dictionary
+        """
+        # Save pareto_results.json
+        pareto_data = []
+        for sol in solutions:
+            pareto_data.append({
+                'metrics': sol.metrics,
+                'mutation': sol.mutation_type,
+                'generation': sol.generation
+            })
+            
+        with open(self.results_dir / "pareto_results.json", 'w') as f:
+            json.dump(pareto_data, f, indent=2)
+            
+        # Save statistics.json
+        stats_data = {
+            'total_mutations': summary.get('learning_stats', {}).get('total_outcomes', 0),
+            'successful_mutations': len(solutions),
+            'success_rate': f"{summary.get('learning_stats', {}).get('total_outcomes', 0) / max(1, summary.get('generations_completed', 1) * 5) * 100:.1f}%",
+            'improvement_rate': f"{len(solutions) / max(1, summary.get('learning_stats', {}).get('total_outcomes', 1)) * 100:.1f}%",
+            'cache_hits': summary.get('cache_efficiency', 0)
+        }
+        
+        with open(self.results_dir / "statistics.json", 'w') as f:
+            json.dump(stats_data, f, indent=2)
+            
+        # Generate all visualizations
+        self.generate_all()
     
     def generate_pareto_front(self):
         """Generate Pareto front scatter plot."""

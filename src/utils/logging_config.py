@@ -39,7 +39,8 @@ def silence_noisy_libraries(level: int = logging.DEBUG):
 def setup_logging(
     level: str = "INFO",
     log_file: Optional[Path] = None,
-    verbose: bool = False
+    verbose: bool = False,
+    log_to_console: bool = True
 ) -> logging.Logger:
     """
     Set up logging configuration for HEDGE.
@@ -48,6 +49,7 @@ def setup_logging(
         level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: Optional file path to write logs to
         verbose: If True, use more detailed format
+        log_to_console: If True, log to stdout
         
     Returns:
         Configured root logger
@@ -75,10 +77,11 @@ def setup_logging(
     root_logger.handlers.clear()
     
     # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(numeric_level)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+    if log_to_console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(numeric_level)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
     
     # File handler if specified
     if log_file:
