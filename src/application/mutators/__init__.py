@@ -49,6 +49,7 @@ from .semantic_layer import AlgorithmicIntentMutator, ProgramIntentMutator
 from .algorithmic_layer import DataStructureOptimizer, ComplexityReducer
 from .syntactic_layer import PythonicIdiomOptimizer, CodePatternOptimizer
 from .micro_layer import ConstantOptimizer, DeadCodeEliminator, LoopMicroOptimizer
+from .advanced_performance import AdvancedAlgorithmicOptimizer, MemoryOptimizer, VectorizationOptimizer
 
 # Utility functions
 def initialize_mutator_system():
@@ -106,6 +107,9 @@ __all__ = [
     'ConstantOptimizer',
     'DeadCodeEliminator',
     'LoopMicroOptimizer',
+    'AdvancedAlgorithmicOptimizer',
+    'MemoryOptimizer',
+    'VectorizationOptimizer',
     
     # Utility functions
     'initialize_mutator_system',

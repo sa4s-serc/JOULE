@@ -352,7 +352,7 @@ def auto_discover_mutators():
     """Automatically discover and register all mutators."""
     # Import all mutator modules to trigger registration
     from src.application.mutators import (
-        semantic_layer, algorithmic_layer, syntactic_layer, micro_layer
+        semantic_layer, algorithmic_layer, syntactic_layer, micro_layer, advanced_performance
     )
     
     # Register semantic layer mutators
@@ -371,5 +371,10 @@ def auto_discover_mutators():
     register_mutator("ConstantOptimizer", micro_layer.ConstantOptimizer)
     register_mutator("DeadCodeEliminator", micro_layer.DeadCodeEliminator)
     register_mutator("LoopMicroOptimizer", micro_layer.LoopMicroOptimizer)
+    
+    # Register advanced performance mutators
+    register_mutator("AdvancedAlgorithmicOptimizer", advanced_performance.AdvancedAlgorithmicOptimizer)
+    register_mutator("MemoryOptimizer", advanced_performance.MemoryOptimizer)
+    register_mutator("VectorizationOptimizer", advanced_performance.VectorizationOptimizer)
     
     logger.info("Auto-discovery completed: registered 9 mutators")

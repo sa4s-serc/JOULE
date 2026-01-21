@@ -396,6 +396,21 @@ class ComprehensionOptimizer(NodeTransformer):
             return None
         
         body_stmt = stmt.body.statements[0]
+        ifs = []
+        
+        # Handle conditional appends: if cond: result.append(expr)
+        if isinstance(body_stmt, schema.If):
+            # Condition must not have else block
+            if body_stmt.orelse and len(body_stmt.orelse.statements) > 0:
+                return None
+            
+            # Condition body must have exactly one statement
+            if len(body_stmt.body.statements) != 1:
+                return None
+            
+            ifs.append(body_stmt.test)
+            body_stmt = body_stmt.body.statements[0]
+            
         if not isinstance(body_stmt, schema.ExprStmt):
             return None
         
@@ -409,9 +424,6 @@ class ComprehensionOptimizer(NodeTransformer):
             call.func.value.id == list_name and
             call.func.attr == 'append' and
             len(call.args) == 1):
-            
-            # Also handle conditional appends: if cond: result.append(expr)
-            ifs = []
             
             return schema.ListComp(
                 elt=call.args[0],
@@ -578,7 +590,16 @@ class BuiltinUtilizer(NodeTransformer):
     
     def _try_convert_to_minmax(self, stmt: schema.Statement, 
                                 var_name: str, is_min: bool) -> Optional[schema.Call]:
-        """Try to convert a for-loop with comparison to min/max call."""
+        """Try to convert a for-loop with comparison to min/max call.
+        
+        Detects patterns like:
+            result = float('inf')  # or float('-inf') for max
+            for x in iterable:
+                if x < result:  # or x > result for max
+                    result = x
+        
+        And converts to: result = min(iterable) or max(iterable)
+        """
         if not isinstance(stmt, schema.For):
             return None
         
@@ -591,13 +612,82 @@ class BuiltinUtilizer(NodeTransformer):
         if not isinstance(body_stmt, schema.If):
             return None
         
-        # Check the condition
+        # Check the condition is a comparison
         if not isinstance(body_stmt.test, schema.Compare):
             return None
         
-        # For now, just return None as this is complex
-        # Full implementation would verify the comparison pattern
-        return None
+        compare = body_stmt.test
+        
+        # Must have exactly one comparison operator
+        if len(compare.ops) != 1 or len(compare.comparators) != 1:
+            return None
+        
+        op = compare.ops[0]
+        
+        # For min: looking for x < var_name or var_name > x
+        # For max: looking for x > var_name or var_name < x
+        left = compare.left
+        right = compare.comparators[0]
+        
+        # Get the loop variable name
+        if not isinstance(stmt.target, schema.Name):
+            return None
+        loop_var = stmt.target.id
+        
+        # Determine if pattern matches
+        is_valid_pattern = False
+        
+        if is_min:
+            # For min: loop_var < var_name
+            if (op == '<' and 
+                isinstance(left, schema.Name) and left.id == loop_var and
+                isinstance(right, schema.Name) and right.id == var_name):
+                is_valid_pattern = True
+            # Also handle: var_name > loop_var
+            elif (op == '>' and
+                  isinstance(left, schema.Name) and left.id == var_name and
+                  isinstance(right, schema.Name) and right.id == loop_var):
+                is_valid_pattern = True
+        else:
+            # For max: loop_var > var_name
+            if (op == '>' and 
+                isinstance(left, schema.Name) and left.id == loop_var and
+                isinstance(right, schema.Name) and right.id == var_name):
+                is_valid_pattern = True
+            # Also handle: var_name < loop_var
+            elif (op == '<' and
+                  isinstance(left, schema.Name) and left.id == var_name and
+                  isinstance(right, schema.Name) and right.id == loop_var):
+                is_valid_pattern = True
+        
+        if not is_valid_pattern:
+            return None
+        
+        # Check the if body: var_name = loop_var
+        if len(body_stmt.body.statements) != 1:
+            return None
+        
+        assign_stmt = body_stmt.body.statements[0]
+        if not isinstance(assign_stmt, schema.Assign):
+            return None
+        
+        if len(assign_stmt.targets) != 1:
+            return None
+        
+        target = assign_stmt.targets[0]
+        if not isinstance(target, schema.Name) or target.id != var_name:
+            return None
+        
+        if not isinstance(assign_stmt.value, schema.Name) or assign_stmt.value.id != loop_var:
+            return None
+        
+        # Pattern matches! Create min/max call
+        func_name = 'min' if is_min else 'max'
+        return schema.Call(
+            func=schema.Name(id=func_name),
+            args=[stmt.iter],
+            keywords=[]
+        )
     
     def visit_For(self, node: schema.For) -> schema.Statement:
         """Handle other for-loop patterns."""
@@ -713,15 +803,141 @@ class IndexedAccessReplacer(NodeTransformer):
 
 
 class ContextManagerOptimizer(NodeTransformer):
-    """Optimizes resource management using context managers."""
+    """Optimizes resource management using context managers.
+    
+    Converts patterns like:
+        f = open(...)
+        try:
+            ... use f ...
+        finally:
+            f.close()
+    
+    To:
+        with open(...) as f:
+            ... use f ...
+    """
     
     def __init__(self):
         self.changed = False
     
+    def visit_Block(self, node: schema.Block) -> schema.Block:
+        """Process blocks to find resource init + try/finally patterns."""
+        new_statements = []
+        skip_next = False
+        
+        i = 0
+        while i < len(node.statements):
+            if skip_next:
+                skip_next = False
+                i += 1
+                continue
+            
+            stmt = node.statements[i]
+            
+            # Check for pattern: resource = open(...) followed by try/finally with close()
+            if isinstance(stmt, schema.Assign) and i + 1 < len(node.statements):
+                resource_info = self._get_resource_assignment(stmt)
+                if resource_info:
+                    var_name, open_call = resource_info
+                    next_stmt = node.statements[i + 1]
+                    
+                    # Check if next statement is try/finally with close()
+                    if isinstance(next_stmt, schema.Try):
+                        with_stmt = self._try_convert_to_with(next_stmt, var_name, open_call)
+                        if with_stmt:
+                            new_statements.append(with_stmt)
+                            skip_next = True
+                            self.changed = True
+                            i += 1
+                            continue
+            
+            # Recursively visit the statement
+            new_statements.append(self.visit(stmt))
+            i += 1
+        
+        node.statements = new_statements
+        return node
+    
     def visit_Try(self, node: schema.Try) -> schema.Statement:
+        """Also handle try/finally patterns where assignment is inside try."""
         node = self.generic_visit(node)
         
-        # Look for resource management patterns that could use context managers
-        # This would require more sophisticated analysis
+        # Check for: try: f = open(...); ... finally: f.close()
+        if node.finalbody and len(node.finalbody.statements) >= 1:
+            final_stmt = node.finalbody.statements[0]
+            
+            # Look for .close() call
+            close_info = self._get_close_call(final_stmt)
+            if close_info:
+                resource_name = close_info
+                
+                # Look for open() assignment in try body
+                for idx, body_stmt in enumerate(node.body.statements):
+                    if isinstance(body_stmt, schema.Assign):
+                        resource_info = self._get_resource_assignment(body_stmt)
+                        if resource_info and resource_info[0] == resource_name:
+                            _, open_call = resource_info
+                            
+                            # Create with statement
+                            remaining_body = schema.Block(
+                                statements=node.body.statements[idx + 1:]
+                            )
+                            
+                            self.changed = True
+                            return schema.With(
+                                items=[schema.WithItem(
+                                    context_expr=open_call,
+                                    optional_vars=schema.Name(id=resource_name, ctx="Store")
+                                )],
+                                body=remaining_body
+                            )
         
         return node
+    
+    def _get_resource_assignment(self, stmt: schema.Assign) -> Optional[tuple]:
+        """Check if statement is resource = open(...) or similar."""
+        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], schema.Name):
+            return None
+        
+        var_name = stmt.targets[0].id
+        
+        # Check for open() call
+        if isinstance(stmt.value, schema.Call):
+            if isinstance(stmt.value.func, schema.Name):
+                if stmt.value.func.id in ('open', 'file'):
+                    return (var_name, stmt.value)
+            elif isinstance(stmt.value.func, schema.Attribute):
+                # Handle Path(...).open() etc.
+                if stmt.value.func.attr == 'open':
+                    return (var_name, stmt.value)
+        
+        return None
+    
+    def _get_close_call(self, stmt: schema.Statement) -> Optional[str]:
+        """Check for .close() call and return the resource name."""
+        if isinstance(stmt, schema.ExprStmt) and isinstance(stmt.value, schema.Call):
+            call = stmt.value
+            if (isinstance(call.func, schema.Attribute) and
+                call.func.attr == 'close' and
+                isinstance(call.func.value, schema.Name)):
+                return call.func.value.id
+        return None
+    
+    def _try_convert_to_with(self, try_stmt: schema.Try, 
+                              var_name: str, open_call: schema.Call) -> Optional[schema.With]:
+        """Try to convert a try/finally with close() to with statement."""
+        if not try_stmt.finalbody:
+            return None
+        
+        # Look for resource_name.close() in finally block
+        for final_stmt in try_stmt.finalbody.statements:
+            close_resource = self._get_close_call(final_stmt)
+            if close_resource == var_name:
+                # Found matching close() - create with statement
+                return schema.With(
+                    items=[schema.WithItem(
+                        context_expr=open_call,
+                        optional_vars=schema.Name(id=var_name, ctx="Store")
+                    )],
+                    body=try_stmt.body
+                )

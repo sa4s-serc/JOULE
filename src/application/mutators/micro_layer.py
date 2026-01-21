@@ -643,27 +643,92 @@ class UnreachableCodeEliminator(NodeTransformer):
 
 
 class UnusedVariableEliminator(NodeTransformer):
-    """Eliminates assignments to unused variables."""
+    """Eliminates assignments to unused variables.
+    
+    Uses a two-pass approach:
+    1. First pass: collect all used variables in the IR
+    2. Second pass: remove assignments to variables that are never used
+    
+    Preserves assignments with side effects (function calls, etc.)
+    """
     
     def __init__(self):
         self.changed = False
-        self.defined_vars = set()
-        self.used_vars = set()
+        self.used_vars: Set[str] = set()
+        self._collecting_phase = True  # True during first pass
+    
+    def visit(self, node: schema.IRNode) -> Any:
+        """Override visit to implement two-pass algorithm."""
+        if not hasattr(self, '_initialized'):
+            self._initialized = True
+            # First pass: collect all used variables
+            self._collecting_phase = True
+            super().visit(node)
+            # Second pass: eliminate unused assignments
+            self._collecting_phase = False
+        return super().visit(node)
     
     def visit_Assign(self, node: schema.Assign) -> Optional[schema.Statement]:
+        """Handle assignments - remove if target is unused and RHS has no side effects."""
         node = self.generic_visit(node)
         
-        # Track variable definitions
-        for target in node.targets:
-            if isinstance(target, schema.Name):
-                self.defined_vars.add(target.id)
+        if self._collecting_phase:
+            return node
         
-        return node
+        # Only consider simple single-target assignments
+        if len(node.targets) != 1 or not isinstance(node.targets[0], schema.Name):
+            return node
+        
+        target_name = node.targets[0].id
+        
+        # Don't eliminate if variable is used
+        if target_name in self.used_vars:
+            return node
+        
+        # Don't eliminate if RHS might have side effects
+        if self._has_side_effects(node.value):
+            return node
+        
+        # Safe to eliminate this unused assignment
+        self.changed = True
+        return None
     
     def visit_Name(self, node: schema.Name) -> schema.Expression:
+        """Track all variable uses (loads)."""
         if node.ctx == "Load":
             self.used_vars.add(node.id)
         return node
+    
+    def _has_side_effects(self, expr: schema.Expression) -> bool:
+        """Check if an expression might have side effects.
+        
+        Conservatively returns True for:
+        - Function calls (may have side effects)
+        - Attribute accesses (may be property with side effects)
+        - Subscript stores (modifying data structures)
+        """
+        if isinstance(expr, schema.Call):
+            return True
+        elif isinstance(expr, schema.Attribute):
+            # Method calls have side effects
+            return True
+        elif isinstance(expr, (schema.Constant, schema.Name)):
+            return False
+        elif isinstance(expr, schema.BinaryOp):
+            return self._has_side_effects(expr.left) or self._has_side_effects(expr.right)
+        elif isinstance(expr, schema.UnaryOp):
+            return self._has_side_effects(expr.operand)
+        elif isinstance(expr, (schema.ListExpr, schema.TupleExpr, schema.SetExpr)):
+            return any(self._has_side_effects(elt) for elt in expr.elts)
+        elif isinstance(expr, schema.DictExpr):
+            for k, v in zip(expr.keys, expr.values):
+                if k and self._has_side_effects(k):
+                    return True
+                if self._has_side_effects(v):
+                    return True
+            return False
+        # Be conservative for unknown expression types
+        return True
 
 
 class PureExpressionEliminator(NodeTransformer):
@@ -740,7 +805,18 @@ class SmallLoopUnroller(NodeTransformer):
 
 
 class LoopStrengthReducer(NodeTransformer):
-    """Applies strength reduction to loop operations."""
+    """Applies strength reduction to loop operations.
+    
+    Transforms expensive operations into cheaper equivalent operations:
+    - x ** 2 → x * x (avoid exponentiation function call)
+    - x ** 3 → x * x * x
+    - x * 2 → x << 1 (bit shift instead of multiplication) - ONLY if known int
+    
+    Note: Bit shift optimizations are only applied if we can guarantee operands
+    are integers. Since we lack full type inference, we only apply bit shifts
+    when both operands are integer constants (constant folding essentially) 
+    or logic explicitly permits. For now, we are conservative.
+    """
     
     def __init__(self):
         self.changed = False
@@ -748,61 +824,227 @@ class LoopStrengthReducer(NodeTransformer):
     def visit_BinaryOp(self, node: schema.BinaryOp) -> schema.Expression:
         node = self.generic_visit(node)
         
-        # Look for multiplication by loop variables that can be converted to addition
-        # This is a simplified implementation
-        if node.op == '*':
-            # Could implement induction variable analysis here
-            pass
+        # Power to multiplication: x ** 2 → x * x
+        # This is generally safe for floats too
+        if node.op == '**' and isinstance(node.right, schema.Constant):
+            if int(node.right.value) == node.right.value: # Check if integer value
+                if node.right.value == 2:
+                    self.changed = True
+                    return schema.BinaryOp(
+                        left=copy.deepcopy(node.left),
+                        op='*',
+                        right=copy.deepcopy(node.left)
+                    )
+                elif node.right.value == 3:
+                    # x ** 3 → x * x * x
+                    self.changed = True
+                    x_squared = schema.BinaryOp(
+                        left=copy.deepcopy(node.left),
+                        op='*',
+                        right=copy.deepcopy(node.left)
+                    )
+                    return schema.BinaryOp(
+                        left=x_squared,
+                        op='*',
+                        right=copy.deepcopy(node.left)
+                    )
+        
+        # Multiplication by power of 2 to bit shift: x * 2 → x << 1
+        # unsafe for floats, so only apply if we know it's an int
+        if node.op == '*' and isinstance(node.right, schema.Constant):
+            # Strict type check for int (no floats like 2.0)
+            if type(node.right.value) is int:
+                shift_map = {2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6}
+                if node.right.value in shift_map:
+                    # Check if left is also known int (Constant int)
+                    # If left is variable, we skip to avoid TypeError on floats
+                    if isinstance(node.left, schema.Constant) and type(node.left.value) is int:
+                        self.changed = True
+                        return schema.BinaryOp(
+                            left=node.left,
+                            op='<<',
+                            right=schema.Constant(value=shift_map[node.right.value], kind='int')
+                        )
+        
+        # Also handle left operand being constant: 2 * x → x << 1
+        if node.op == '*' and isinstance(node.left, schema.Constant):
+            # Strict type check for int
+            if type(node.left.value) is int:
+                shift_map = {2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6}
+                if node.left.value in shift_map:
+                     # Check if right is also known int
+                    if isinstance(node.right, schema.Constant) and type(node.right.value) is int:
+                        self.changed = True
+                        return schema.BinaryOp(
+                            left=node.right,
+                            op='<<',
+                            right=schema.Constant(value=shift_map[node.left.value], kind='int')
+                        )
         
         return node
 
 
 class LoopInvariantMover(NodeTransformer):
-    """Moves loop-invariant code outside loops."""
+    """Moves loop-invariant code outside loops.
+    
+    A statement is loop-invariant if:
+    1. It doesn't use any loop variables (including the loop target)
+    2. It doesn't use any variables modified within the loop
+    3. It doesn't have side effects (function calls, etc.)
+    4. Its target variable is not used before this statement in the loop
+    
+    This transformer returns a list when hoisting is performed, which NodeTransformer
+    handles by flattening into the parent block.
+    """
     
     def __init__(self):
         self.changed = False
-        self.loop_vars = set()
+        self.loop_vars: Set[str] = set()
     
-    def visit_For(self, node: schema.For) -> schema.Statement:
+    def visit_For(self, node: schema.For) -> Any:
+        """Process for loops to find invariant statements."""
         if isinstance(node.target, schema.Name):
             old_loop_vars = self.loop_vars.copy()
             self.loop_vars.add(node.target.id)
             
+            # First pass: collect all variables modified in the loop
+            modified_in_loop = self._collect_modified_vars(node.body)
+            self.loop_vars.update(modified_in_loop)
+            
             # Find invariant statements
             invariant_stmts = []
             remaining_stmts = []
+            hoisted_vars: Set[str] = set()
             
             for stmt in node.body.statements:
-                if self._is_loop_invariant(stmt):
+                can_hoist, stmt_target = self._can_hoist_statement(stmt, hoisted_vars)
+                if can_hoist:
                     invariant_stmts.append(stmt)
+                    if stmt_target:
+                        hoisted_vars.add(stmt_target)
                     self.changed = True
                 else:
-                    remaining_stmts.append(stmt)
+                    remaining_stmts.append(self.visit(stmt))
             
             node.body.statements = remaining_stmts
             self.loop_vars = old_loop_vars
             
+            # Return hoisted statements before the loop
             if invariant_stmts:
                 return invariant_stmts + [node]
         
         return self.generic_visit(node)
     
-    def _is_loop_invariant(self, stmt: schema.Statement) -> bool:
-        """Check if a statement is loop-invariant (simplified)."""
+    def _collect_modified_vars(self, block: schema.Block) -> Set[str]:
+        """Collect all variables that are assigned within a block."""
+        modified = set()
+        for stmt in block.statements:
+            if isinstance(stmt, schema.Assign):
+                for target in stmt.targets:
+                    if isinstance(target, schema.Name):
+                        modified.add(target.id)
+            elif isinstance(stmt, schema.AugAssign):
+                if isinstance(stmt.target, schema.Name):
+                    modified.add(stmt.target.id)
+            elif isinstance(stmt, (schema.For, schema.While)):
+                # Recursively check nested loops
+                modified.update(self._collect_modified_vars(stmt.body))
+            elif isinstance(stmt, schema.If):
+                modified.update(self._collect_modified_vars(stmt.body))
+                if stmt.orelse:
+                    modified.update(self._collect_modified_vars(stmt.orelse))
+        return modified
+    
+    def _can_hoist_statement(self, stmt: schema.Statement, hoisted_vars: Set[str]) -> tuple:
+        """Check if a statement can be hoisted out of the loop.
+        
+        Returns (can_hoist: bool, target_var: Optional[str])
+        """
         if isinstance(stmt, schema.Assign):
+            # Only consider simple single-target assignments
+            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], schema.Name):
+                return False, None
+            
+            target_name = stmt.targets[0].id
+            
+            # Don't hoist if target is a loop variable or modified elsewhere
+            if target_name in self.loop_vars:
+                return False, None
+            
+            # Don't hoist if RHS has side effects
+            if self._has_side_effects(stmt.value):
+                return False, None
+            
+            # Don't hoist if RHS uses loop variables or hoisted variables
             used_vars = self._get_used_vars(stmt.value)
-            return not (used_vars & self.loop_vars)
-        return False
+            if used_vars & self.loop_vars:
+                return False, None
+            if used_vars & hoisted_vars:
+                # Depends on another hoisted var - this is fine, as long as 
+                # it comes after the dependency
+                pass  # Allow this case
+            
+            return True, target_name
+        
+        return False, None
+    
+    def _has_side_effects(self, expr: schema.Expression) -> bool:
+        """Check if an expression might have side effects."""
+        if isinstance(expr, schema.Call):
+            return True
+        elif isinstance(expr, schema.Attribute):
+            # Could be a property with side effects
+            return self._has_side_effects(expr.value)
+        elif isinstance(expr, (schema.Constant, schema.Name)):
+            return False
+        elif isinstance(expr, schema.BinaryOp):
+            return self._has_side_effects(expr.left) or self._has_side_effects(expr.right)
+        elif isinstance(expr, schema.UnaryOp):
+            return self._has_side_effects(expr.operand)
+        elif isinstance(expr, (schema.ListExpr, schema.TupleExpr, schema.SetExpr)):
+            return any(self._has_side_effects(elt) for elt in expr.elts)
+        elif isinstance(expr, schema.Subscript):
+            return self._has_side_effects(expr.value) or self._has_side_effects(expr.slice)
+        return True  # Conservative for unknown types
     
     def _get_used_vars(self, expr: schema.Expression) -> Set[str]:
         """Get all variables used in an expression."""
-        used = set()
+        used: Set[str] = set()
         if isinstance(expr, schema.Name):
-            used.add(expr.id)
+            if expr.ctx == "Load":
+                used.add(expr.id)
         elif isinstance(expr, schema.BinaryOp):
             used.update(self._get_used_vars(expr.left))
             used.update(self._get_used_vars(expr.right))
+        elif isinstance(expr, schema.UnaryOp):
+            used.update(self._get_used_vars(expr.operand))
+        elif isinstance(expr, schema.Compare):
+            used.update(self._get_used_vars(expr.left))
+            for comp in expr.comparators:
+                used.update(self._get_used_vars(comp))
+        elif isinstance(expr, schema.Call):
+            if isinstance(expr.func, schema.Name):
+                pass  # Function names are not variables in our sense
+            used.update(self._get_used_vars(expr.func))
+            for arg in expr.args:
+                used.update(self._get_used_vars(arg))
+        elif isinstance(expr, schema.Attribute):
+            used.update(self._get_used_vars(expr.value))
+        elif isinstance(expr, schema.Subscript):
+            used.update(self._get_used_vars(expr.value))
+            used.update(self._get_used_vars(expr.slice))
+        elif isinstance(expr, (schema.ListExpr, schema.TupleExpr, schema.SetExpr)):
+            for elt in expr.elts:
+                used.update(self._get_used_vars(elt))
+        elif isinstance(expr, schema.DictExpr):
+            for k, v in zip(expr.keys, expr.values):
+                if k:
+                    used.update(self._get_used_vars(k))
+                used.update(self._get_used_vars(v))
+        elif isinstance(expr, schema.IfExp):
+            used.update(self._get_used_vars(expr.test))
+            used.update(self._get_used_vars(expr.body))
+            used.update(self._get_used_vars(expr.orelse))
         return used
 
 
