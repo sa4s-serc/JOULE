@@ -61,7 +61,7 @@ class IROnlyMutator(LayeredMutator):
         validated_results = []
         for result in results:
             if self._validate_ir_mutation(result):
-                validated_results.append((result.ir, result.description))
+                validated_results.append((result.ir, result.strategy_name))
             else:
                 logger.warning(f"Invalid IR mutation rejected: {result.strategy_name}")
         
