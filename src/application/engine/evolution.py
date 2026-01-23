@@ -22,8 +22,9 @@ import hashlib
 import math
 import random
 import time
-from typing import List, Dict, Tuple, Optional, Set, Callable, Any
+from typing import List, Dict, Tuple, Optional, Set, Callable, Any, Union
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from src.domain.interfaces import Mutator, CodeRunner
@@ -41,6 +42,25 @@ from src.application.mutators.parallel_orchestrator import ParallelMutationOrche
 from src.application.mutators.intelligent_selector import get_intelligent_selector
 
 logger = logging.getLogger(__name__)
+
+
+class EventType(str, Enum):
+    """Event types for optimization hooks."""
+    OPTIMIZATION_START = "optimization_start"
+    OPTIMIZATION_COMPLETE = "optimization_complete"
+    GENERATION_START = "generation_start"
+    GENERATION_COMPLETE = "generation_complete"
+    MUTATION_ATTEMPT = "mutation_attempt"
+    MUTATION_RESULT = "mutation_result"
+    NEW_BEST_SOLUTION = "new_best_solution"
+
+@dataclass
+class OptimizationEvent:
+    """Event data structure."""
+    type: EventType
+    data: Dict[str, Any]
+    timestamp: float = field(default_factory=time.time)
+
 
 
 @dataclass
@@ -212,13 +232,15 @@ class EvolutionaryEngine:
         runner: CodeRunner,
         config: Optional[EngineConfig] = None,
         llm_client=None,
-        experiment_dir: Optional[Path] = None
+        experiment_dir: Optional[Path] = None,
+        event_callback: Optional[Callable[[OptimizationEvent], None]] = None
     ):
         self.mutators = mutators
         self.runner = runner
         self.config = config or EngineConfig()
         self.experiment_dir = experiment_dir
         self.llm_client = llm_client
+        self.event_callback = event_callback
         
         # Core components
         self.parser = PythonParser()
@@ -277,7 +299,17 @@ class EvolutionaryEngine:
         logger.info(f"  Parallel mutations: {self.config.enable_parallel_mutations}")
         logger.info(f"  Intelligent selection: {self.config.enable_intelligent_selection}")
         logger.info(f"  Batch LLM: {self.config.enable_batch_llm}")
-        logger.info(f"  Memory optimization: {self.config.enable_memory_optimization}")
+        if self.config.enable_memory_optimization:
+            logger.info(f"  Memory optimization: {self.config.enable_memory_optimization}")
+            
+    def _emit_event(self, event_type: EventType, data: Dict[str, Any]):
+        """Emit an optimization event."""
+        if self.event_callback:
+            try:
+                event = OptimizationEvent(type=event_type, data=data)
+                self.event_callback(event)
+            except Exception as e:
+                logger.warning(f"Event callback failed: {e}")
     
     def _setup_experiment_dir(self):
         """Initialize experiment directory structure."""
@@ -345,6 +377,11 @@ class EvolutionaryEngine:
                     
                     # Apply selected mutations
                     for mutator, strategy, confidence in selected_mutators:
+                        self._emit_event(EventType.MUTATION_ATTEMPT, {
+                            "mutator": mutator.__class__.__name__,
+                            "strategy": strategy,
+                            "parent": parent.variant_id
+                        })
                         variants = mutator.mutate(parent.ir)
                         for variant_ir, variant_strategy in variants:
                             if variant_strategy == strategy:
@@ -365,7 +402,17 @@ class EvolutionaryEngine:
                                     self.intelligent_selector.record_mutation_outcome(
                                         parent.ir, mutator, strategy, True, confidence
                                     )
+                                    self._emit_event(EventType.MUTATION_RESULT, {
+                                        "success": True,
+                                        "strategy": strategy,
+                                        "mutator": mutator.__class__.__name__
+                                    })
                                 else:
+                                    self._emit_event(EventType.MUTATION_RESULT, {
+                                        "success": False,
+                                        "error": "Validation failed",
+                                        "strategy": strategy
+                                    })
                                     # Record failed outcome
                                     if self.intelligent_selector:
                                         self.intelligent_selector.record_mutation_outcome(
@@ -394,6 +441,12 @@ class EvolutionaryEngine:
                 # Fallback to traditional mutation
                 else:
                     for mutator in self.mutators:
+                        # Log attempt
+                        self._emit_event(EventType.MUTATION_ATTEMPT, {
+                            "mutator": mutator.__class__.__name__,
+                            "parent": parent.variant_id
+                        })
+                        
                         variants = mutator.mutate(parent.ir)
                         for variant_ir, strategy_name in variants:
                             val_result = self.validator.validate(variant_ir)
@@ -407,6 +460,17 @@ class EvolutionaryEngine:
                                     generation=self.generation + 1
                                 )
                                 all_variants.append(solution)
+                                self._emit_event(EventType.MUTATION_RESULT, {
+                                    "success": True,
+                                    "strategy": strategy_name,
+                                    "mutator": mutator.__class__.__name__
+                                })
+                            else:
+                                self._emit_event(EventType.MUTATION_RESULT, {
+                                    "success": False,
+                                    "error": "Validation failed",
+                                    "strategy": strategy_name
+                                })
                 
             except Exception as e:
                 logger.error(f"Mutation generation failed for parent {parent.variant_id}: {e}")
@@ -508,6 +572,12 @@ class EvolutionaryEngine:
             logger.error(f"Failed to parse initial code: {e}")
             return []
         
+        self._emit_event(EventType.OPTIMIZATION_START, {
+            "target": "initial_code",
+            "generations": self.config.generations,
+            "population_size": self.config.population_size
+        })
+        
         # Evaluate baseline
         success, baseline_metrics, output = self._evaluate(
             Solution(
@@ -543,7 +613,13 @@ class EvolutionaryEngine:
         # Evolution loop
         for generation in range(self.config.generations):
             self.generation = generation
+            self._emit_event(EventType.GENERATION_START, {
+                "generation": generation,
+                "total_generations": self.config.generations,
+                "population_fitness": [self._compute_fitness(s) for s in self.archive.solutions]
+            })
             generation_start = time.time()
+            logger.info(f"--- Starting Generation {generation} ---")
             
             # Adaptive population size
             current_pop_size = self._adaptive_population_size()
@@ -552,7 +628,9 @@ class EvolutionaryEngine:
             parents = self._select_parents(self.archive.solutions, current_pop_size)
             
             # Generate mutations
+            logger.info(f"Generating mutations for {len(parents)} parents...")
             variants = self._generate_mutations_enhanced(parents, enabled_layers)
+            logger.info(f"Generated {len(variants)} variants.")
             
             # Generate crossovers
             if len(parents) >= 2 and random.random() < self.config.crossover_rate:
@@ -561,7 +639,9 @@ class EvolutionaryEngine:
             
             # Evaluate variants
             improved_count = 0
-            for variant in variants:
+            logger.info("Evaluating variants...")
+            for i, variant in enumerate(variants):
+                logger.debug(f"Evaluating variant {i+1}/{len(variants)}: {variant.mutation_type}")
                 success, metrics, output = self._evaluate(variant, test_code)
                 
                 if success:
@@ -575,6 +655,14 @@ class EvolutionaryEngine:
                         if not self.best_solution or self._compute_fitness(variant) > self._compute_fitness(self.best_solution):
                             self.best_solution = variant
                             self.stagnation_counter = 0
+                            
+                            self._emit_event(EventType.NEW_BEST_SOLUTION, {
+                                "energy": variant.metrics.get('energy_joules'),
+                                "time": variant.metrics.get('duration_seconds'),
+                                "generation": generation,
+                                "mutation": variant.mutation_type,
+                                "code": self.codegen.generate(variant.ir)
+                            })
                         
                         # Save IR snapshot
                         if self.config.save_ir_snapshots:
@@ -599,10 +687,24 @@ class EvolutionaryEngine:
             if self.stagnation_counter >= self.config.early_stopping_patience:
                 logger.info(f"Early stopping after {self.stagnation_counter} generations without improvement")
                 break
+            
+            self._emit_event(EventType.GENERATION_COMPLETE, {
+                "generation": generation,
+                "improved_count": improved_count,
+                "duration": generation_time,
+                "best_metrics": self.best_solution.metrics if self.best_solution else {}
+            })
         
         total_time = time.time() - start_time
         logger.info(f"Optimization completed in {total_time:.2f}s")
         logger.info(f"Final archive size: {len(self.archive.solutions)}")
+        
+        self._emit_event(EventType.OPTIMIZATION_COMPLETE, {
+            "total_solutions": len(self.archive.solutions),
+            "best_metrics": self.best_solution.metrics if self.best_solution else {},
+            "best_code": self.codegen.generate(self.best_solution.ir) if self.best_solution else "",
+            "duration": total_time
+        })
         
         # Save performance history
         if self.experiment_dir:

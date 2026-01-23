@@ -327,8 +327,8 @@ class DynamicProgrammingTransformer(IRTransformerBase):
             schema.If(
                 test=schema.Compare(
                     left=schema.Name(id="n"),
-                    ops=[schema.LtE()],
-                    comparators=[schema.Constant(value=1)]
+                    ops=["<="],
+                    comparators=[schema.Constant(value=1, kind="int")]
                 ),
                 body=schema.Block(statements=[
                     schema.Return(value=schema.Name(id="n"))
@@ -337,13 +337,13 @@ class DynamicProgrammingTransformer(IRTransformerBase):
             ),
             # a, b = 0, 1
             schema.Assign(
-                targets=[schema.Tuple(elts=[
+                targets=[schema.TupleExpr(elts=[
                     schema.Name(id="a"),
                     schema.Name(id="b")
                 ])],
-                value=schema.Tuple(elts=[
-                    schema.Constant(value=0),
-                    schema.Constant(value=1)
+                value=schema.TupleExpr(elts=[
+                    schema.Constant(value=0, kind="int"),
+                    schema.Constant(value=1, kind="int")
                 ])
             ),
             # for _ in range(2, n + 1):
@@ -352,26 +352,26 @@ class DynamicProgrammingTransformer(IRTransformerBase):
                 iter=schema.Call(
                     func=schema.Name(id="range"),
                     args=[
-                        schema.Constant(value=2),
+                        schema.Constant(value=2, kind="int"),
                         schema.BinaryOp(
                             left=schema.Name(id="n"),
-                            op=schema.Add(),
-                            right=schema.Constant(value=1)
+                            op="+",
+                            right=schema.Constant(value=1, kind="int")
                         )
                     ]
                 ),
                 body=schema.Block(statements=[
                     # a, b = b, a + b
                     schema.Assign(
-                        targets=[schema.Tuple(elts=[
+                        targets=[schema.TupleExpr(elts=[
                             schema.Name(id="a"),
                             schema.Name(id="b")
                         ])],
-                        value=schema.Tuple(elts=[
+                        value=schema.TupleExpr(elts=[
                             schema.Name(id="b"),
                             schema.BinaryOp(
                                 left=schema.Name(id="a"),
-                                op=schema.Add(),
+                                op="+",
                                 right=schema.Name(id="b")
                             )
                         ])

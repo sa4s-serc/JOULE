@@ -30,6 +30,7 @@ from cli.commands.visualize import visualize_cmd
 from cli.commands.benchmark import benchmark_cmd
 from cli.commands.config import config_cmd
 from cli.commands.project import project_cmd
+from cli.commands.serve import serve_cmd
 from cli.utils.interactive_help import help_cmd
 from cli.utils.banner import (
     print_banner, print_welcome, print_feature_highlights, 
@@ -98,6 +99,7 @@ cli.add_command(visualize_cmd, name='visualize')
 cli.add_command(benchmark_cmd, name='benchmark')
 cli.add_command(config_cmd, name='config')
 cli.add_command(project_cmd, name='project')
+cli.add_command(serve_cmd, name='serve')
 cli.add_command(help_cmd, name='help')
 
 if __name__ == '__main__':
