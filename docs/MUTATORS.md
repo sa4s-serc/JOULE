@@ -1,58 +1,77 @@
-# HEDGE Mutators
+# HEDGE Optimization Layers
 
-Mutators are the core transformation engines in HEDGE. They accept a `Module` (IR root) and return a list of potentially optimized variants.
+HEDGE utilizes a hierarchical mutation system to optimize Python code across multiple levels of abstraction. Each layer is responsible for a specific class of optimizations, ranging from high-level algorithmic shifts to low-level compiler-style micro-refinements.
 
-## 1. Structural Mutators (`src/application/mutators/structural.py`)
+## 1. Semantic Layer
+The Semantic Layer operates at the highest level of abstraction, focusing on the program's intent and high-level algorithmic logic. It leverages Large Language Models (LLMs) to perform complex refactorings that require a deep understanding of the code.
 
-These mutators operate directly on the IR tree. They are fast, deterministic, and focus on syntactic-level transformations that don't change the algorithm but might improve local performance or readability.
+### Mutators
+- **AlgorithmicIntentMutator**: Identifies opportunities to change the underlying algorithm or Big-O complexity (e.g., recursive to iterative, exponential to linear).
+- **ProgramIntentMutator**: Simplifies high-level control flow and program structure based on the inferred meaning of the code.
 
-### Strategies
--   **Reorder Statements**: Identifies independent adjacent statements and swaps them.
-    -   *Logic*: Safe if neither statement uses variables defined by the other (checked via `MutationContext` dependency analysis).
--   **Swap Operands**: Swaps operands for commutative binary operations (e.g., `a + b` → `b + a`).
-    -   *Logic*: Applied to `+`, `*`, `==`, `!=`, `and`, `or`.
--   **Augmented Assignment**: Converts `x = x + y` to `x += y`.
-    -   *Logic*: Checks binary operations where the target appears in the expression.
--   **Range Optimization**: conversion of `range(0, n)` to `range(n)`.
+### Mechanism
+These mutators convert the IR to source code, prompt an LLM with specific optimization goals, and then parse the results back into the HEDGE IR. A self-repair mechanism handles any syntax errors in the AI-generated output.
 
-### Context Awareness
-If enabled (default), `StructuralMutator` builds a lightweight symbol table and dependency graph (`MutationContext`) to ensure transformations like statement reordering do not violate data dependencies.
+---
 
-## 2. Semantic Mutators (`src/application/mutators/semantic.py`)
+## 2. Algorithmic Layer
+The Algorithmic Layer focuses on data structure efficiency and internal complexity reduction. These are logic-based transformations that do not require an LLM but operate on broader code patterns.
 
-These mutators leverage Large Language Models (LLMs) to perform high-level refactoring and algorithmic changes.
+### Mutators
+- **DataStructureOptimizer**: 
+    - **Membership Optimization**: Converts list membership tests to set membership for O(1) access.
+    - **Insertion/Deletion Optimization**: Replaces list operations with `collections.deque` where appropriate to optimize O(n) head operations.
+    - **Search Optimization**: Heuristically replaces linear searches with `bisect` for sorted data.
+- **ComplexityReducer**:
+    - **Nested Loop Reduction**: Converts nested loops to `itertools.product` to improve iteration performance.
+    - **Mathematical Optimization**: Simplifies complex arithmetic or logical loops using mathematical identities.
+    - **Duplicate Work Elimination**: Identifies and removes redundant computations within a scope.
 
-### Workflow
-1.  **Code Generation**: Convert current IR to Python source code.
-2.  **Prompting**: Send code to LLM with specific optimization instructions.
-3.  **Parsing**: Parse the LLM response back into HEDGE IR.
-4.  **Self-Repair**: If parsing fails (syntax error), the system feeds the error back to the LLM to request a fix (up to 3 retries).
+---
 
-### Strategies
--   **Idiomatic Refactoring**: Rewrites code to use Pythonic patterns (list comprehensions, generators).
--   **Library Optimization**: Replaces manual loops/logic with standard library functions (`itertools`, `collections`).
--   **Algorithmic Optimization**: Attempts to improve Big-O complexity (e.g., O(n²) → O(n)).
+## 3. Syntactic Layer
+The Syntactic Layer focuses on Pythonic idioms and modern coding patterns. It ensures the code follows "The Zen of Python" and utilizes efficient built-in features.
 
-## 3. Advanced Mutators (`src/application/mutators/advanced.py`)
+### Mutators
+- **PythonicIdiomOptimizer**:
+    - **Comprehension Optimization**: Converts manual accumulation loops into list, set, or dict comprehensions.
+    - **Built-in Utilization**: Replaces manual loop-based `sum`, `min`, or `max` calculations with their built-in equivalents.
+    - **Iterator Optimization**: Transforms `range(len())` patterns into idiomatic `enumerate()` or direct iteration.
+- **CodePatternOptimizer**: Uses LLMs to suggest modern Pythonic patterns for loop management, conditional simplification, and function composition.
 
-Compiler-style optimizations implemented on the IR.
+---
 
-### Strategies
--   **Constant Folding**: Evaluates constant expressions at compile-time (e.g., `2 + 3` → `5`).
--   **Dead Code Elimination**: Removes code that does not affect the program output (e.g., code after a `return` statement, or assignments to unused variables).
+## 4. Micro Layer
+The Micro Layer performs localized, compiler-style optimizations. These transformations are extremely safe, fast, and focus on removing "bloat" from the code.
 
-## Extending Mutators
+### Mutators
+- **ConstantOptimizer**:
+    - **Constant Folding**: Evaluates constant expressions (e.g., `2 + 3`) during optimization.
+    - **Constant Propagation**: Substitutes variable references with their known constant values.
+    - **Arithmetic/Boolean Simplification**: Removes identity operations (e.g., `x + 0`, `x and True`).
+- **DeadCodeEliminator**:
+    - **Unreachable Code**: Removes code after `return`, `break`, or `raise`.
+    - **Unused Variables**: Eliminates assignments to variables that are never read.
+    - **Pure Expression Removal**: Removes statements that have no side effects and no impact on output.
+- **LoopMicroOptimizer**:
+    - **Small Loop Unrolling**: Expands very small loops (e.g., < 4 iterations) to reduce branch overhead.
+    - **Invariant Motion**: Moves computations that don't change inside a loop to just before the loop begins.
 
-To create a new mutator, implement the `Mutator` interface:
+---
+
+## Custom Mutator Development
+
+To extend HEDGE with custom mutators, developers can inherit from the `LayeredMutator` base class and register them in the `MutatorRegistry`.
 
 ```python
-from src.domain.interfaces import Mutator
+from src.application.mutators.base import LayeredMutator, MutationLayer
 from src.domain.ir import schema
-from typing import List, Tuple
 
-class MyCustomMutator(Mutator):
-    def mutate(self, ir: schema.Module) -> List[Tuple[schema.Module, str]]:
-        new_ir = copy.deepcopy(ir)
-        # ... perform transformations ...
-        return [(new_ir, "MyCustomStrategy")]
+class MyOptimizer(LayeredMutator):
+    def __init__(self):
+        super().__init__(MutationLayer.MICRO)
+        
+    def _apply_mutations(self, ir: schema.Module):
+        # Implementation of IR-based transformations
+        pass
 ```

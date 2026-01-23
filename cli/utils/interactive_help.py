@@ -213,7 +213,7 @@ def show_troubleshooting_help():
             'solutions': [
                 'Check .env file for OPENAI_API_KEY or GEMINI_API_KEY',
                 'Verify API key is valid and has credits',
-                'Try different provider: --llm-provider openai/gemini'
+                'Try different provider: --llm openai/gemini'
             ]
         },
         {

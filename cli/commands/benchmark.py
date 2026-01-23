@@ -223,7 +223,7 @@ def _run_optimization(target_path, tests_path, level, generations, exp_dir):
             str(tests_path),
             '--level', level,
             '--generations', str(generations),
-            '--experiment-dir', str(exp_dir),
+            '--out-dir', str(exp_dir),
             '--quiet'
         ])
         

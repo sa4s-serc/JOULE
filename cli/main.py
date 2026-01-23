@@ -35,26 +35,18 @@ from cli.utils.banner import (
     print_banner, print_welcome, print_feature_highlights, 
     print_command_help, console
 )
-from cli.utils.version import __version__
 
 console = Console()
 
 @click.group(invoke_without_command=True)
-@click.option('--version', is_flag=True, help='Show version information')
 @click.option('--features', is_flag=True, help='Show feature highlights')
 @click.pass_context
-def cli(ctx, version, features):
+def cli(ctx, features):
     """
     HEDGE - Hierarchical Evolutionary Darwin-Green Engine
     
     A code optimization system using evolutionary strategies for Python code improvement.
     """
-    if version:
-        console.print(f"[bold cyan]HEDGE[/bold cyan] version [green]{__version__}[/green]")
-        console.print("Code Optimization System")
-        console.print("\n[dim]Professional code optimization tool[/dim]")
-        return
-    
     if features:
         print_banner()
         print_feature_highlights()

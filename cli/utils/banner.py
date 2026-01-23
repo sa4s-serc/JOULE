@@ -6,21 +6,17 @@ from rich.text import Text
 from rich.align import Align
 from rich.columns import Columns
 from rich.table import Table
-from .version import __version__, __description__
 
 console = Console()
 
 def print_banner():
-    """Print the HEDGE banner with version information."""
+    """Print the HEDGE banner."""
     banner_text = Text("""
 HEDGE
 """, style="bold blue")
     
-    title = Text(__description__, style="bold white")
-    subtitle = Text(f"Version {__version__}", style="dim white")
-    
     console.print(Panel(
-        Align.center(banner_text + Text("\n") + title + Text("\n") + subtitle),
+        Align.center(banner_text),
         style="bold blue",
         border_style="blue"
     ))

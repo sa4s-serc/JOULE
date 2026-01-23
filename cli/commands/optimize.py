@@ -44,10 +44,9 @@ console = Console()
 @click.option('--generations', type=int, default=10, help='Number of evolutionary generations')
 @click.option('--population-size', type=int, default=8, help='Population size for evolution')
 @click.option('--timeout', type=int, default=30, help='Execution timeout in seconds')
-@click.option('--llm-provider', type=click.Choice(['openai', 'gemini']), help='LLM provider')
-@click.option('--llm-model', type=str, help='Custom LLM model name')
+@click.option('--llm', type=str, help='LLM specification (e.g., gemini or openai:gpt-4)')
 @click.option('--output', '-o', type=click.Path(path_type=Path), help='Output file for optimized code')
-@click.option('--experiment-dir', type=click.Path(path_type=Path), help='Custom experiment directory')
+@click.option('--out-dir', type=click.Path(path_type=Path), help='Custom output directory')
 @click.option('--visualize', is_flag=True, help='Generate visualizations after optimization')
 @click.option('--save-ir', is_flag=True, help='Save IR snapshots for debugging')
 @click.option('--exclude-mutators', type=str, help='Comma-separated list of mutators to exclude')
@@ -66,7 +65,7 @@ console = Console()
 @click.option('--log-to-file/--no-log-to-file', default=True, help='Whether to log to a file (default: True)')
 @click.option('--log-to-console/--no-log-to-console', default=None, help='Whether to log to console (default: False)')
 def optimize_cmd(target, tests, level, layers, generations, population_size, timeout, 
-                llm_provider, llm_model, output, experiment_dir, visualize, save_ir, 
+                llm, output, out_dir, visualize, save_ir, 
                 exclude_mutators, verbose, quiet, profile, parallel, intelligent, 
                 batch_llm, memory_optimization, max_workers, max_memory_mb, 
                 benchmark, adaptive, log_file, log_to_file, log_to_console):
@@ -103,6 +102,14 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
         if features:
             console.print(f"[dim]Features: {', '.join(features)}[/dim]\n")
     
+    # Parse LLM specification
+    llm_provider = None
+    llm_model = None
+    if llm:
+        if ':' in llm:
+            llm_provider, llm_model = llm.split(':', 1)
+        else:
+            llm_provider = llm
     
     # Setup logging
     sys_config = load_config()
@@ -168,16 +175,16 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
         with open(tests, "r") as f:
             test_code = f.read()
         
-        # Setup experiment directory
-        if experiment_dir:
-            exp_dir = experiment_dir
+        # Setup output directory
+        if out_dir:
+            exp_dir = out_dir
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             exp_dir = Path(f"experiments/run_{timestamp}")
         
         exp_dir.mkdir(parents=True, exist_ok=True)
         if not quiet:
-            print_step(3, 5, f"Experiment directory: {exp_dir}")
+            print_step(3, 5, f"Output directory: {exp_dir}")
         
         # Save configuration
         config = {
