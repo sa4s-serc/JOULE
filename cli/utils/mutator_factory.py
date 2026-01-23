@@ -2,7 +2,7 @@
 
 import os
 import logging
-from typing import List, Set, Optional, Tuple
+from typing import List, Set, Optional, Tuple, Any
 
 from src.application.mutators.base import MutationLayer
 from src.application.mutators.semantic_layer import AlgorithmicIntentMutator, ProgramIntentMutator
@@ -19,7 +19,7 @@ def create_mutators(level: str = 'standard',
                    llm_model: Optional[str] = None,
                    exclude_mutators: Optional[str] = None,
                    progress=None,
-                   task=None) -> Tuple[List, Set[MutationLayer]]:
+                   task=None) -> Tuple[List, Set[MutationLayer], Any]:
     """
     Create mutators based on optimization level and configuration.
     
@@ -33,7 +33,7 @@ def create_mutators(level: str = 'standard',
         task: Progress task ID for updates
         
     Returns:
-        Tuple of (mutators_list, enabled_layers_set)
+        Tuple of (mutators_list, enabled_layers_set, llm_client)
     """
     
     # Determine enabled layers
@@ -41,7 +41,9 @@ def create_mutators(level: str = 'standard',
     
     # Initialize LLM if needed
     llm = None
-    use_llm = any(layer in enabled_layers for layer in [MutationLayer.SEMANTIC])
+    # Level 'basic' and above have SYNTACTIC layer which can use LLM
+    # Level 'advanced' and above have SEMANTIC layer which requires LLM
+    use_llm = level in ['basic', 'standard', 'advanced', 'aggressive']
     
     if use_llm:
         try:
@@ -50,10 +52,14 @@ def create_mutators(level: str = 'standard',
             if progress:
                 progress.update(task, description="✓ LLM client initialized")
         except Exception as e:
-            logger.warning(f"LLM client initialization failed: {e}. Disabling semantic layer.")
-            enabled_layers.discard(MutationLayer.SEMANTIC)
-            if progress:
-                progress.update(task, description="⚠ Semantic layer disabled")
+            # Only warn if it's strictly required (advanced/aggressive)
+            if level in ['advanced', 'aggressive']:
+                logger.warning(f"LLM client initialization failed: {e}. Disabling semantic layer.")
+                enabled_layers.discard(MutationLayer.SEMANTIC)
+                if progress:
+                    progress.update(task, description="⚠ Semantic layer disabled")
+            else:
+                logger.debug(f"LLM client not initialized: {e}")
     
     # Create mutators
     mutators = []
@@ -102,7 +108,7 @@ def create_mutators(level: str = 'standard',
         if progress:
             progress.update(task, description=f"✓ Mutators filtered: {len(mutators)} active")
     
-    return mutators, enabled_layers
+    return mutators, enabled_layers, llm
 
 def _get_enabled_layers(level: str, layers: Optional[str]) -> Set[MutationLayer]:
     """Determine which mutation layers are enabled based on optimization level."""

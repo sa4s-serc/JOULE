@@ -11,6 +11,7 @@ import logging
 import json
 import pickle
 import time
+import random
 import numpy as np
 from typing import List, Dict, Set, Optional, Tuple, Any
 from dataclasses import dataclass, field
@@ -334,7 +335,8 @@ class MutationPredictor:
         self, 
         code_features: Dict[str, float], 
         layer: Optional[MutationLayer] = None,
-        top_k: int = 5
+        top_k: int = 5,
+        llm_client: Any = None
     ) -> List[Tuple[str, str, float]]:
         """Get top mutators for given code features."""
         registry = get_registry()
@@ -342,11 +344,11 @@ class MutationPredictor:
         
         # Get all available mutators
         if layer:
-            mutators = registry.get_mutators_for_layer(layer, llm_client=None)
+            mutators = registry.get_mutators_for_layer(layer, llm_client=llm_client)
         else:
             mutators = []
             for l in MutationLayer:
-                mutators.extend(registry.get_mutators_for_layer(l, llm_client=None))
+                mutators.extend(registry.get_mutators_for_layer(l, llm_client=llm_client))
         
         # Score each mutator strategy
         for mutator in mutators:
@@ -356,6 +358,9 @@ class MutationPredictor:
             for strategy in strategies:
                 score = self.predict_improvement(mutator_name, strategy, code_features)
                 candidates.append((mutator_name, strategy, score))
+        
+        # Shuffle to allow exploration of equal-scored strategies
+        random.shuffle(candidates)
         
         # Sort by score and return top k
         candidates.sort(key=lambda x: x[2], reverse=True)
@@ -412,7 +417,7 @@ class IntelligentMutationSelector:
         if enabled_layers:
             for layer in enabled_layers:
                 top_strategies = self.predictor.get_top_mutators(
-                    feature_dict, layer, max_mutators // len(enabled_layers)
+                    feature_dict, layer, max_mutators // len(enabled_layers), llm_client=llm_client
                 )
                 
                 for mutator_name, strategy_name, score in top_strategies:
@@ -421,7 +426,7 @@ class IntelligentMutationSelector:
                         selected_mutators.append((mutator, strategy_name, score))
         else:
             top_strategies = self.predictor.get_top_mutators(
-                feature_dict, None, max_mutators
+                feature_dict, None, max_mutators, llm_client=llm_client
             )
             
             for mutator_name, strategy_name, score in top_strategies:

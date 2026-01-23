@@ -115,17 +115,23 @@ class IROnlyMutator(LayeredMutator):
         if not self.context:
             return True  # Can't check without context
         
-        # Check that all originally defined variables are still defined
-        original_defs = self.context.get_defined_vars(self.context.ir)
-        mutated_context = MutationContext(mutated_ir)
-        mutated_defs = mutated_context.get_defined_vars(mutated_ir)
+        # Check that top-level definitions (functions, classes) are preserved
+        # We allow local variables to be removed during optimization
+        def get_top_level_defs(ir_node: schema.Module) -> Set[str]:
+            top_defs = set()
+            for stmt in ir_node.body.statements:
+                if isinstance(stmt, (schema.FunctionDef, schema.AsyncFunctionDef, schema.ClassDef)):
+                    top_defs.add(stmt.name)
+            return top_defs
+            
+        original_top_defs = get_top_level_defs(self.context.ir)
+        mutated_top_defs = get_top_level_defs(mutated_ir)
         
-        # Allow new definitions, but not removal of existing ones
-        if not original_defs.issubset(mutated_defs):
-            missing = original_defs - mutated_defs
-            logger.debug(f"Missing definitions after mutation: {missing}")
+        if not original_top_defs.issubset(mutated_top_defs):
+            missing = original_top_defs - mutated_top_defs
+            logger.debug(f"Missing top-level definitions after mutation: {missing}")
             return False
-        
+            
         return True
     
     def _create_ir_transformer(self, transformer_class: type) -> NodeTransformer:

@@ -30,6 +30,7 @@ from cli.utils.banner import (
     print_step, print_optimization_summary, create_progress_table
 )
 from cli.utils.mutator_factory import create_mutators
+from src.application.mutators import initialize_mutator_system
 from src.utils.logging_config import setup_logging
 from src.utils.config import load_config
 
@@ -217,6 +218,8 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
         if not quiet:
             print_step(4, 5, "Initializing optimization components")
             
+        # Ensure mutator system is fully initialized
+        initialize_mutator_system()
         with Progress(
             SpinnerColumn(style="bold magenta"),
             TextColumn("[bold blue]{task.description}"),
@@ -232,7 +235,7 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
             # Setup mutators
         with progress:
             # Create mutators
-            mutators, enabled_layers = create_mutators(
+            mutators, enabled_layers, llm_client = create_mutators(
                 level=level,
                 layers=layers,
                 llm_provider=llm_provider,
@@ -242,14 +245,11 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
                 task=task
             )
             
-            # Create LLM client for batch processing
-            llm_client = None
-            if batch_llm and (level in ['advanced', 'aggressive']):
+            # Use the LLM client from mutator factory for batch processing if available
+            if batch_llm and llm_client is None and (level in ['advanced', 'aggressive']):
                 try:
-                    # create_llm_client will handle its own config if provider/model are None
-                    # and will automatically look for API keys in environment
                     llm_client = create_llm_client(llm_provider, None, llm_model)
-                    progress.update(task, description="✓ LLM client initialized")
+                    progress.update(task, description="✓ LLM client initialized (fallback)")
                 except Exception as e:
                     if not quiet:
                         print_warning(f"LLM client initialization failed: {e}. Disabling batch LLM.")

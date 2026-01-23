@@ -84,7 +84,10 @@ class OpenAIClient(LLMClient):
                     stop=stop,
                     temperature=0.2
                 )
-                return response.choices[0].message.content or ""
+                result = response.choices[0].message.content or ""
+                if result:
+                    logger.info(f"OpenAI completion successful ({len(result)} chars)")
+                return result
                 
             except Exception as e:
                 error_str = str(e).lower()
@@ -137,7 +140,9 @@ class GeminiClient(LLMClient):
                 if (response.candidates and 
                     response.candidates[0].content and 
                     response.candidates[0].content.parts):
-                    return response.text
+                    result = response.text
+                    logger.info(f"Gemini completion successful ({len(result)} chars)")
+                    return result
                 return ""
                 
             except Exception as e:
