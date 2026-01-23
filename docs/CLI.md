@@ -60,13 +60,22 @@ Runs HEDGE against a suite of standard problems to evaluate system performance.
 python hedge.py benchmark [--quick] [--compare-levels]
 ```
 
-### `list-mutators`
+### `app`
 
-Displays all registered mutators and their constituent strategies, organized by layer.
+Starts the HEDGE Interactive Web Interface.
 
 **Usage:**
 ```bash
-python hedge.py list-mutators
+python hedge.py app [--port 5173]
+```
+
+### `serve`
+
+Starts the HEDGE API server for remote access or web interface integration.
+
+**Usage:**
+```bash
+python hedge.py serve [--port 8000] [--host 0.0.0.0]
 ```
 
 ## Environment Variables

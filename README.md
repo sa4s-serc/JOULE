@@ -39,6 +39,17 @@ python hedge.py optimize examples/target_fib.py examples/test_target_fib.py
 python hedge.py optimize target.py tests.py --level advanced
 ```
 
+### Interactive Web Interface
+
+HEDGE features a modern, interactive web interface for visualizing optimization results, managing experiments, and configuring the engine.
+
+```bash
+# Start the web interface (requires Node.js)
+python hedge.py app
+```
+
+Once started, the interface is accessible at `http://localhost:5173`.
+
 ## Optimization Hierarchy
 
 HEDGE utilizes a layered approach to code transformation:
