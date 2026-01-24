@@ -4,17 +4,24 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.columns import Columns
+from rich.layout import Layout
+from rich.text import Text
+from rich.box import ROUNDED, DOUBLE
 
 console = Console()
 
 
 def show_optimization_levels_help():
     """Show detailed help about optimization levels."""
-    console.print("\n[bold cyan]HEDGE Optimization Levels[/bold cyan]\n")
+    console.print("\n[bold cyan]🚀 HEDGE Optimization Levels[/bold cyan]\n")
+    console.print(
+        "[dim]Choose the right balance of speed and optimization depth.[/dim]\n")
 
     levels = [
         {
             "name": "micro",
+            "icon": "⚡",
             "speed": "Very Fast",
             "description": "Safe micro-optimizations",
             "features": ["Constant folding", "Dead code elimination", "Strength reduction"],
@@ -23,6 +30,7 @@ def show_optimization_levels_help():
         },
         {
             "name": "basic",
+            "icon": "🧹",
             "speed": "Fast",
             "description": "Python idioms and patterns",
             "features": ["Micro optimizations", "List comprehensions", "Built-in functions"],
@@ -31,6 +39,7 @@ def show_optimization_levels_help():
         },
         {
             "name": "standard",
+            "icon": "⚖️",
             "speed": "Moderate",
             "description": "Algorithmic improvements",
             "features": ["Basic optimizations", "Data structure selection", "Complexity reduction"],
@@ -39,6 +48,7 @@ def show_optimization_levels_help():
         },
         {
             "name": "advanced",
+            "icon": "🧠",
             "speed": "Slower",
             "description": "AI-powered semantic optimization",
             "features": ["Standard optimizations", "Algorithm intent", "LLM-based improvements"],
@@ -47,6 +57,7 @@ def show_optimization_levels_help():
         },
         {
             "name": "aggressive",
+            "icon": "🔥",
             "speed": "Slowest",
             "description": "All optimizations enabled",
             "features": ["All layers active", "Experimental features", "Maximum settings"],
@@ -57,42 +68,60 @@ def show_optimization_levels_help():
 
     for level in levels:
         # Create level panel
-        features_text = "\n".join([f"• {feature}" for feature in level["features"]])
-        api_text = "Requires API key" if level["api_key"] else "No API key needed"
+        features_text = "\n".join(
+            [f"[green]✓[/green] {feature}" for feature in level["features"]])
+        api_text = "[bold yellow]Requires API Key[/bold yellow]" if level["api_key"] else "[bold green]No API Key Needed[/bold green]"
 
-        panel_content = (
-            f"[bold]{level['description']}[/bold]\n\n"
-            f"Speed: {level['speed']}\n"
-            f"Use case: {level['use_case']}\n"
-            f"{api_text}\n\n"
-            f"[bold]Features:[/bold]\n{features_text}"
-        )
+        # Header
+        header = Text(
+            f"{level['icon']} {level['name'].upper()}", style="bold cyan")
 
-        console.print(
-            Panel(
-                panel_content,
-                title=f"{level['name'].upper()}",
-                border_style="cyan" if not level["api_key"] else "yellow",
-            )
+        content_table = Table(show_header=False, box=None, padding=(0, 2))
+        content_table.add_column("Key", style="dim")
+        content_table.add_column("Value")
+
+        content_table.add_row("Description:", level['description'])
+        content_table.add_row("Speed:", level['speed'])
+        content_table.add_row("Use Case:", level['use_case'])
+
+        grid = Table.grid(expand=True)
+        grid.add_column()
+        grid.add_column(justify="right")
+        grid.add_row(content_table, Text(features_text))
+
+        panel = Panel(
+            grid,
+            title=header,
+            subtitle=api_text,
+            border_style="cyan" if not level["api_key"] else "yellow",
+            box=ROUNDED,
+            padding=(1, 2)
         )
+        console.print(panel)
         console.print()
 
 
 def show_mutators_help():
     """Show detailed help about mutators."""
-    console.print("\n[bold cyan]HEDGE Mutator System[/bold cyan]\n")
+    console.print("\n[bold cyan]🧬 HEDGE Mutator System[/bold cyan]\n")
+    console.print(
+        "[dim]A four-layer hierarchical system inspired by biological evolution.[/dim]\n")
 
     layers = {
         "Semantic Layer": {
+            "icon": "🧠",
             "description": "AI-powered algorithm and intent optimization",
             "mutators": [
-                ("AlgorithmicIntentMutator", "Algorithm selection and Big-O optimization"),
+                ("AlgorithmicIntentMutator",
+                 "Algorithm selection and Big-O optimization"),
                 ("ProgramIntentMutator", "Logic simplification and control flow"),
             ],
             "examples": ["O(2^n) → O(n) Fibonacci", "Recursive → Iterative"],
             "requires_llm": True,
+            "color": "magenta"
         },
         "Algorithmic Layer": {
+            "icon": "🧮",
             "description": "Data structures and complexity optimization",
             "mutators": [
                 ("DataStructureOptimizer", "List → Set conversion, access patterns"),
@@ -100,8 +129,10 @@ def show_mutators_help():
             ],
             "examples": ["Linear search → Set membership", "Nested loops → Single pass"],
             "requires_llm": False,
+            "color": "blue"
         },
         "Syntactic Layer": {
+            "icon": "📝",
             "description": "Python idioms and code patterns",
             "mutators": [
                 ("PythonicIdiomOptimizer", "Comprehensions, built-ins, iterators"),
@@ -109,8 +140,10 @@ def show_mutators_help():
             ],
             "examples": ["Manual loops → Comprehensions", "range(len()) → enumerate()"],
             "requires_llm": False,
+            "color": "green"
         },
         "Micro Layer": {
+            "icon": "⚡",
             "description": "Low-level code optimizations",
             "mutators": [
                 ("ConstantOptimizer", "Constant folding and propagation"),
@@ -119,36 +152,68 @@ def show_mutators_help():
             ],
             "examples": ["24*60*60 → 86400", "x**2 → x*x"],
             "requires_llm": False,
+            "color": "yellow"
         },
     }
 
     for layer_name, layer_info in layers.items():
-        console.print(f"[bold]{layer_name}[/bold]")
-        console.print(f"[dim]{layer_info['description']}[/dim]")
-
-        if layer_info["requires_llm"]:
-            console.print("[yellow]Requires LLM API key[/yellow]")
-        else:
-            console.print("[green]No API key needed[/green]")
+        color = layer_info['color']
 
         # Mutators table
-        table = Table(show_header=True, header_style="bold cyan", box=None)
-        table.add_column("Mutator", style="yellow")
+        table = Table(show_header=True,
+                      header_style=f"bold {color}", box=None, padding=(0, 1))
+        table.add_column("Mutator", style="bold white")
         table.add_column("Description", style="dim")
 
         for mutator_name, mutator_desc in layer_info["mutators"]:
             table.add_row(mutator_name, mutator_desc)
 
-        console.print(table)
+        # Content assembly
+        content = [
+            f"[italic]{layer_info['description']}[/italic]",
+            "",
+            table,
+            "",
+            f"[bold]Examples:[/bold] {', '.join(layer_info['examples'])}"
+        ]
 
-        # Examples
-        console.print(f"[bold]Examples:[/bold] {', '.join(layer_info['examples'])}")
+        req_text = "[bold yellow(Requires API Key)[/]" if layer_info["requires_llm"] else "[bold green](No API Key)[/]"
+
+        console.print(
+            Panel(
+                "\n".join(str(x) if not isinstance(
+                    x, Table) else "" for x in content),
+                title=f"[{color}]{layer_info['icon']} {layer_name}[/{color}]",
+                subtitle=req_text,
+                border_style=color,
+                box=ROUNDED
+            )
+        )
+        # Hack to print table inside panel correctly if mixed content
+        # Actually rich handles tables in panels fine if passed directly.
+        # Let's just print the table inside the loop for simplicity or reconstructed.
+        # For now, simplistic rendering is fine but let's make it better.
+        # Re-doing the panel content to be a renderable group is better.
+
+        # (Self-correction: The above string join will miss the table object. Let's fix.)
+        from rich.console import Group
+        group = Group(
+            Text(layer_info['description'], style="italic"),
+            Text(""),
+            table,
+            Text(""),
+            Text(
+                f"Examples: {', '.join(layer_info['examples'])}", style="bold"),
+        )
+
+        console.print(Panel(group, title=f"[{color}]{layer_info['icon']} {layer_name}[/{color}]",
+                      subtitle=req_text, border_style=color, box=ROUNDED))
         console.print()
 
 
 def show_examples_help():
     """Show examples and use cases."""
-    console.print("\n[bold cyan]HEDGE Examples & Use Cases[/bold cyan]\n")
+    console.print("\n[bold cyan]📚 HEDGE Examples & Use Cases[/bold cyan]\n")
 
     examples = [
         {
@@ -195,22 +260,26 @@ def show_examples_help():
         },
     ]
 
+    example_panels = []
     for example in examples:
-        console.print(
-            Panel(
-                f"[bold]{example['description']}[/bold]\n\n"
-                f"[cyan]$ {example['command']}[/cyan]\n\n"
-                f"[dim]Use case: {example['use_case']}[/dim]",
-                title=example["title"],
-                border_style="blue",
-            )
+        p = Panel(
+            f"[bold]{example['description']}[/bold]\n\n"
+            f"[dim]Use case: {example['use_case']}[/dim]",
+            title=f"[cyan]$ {example['command']}[/cyan]",
+            subtitle=example["title"],
+            border_style="blue",
+            box=ROUNDED,
+            padding=(1, 2)
         )
-        console.print()
+        example_panels.append(p)
+
+    console.print(Columns(example_panels, equal=True, width=50, expand=True))
+    console.print()
 
 
 def show_troubleshooting_help():
     """Show troubleshooting guide."""
-    console.print("\n[bold cyan]HEDGE Troubleshooting Guide[/bold cyan]\n")
+    console.print("\n[bold cyan]🔧 HEDGE Troubleshooting Guide[/bold cyan]\n")
 
     issues = [
         {
@@ -252,16 +321,18 @@ def show_troubleshooting_help():
     ]
 
     for issue in issues:
-        console.print(f"[bold red]{issue['problem']}[/bold red]")
+        table = Table(box=ROUNDED, show_header=True,
+                      header_style="bold red", expand=True)
+        table.add_column("Symptoms")
+        table.add_column("Solutions")
 
-        console.print("[bold]Symptoms:[/bold]")
-        for symptom in issue["symptoms"]:
-            console.print(f"  • {symptom}")
+        sym_text = "\n".join([f"• {s}" for s in issue["symptoms"]])
+        sol_text = "\n".join([f"• {s}" for s in issue["solutions"]])
 
-        console.print("[bold]Solutions:[/bold]")
-        for solution in issue["solutions"]:
-            console.print(f"  • {solution}")
+        table.add_row(sym_text, sol_text)
 
+        console.print(Panel(
+            table, title=f"[bold red]{issue['problem']}[/bold red]", border_style="red", box=DOUBLE))
         console.print()
 
 
@@ -283,25 +354,34 @@ def help_cmd(topic):
         show_troubleshooting_help()
     else:
         # Show help menu
-        console.print("\n[bold cyan]HEDGE Interactive Help[/bold cyan]\n")
+        console.print("\n[bold cyan]❓ HEDGE Interactive Help[/bold cyan]\n")
 
         help_topics = [
             (
                 "levels",
-                "Optimization Levels",
+                "Optimization Levels 🚀",
                 "Learn about micro, basic, standard, advanced, aggressive",
             ),
-            ("mutators", "Mutator System", "Understand the 4-layer hierarchical mutation system"),
-            ("examples", "Examples & Use Cases", "See practical examples and common workflows"),
-            ("troubleshooting", "Troubleshooting", "Solve common issues and problems"),
+            ("mutators", "Mutator System 🧬",
+             "Understand the 4-layer hierarchical mutation system"),
+            ("examples", "Examples & Use Cases 📚",
+             "See practical examples and common workflows"),
+            ("troubleshooting", "Troubleshooting 🔧",
+             "Solve common issues and problems"),
         ]
 
-        console.print("[bold]Available Help Topics:[/bold]\n")
-
+        panels = []
         for topic_name, title, description in help_topics:
-            console.print(f"[cyan]hedge help --topic {topic_name}[/cyan]")
-            console.print(f"  {title} - {description}\n")
+            p = Panel(
+                f"[bold]{title}[/bold]\n\n"
+                f"{description}\n\n"
+                f"[cyan]Run: hedge help --topic {topic_name}[/cyan]",
+                border_style="cyan",
+                box=ROUNDED
+            )
+            panels.append(p)
 
+        console.print(Columns(panels, equal=True))
         console.print(
-            "[dim]You can also use 'hedge COMMAND --help' for command-specific help[/dim]"
+            "\n[dim]You can also use 'hedge COMMAND --help' for command-specific help[/dim]"
         )

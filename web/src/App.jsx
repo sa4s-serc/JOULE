@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Sprout } from 'lucide-react';
+import { Sprout, Github, BookOpen } from 'lucide-react';
 import OptimizationForm from './components/OptimizationForm';
 import Dashboard from './components/Dashboard';
 
@@ -9,38 +9,53 @@ function App() {
   const [error, setError] = useState(null);
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', paddingBottom: '2rem' }}>
+    <div style={{ maxWidth: '1400px', margin: '0 auto', paddingBottom: '4rem' }}>
       <nav className="header">
         <div className="logo">
-          <Sprout size={32} />
+          <Sprout size={28} className="logo-icon" />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={{ lineHeight: 1 }}>HEDGE</span>
-            <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 400 }}>Evolutionary Optimizer</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600, letterSpacing: '0.1em' }}>EVOLUTIONARY OPTIMIZER</span>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <a href="http://localhost:8000/docs" target="_blank" style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textDecoration: 'none' }}>API Docs</a>
+        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
+          <a href="http://localhost:8000/docs" target="_blank" className="btn-small" style={{ textDecoration: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <BookOpen size={16} /> API Docs
+          </a>
+          <a href="#" className="btn-small" style={{ textDecoration: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Github size={16} /> GitHub
+          </a>
           {task && (
-            <button onClick={() => setTask(null)} style={{ background: 'transparent', border: '1px solid var(--border)' }}>
+            <button onClick={() => setTask(null)} className="btn-small" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}>
               New Task
             </button>
           )}
         </div>
       </nav>
 
-      <div style={{ padding: '2rem' }}>
+      <div style={{ padding: '0 2rem' }}>
         {error && (
-          <div className="card" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>
-            {error}
-            <button onClick={() => setError(null)} style={{ marginLeft: '1rem', padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}>Dismiss</button>
+          <div className="card glass" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', marginBottom: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Error: {error}</span>
+            <button onClick={() => setError(null)} className="btn-small">Dismiss</button>
           </div>
         )}
 
         {!task ? (
-          <OptimizationForm
-            onStart={setTask}
-            onError={setError}
-          />
+          <>
+            <div className="hero-section">
+              <h1 className="hero-title">Evolve Your Code</h1>
+              <p className="hero-subtitle">
+                Advanced genetic algorithms meet large language models to optimize Python code for energy efficiency and performance.
+              </p>
+            </div>
+            <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+              <OptimizationForm
+                onStart={setTask}
+                onError={setError}
+              />
+            </div>
+          </>
         ) : (
           <Dashboard task={task} />
         )}

@@ -56,6 +56,8 @@ class EventType(str, Enum):
     MUTATION_ATTEMPT = "mutation_attempt"
     MUTATION_RESULT = "mutation_result"
     NEW_BEST_SOLUTION = "new_best_solution"
+    PARETO_UPDATE = "pareto_update"
+    EVALUATION_FAILURE = "evaluation_failure"
 
 
 @dataclass
@@ -871,20 +873,49 @@ class EvolutionaryEngine:
                             self.best_solution = variant
                             self.stagnation_counter = 0
 
+                            # Calculate improvements
+                            baseline_energy = baseline_metrics.get(
+                                "energy_joules", 1e-6)
+                            baseline_time = baseline_metrics.get(
+                                "duration_seconds", 1e-6)
+
+                            current_energy = variant.metrics.get(
+                                "energy_joules", 0)
+                            current_time = variant.metrics.get(
+                                "duration_seconds", 0)
+
+                            energy_imp = (
+                                (baseline_energy - current_energy) / baseline_energy) * 100
+                            time_imp = (
+                                (baseline_time - current_time) / baseline_time) * 100
+
                             self._emit_event(
                                 EventType.NEW_BEST_SOLUTION,
                                 {
-                                    "energy": variant.metrics.get("energy_joules"),
-                                    "time": variant.metrics.get("duration_seconds"),
+                                    "energy": current_energy,
+                                    "time": current_time,
                                     "generation": generation,
                                     "mutation": variant.mutation_type,
                                     "code": self.codegen.generate(variant.ir),
+                                    "improvement": {
+                                        "energy_percent": energy_imp,
+                                        "time_percent": time_imp
+                                    }
                                 },
                             )
 
                         # Save IR snapshot
                         if self.config.save_ir_snapshots:
                             self._save_ir_snapshot(variant)
+                else:
+                    self._emit_event(
+                        EventType.EVALUATION_FAILURE,
+                        {
+                            "mutation": variant.mutation_type,
+                            "error": output if output else "Evaluation failed",
+                            "generation": generation
+                        }
+                    )
 
             # Update stagnation counter
             if improved_count == 0:
@@ -902,6 +933,24 @@ class EvolutionaryEngine:
 
             # Log performance metrics
             self._log_performance_metrics()
+
+            # Emit Pareto front update
+            pareto_points = [
+                {
+                    "energy": s.metrics.get("energy_joules", 0),
+                    "time": s.metrics.get("duration_seconds", 0),
+                    "id": s.variant_id[:8],
+                    "mutation": s.mutation_type
+                }
+                for s in self.archive.solutions
+            ]
+            self._emit_event(
+                EventType.PARETO_UPDATE,
+                {
+                    "generation": generation,
+                    "solutions": pareto_points
+                }
+            )
 
             # Early stopping
             if self.stagnation_counter >= self.config.early_stopping_patience:

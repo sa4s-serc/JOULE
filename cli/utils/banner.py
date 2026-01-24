@@ -1,5 +1,4 @@
-"""Banner and branding utilities for HEDGE CLI."""
-
+import random
 from rich.align import Align
 from rich.columns import Columns
 from rich.console import Console
@@ -9,17 +8,48 @@ from rich.text import Text
 
 console = Console()
 
+TIPS = [
+    "Use [cyan]--level advanced[/cyan] to enable AI-powered semantic optimizations.",
+    "The [cyan]visualize[/cyan] command generates interactive HTML reports of your optimization run.",
+    "HEDGE uses a multi-objective Pareto front to balance energy efficiency and execution time.",
+    "You can exclude specific mutators using the [cyan]--exclude-mutators[/cyan] flag.",
+    "Enable [cyan]--parallel[/cyan] to utilize all CPU cores for faster mutation discovery.",
+    "Try [cyan]hedge analyze[/cyan] first to get a complexity report of your code.",
+    "The [cyan]--intelligent[/cyan] flag uses ML to learn which mutators work best for your code.",
+]
+
 
 def print_banner():
     """Print the HEDGE banner."""
-    banner_text = Text(
-        """
-HEDGE
-""",
-        style="bold blue",
+    banner_art = """
+    ██╗  ██╗███████╗██████╗  ██████╗ ███████╗
+    ██║  ██║██╔════╝██╔══██╗██╔════╝ ██╔════╝
+    ███████║█████╗  ██║  ██║██║  ███╗█████╗  
+    ██╔══██║██╔══╝  ██║  ██║██║   ██║██╔══╝  
+    ██║  ██║███████╗██████╔╝╚██████╔╝███████╗
+    ╚═╝  ╚═╝╚══════╝╚═════╝  ╚═════╝ ╚══════╝
+    """
+
+    subtitle = Text(
+        "Hierarchical Evolutionary Darwin-Green Engine", style="italic cyan")
+
+    # Create the main banner panel
+    banner_panel = Panel(
+        Align.center(
+            Text(banner_art, style="bold blue") + Text("\n") + subtitle,
+            vertical="middle",
+        ),
+        box=None,
+        padding=(0, 2),
     )
 
-    console.print(Panel(Align.center(banner_text), style="bold blue", border_style="blue"))
+    console.print(banner_panel)
+
+    # Print a random tip
+    tip = random.choice(TIPS)
+    console.print(Align.center(f"[bold yellow]Tip:[/bold yellow] {tip}"))
+    console.print(Align.center("[dim]─" * 50 + "[/dim]"))
+    console.print()
 
 
 def print_welcome():
@@ -44,12 +74,12 @@ def print_welcome():
 def print_feature_highlights():
     """Print system features in organized layout."""
     features = [
-        ("AI Integration", "Semantic optimization\nwith LLM support"),
-        ("Hierarchical System", "Four-layer mutation\narchitecture"),
-        ("Multi-Objective", "Pareto optimization\nfor energy and time"),
-        ("Code Analysis", "Complexity metrics\nand recommendations"),
-        ("Visualizations", "Charts and reports\nfor results"),
-        ("Project Management", "Templates and\nworkflow organization"),
+        ("AI Integration 🧠", "Semantic optimization\nwith LLM support"),
+        ("Hierarchical System 🏗️", "Four-layer mutation\narchitecture"),
+        ("Multi-Objective ⚖️", "Pareto optimization\nfor energy and time"),
+        ("Code Analysis 🔍", "Complexity metrics\nand recommendations"),
+        ("Visualizations 📊", "Charts and reports\nfor results"),
+        ("Project Management 📁", "Templates and\nworkflow organization"),
     ]
 
     feature_panels = []
@@ -58,7 +88,7 @@ def print_feature_highlights():
             f"[bold]{title}[/bold]\n[dim]{desc}[/dim]",
             border_style="blue",
             padding=(0, 1),
-            width=20,
+            width=24,
         )
         feature_panels.append(panel)
 

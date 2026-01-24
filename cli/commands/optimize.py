@@ -37,7 +37,8 @@ console = Console()
 @click.argument("tests", type=click.Path(exists=True, path_type=Path))
 @click.option(
     "--level",
-    type=click.Choice(["micro", "basic", "standard", "advanced", "aggressive"]),
+    type=click.Choice(["micro", "basic", "standard",
+                      "advanced", "aggressive"]),
     default="standard",
     help="Optimization level",
 )
@@ -140,7 +141,8 @@ def optimize_cmd(
     """
     if not quiet:
         console.print("\n[bold cyan]🚀 Code Optimization[/bold cyan]")
-        console.print(f"[dim]Target: {target} | Tests: {tests} | Level: {level}[/dim]")
+        console.print(
+            f"[dim]Target: {target} | Tests: {tests} | Level: {level}[/dim]")
 
         # Show enabled features
         features = []
@@ -188,7 +190,8 @@ def optimize_cmd(
     if generations == 10:
         generations = opt_cfg.get("default_generations", generations)
     if population_size == 8:
-        population_size = opt_cfg.get("default_population_size", population_size)
+        population_size = opt_cfg.get(
+            "default_population_size", population_size)
     if timeout == 30:
         timeout = opt_cfg.get("default_timeout", timeout)
     if level == "standard":
@@ -203,9 +206,11 @@ def optimize_cmd(
     if batch_llm:
         batch_llm = perf_cfg.get("enable_batch_llm", batch_llm)
     if memory_optimization:
-        memory_optimization = perf_cfg.get("enable_memory_optimization", memory_optimization)
+        memory_optimization = perf_cfg.get(
+            "enable_memory_optimization", memory_optimization)
     if not adaptive:
-        adaptive = perf_cfg.get("adaptive_population_size", adaptive)  # Default is False
+        adaptive = perf_cfg.get(
+            "adaptive_population_size", adaptive)  # Default is False
 
     if max_workers == 8:
         max_workers = perf_cfg.get("max_workers", max_workers)
@@ -221,14 +226,16 @@ def optimize_cmd(
     log_cfg = sys_config.get("logging", {})
 
     # Priority: CLI argument > Config file > Default
-    log_level = "DEBUG" if verbose else "WARNING" if quiet else (log_cfg.get("level", "INFO"))
+    log_level = "DEBUG" if verbose else "WARNING" if quiet else (
+        log_cfg.get("level", "INFO"))
 
     if log_to_console is None:
         log_to_console = log_cfg.get("log_to_console", False)
 
     effective_log_file = None
     if log_to_file:
-        effective_log_file = log_file or Path(log_cfg.get("log_file", "hedge.log"))
+        effective_log_file = log_file or Path(
+            log_cfg.get("log_file", "hedge.log"))
 
     setup_logging(
         level=log_level, log_file=effective_log_file, log_to_console=log_to_console, verbose=verbose
@@ -236,13 +243,15 @@ def optimize_cmd(
     logger = logging.getLogger(__name__)
 
     if effective_log_file:
-        logger.info(f"Logging initialized. Level: {log_level}, File: {effective_log_file}")
+        logger.info(
+            f"Logging initialized. Level: {log_level}, File: {effective_log_file}")
 
     try:
         # Run benchmark comparison if requested
         if benchmark:
             if not quiet:
-                console.print("[bold yellow]Running Performance Benchmark...[/bold yellow]")
+                console.print(
+                    "[bold yellow]Running Performance Benchmark...[/bold yellow]")
 
             benchmark_suite = PerformanceBenchmark()
 
@@ -256,7 +265,8 @@ def optimize_cmd(
             benchmark_suite.suites["custom"] = type(
                 "BenchmarkSuite",
                 (),
-                {"name": "custom", "tests": [(target.stem, code_content, test_content)]},
+                {"name": "custom", "tests": [
+                    (target.stem, code_content, test_content)]},
             )()
 
             benchmark_results = benchmark_suite.run_benchmark_comparison(
@@ -265,7 +275,8 @@ def optimize_cmd(
 
             if not quiet:
                 console.print("[green]✓ Benchmark completed[/green]")
-                console.print(f"[dim]Results saved to: {benchmark_suite.output_dir}[/dim]\n")
+                console.print(
+                    f"[dim]Results saved to: {benchmark_suite.output_dir}[/dim]\n")
 
         # Read input files with progress
         if not quiet:
@@ -350,8 +361,10 @@ def optimize_cmd(
             # Use the LLM client from mutator factory for batch processing if available
             if batch_llm and llm_client is None and (level in ["advanced", "aggressive"]):
                 try:
-                    llm_client = create_llm_client(llm_provider, None, llm_model)
-                    progress.update(task, description="✓ LLM client initialized (fallback)")
+                    llm_client = create_llm_client(
+                        llm_provider, None, llm_model)
+                    progress.update(
+                        task, description="✓ LLM client initialized (fallback)")
                 except Exception as e:
                     if not quiet:
                         print_warning(
@@ -375,7 +388,8 @@ def optimize_cmd(
                 llm_batch_size=llm_cfg.get("batch_size", 5),
                 adaptive_population_size=adaptive,
                 adaptive_mutation_rate=adaptive,
-                early_stopping_patience=opt_cfg.get("early_stopping_patience", 5),
+                early_stopping_patience=opt_cfg.get(
+                    "early_stopping_patience", 5),
             )
 
             # Event callback for status updates
@@ -438,7 +452,8 @@ def optimize_cmd(
         display_group = Group(
             progress_table,
             Text(""),  # Spacer
-            Panel(status_text, title="Current Activity", border_style="blue", padding=(0, 1)),
+            Panel(status_text, title="Current Activity",
+                  border_style="blue", padding=(0, 1)),
         )
 
         def update_progress(generation: int, total_generations: int):
@@ -451,20 +466,62 @@ def optimize_cmd(
             engine.get_optimization_summary()
 
             # Update table
-            progress_table.columns[1]._cells = [f"{generation}/{total_generations}"]
+            # We recreate the rows because modifying cells directly is brittle with 3 columns
+            # Clear cells to be safe or just overwrite?
+            progress_table.columns[1]._cells = []
+            # Actually, standard Rich way for live tables is to modify specific rows if possible, or just rebuild the table.
+            # But since we passed the table object to the Live context, we must modify it in place.
+
+            # Let's use a safer approach: direct cell access by row/col index if we knew the internal structure,
+            # but modifying columns directly is what we did before.
+            # New table has 3 columns.
+
+            gen_str = f"{generation}/{total_generations}"
+            energy_str = "N/A"
+            time_str = "N/A"
+            sols_str = "0"
+            mem_str = "0MB"
+            eff_str = "0%"
+            # Estimate or get actual if possible
+            threads_str = str(max_workers)
+
+            trend_energy = ""
+            trend_time = ""
 
             if engine.best_solution:
                 energy = engine.best_solution.metrics.get("energy_joules", 0)
-                time_val = engine.best_solution.metrics.get("duration_seconds", 0)
-                progress_table.columns[1]._cells.extend(
-                    [
-                        f"{energy:.6f}J",
-                        f"{time_val:.6f}s",
-                        f"{len(engine.archive.solutions)}",
-                        f"{memory_stats.get('memory_saved_mb', 0):.1f}MB",
-                        f"{memory_stats.get('sharing_efficiency', 0):.1%}",
-                    ]
-                )
+                time_val = engine.best_solution.metrics.get(
+                    "duration_seconds", 0)
+                energy_str = f"{energy:.6f}J"
+                time_str = f"{time_val:.6f}s"
+                sols_str = f"{len(engine.archive.solutions)}"
+                mem_str = f"{memory_stats.get('memory_saved_mb', 0):.1f}MB"
+                eff_str = f"{memory_stats.get('sharing_efficiency', 0):.1%}"
+
+                # Simple trend simulation (would need history for real trend)
+                trend_energy = "⬇"
+                trend_time = "⟷"
+
+            # Update the columns data directly
+            progress_table.columns[1]._cells = [
+                gen_str,
+                energy_str,
+                time_str,
+                sols_str,
+                mem_str,
+                eff_str,
+                threads_str
+            ]
+
+            progress_table.columns[2]._cells = [
+                "⟳",  # Generation
+                trend_energy,
+                trend_time,
+                "⬆" if int(sols_str) > 0 else "",
+                "⬆" if float(mem_str.replace("MB", "")) > 0 else "",
+                "=",
+                "Active"
+            ]
 
         if not quiet:
             with Live(display_group, refresh_per_second=4, console=console):
@@ -475,7 +532,8 @@ def optimize_cmd(
                     progress_callback=update_progress,
                 )
         else:
-            solutions = engine.optimize(initial_code, test_code, enabled_layers=enabled_layers)
+            solutions = engine.optimize(
+                initial_code, test_code, enabled_layers=enabled_layers)
 
         optimization_time = time.time() - start_time
 
@@ -529,14 +587,17 @@ def optimize_cmd(
         # Generate visualizations
         if visualize:
             if not quiet:
-                console.print("\n[bold blue]Generating visualizations...[/bold blue]")
+                console.print(
+                    "\n[bold blue]Generating visualizations...[/bold blue]")
 
             try:
                 visualizer = ResultVisualizer(exp_dir)
-                visualizer.create_visualizations(solutions, optimization_summary)
+                visualizer.create_visualizations(
+                    solutions, optimization_summary)
 
                 if not quiet:
-                    print_success(f"Visualizations saved to: {exp_dir / 'visualizations'}")
+                    print_success(
+                        f"Visualizations saved to: {exp_dir / 'visualizations'}")
             except Exception as e:
                 print_warning(f"Visualization generation failed: {e}")
 
@@ -547,7 +608,8 @@ def optimize_cmd(
                 print_performance_profile(optimization_summary)
 
         if not quiet:
-            console.print(f"\n[green]✓ Optimization completed in {optimization_time:.2f}s[/green]")
+            console.print(
+                f"\n[green]✓ Optimization completed in {optimization_time:.2f}s[/green]")
             console.print(f"[dim]Results saved to: {exp_dir}[/dim]")
 
     except KeyboardInterrupt:
@@ -564,17 +626,20 @@ def optimize_cmd(
 
 def create_progress_table():
     """Create progress table for live updates."""
-    table = Table(title="Optimization Progress", show_header=True, header_style="bold magenta")
+    table = Table(title="Optimization Progress", show_header=True,
+                  header_style="bold magenta", box=None)
 
     table.add_column("Metric", style="cyan", no_wrap=True)
-    table.add_column("Value", style="green")
+    table.add_column("Value", style="bold green")
+    table.add_column("Trend", style="italic dim")
 
-    table.add_row("Generation", "0/0")
-    table.add_row("Best Energy", "N/A")
-    table.add_row("Best Time", "N/A")
-    table.add_row("Solutions Found", "0")
-    table.add_row("Memory Saved", "0MB")
-    table.add_row("Sharing Efficiency", "0%")
+    table.add_row("Generation", "0/0", "")
+    table.add_row("Best Energy", "N/A", "")
+    table.add_row("Best Time", "N/A", "")
+    table.add_row("Solutions Found", "0", "")
+    table.add_row("Memory Saved", "0MB", "")
+    table.add_row("Sharing Efficiency", "0%", "")
+    table.add_row("Active Worker Threads", "0", "")
 
     return table
 
@@ -582,11 +647,13 @@ def create_progress_table():
 def print_optimization_summary(solution, summary, optimization_time, output_path):
     """Print optimization summary with detailed metrics."""
     console.print(
-        Panel.fit("[bold green]Optimization Complete![/bold green]", border_style="green")
+        Panel.fit("[bold green]Optimization Complete![/bold green]",
+                  border_style="green")
     )
 
     # Main results table
-    results_table = Table(title="Optimization Results", show_header=True, header_style="bold cyan")
+    results_table = Table(title="Optimization Results",
+                          show_header=True, header_style="bold cyan")
     results_table.add_column("Metric", style="cyan", no_wrap=True)
     results_table.add_column("Value", style="green")
     results_table.add_column("Details", style="dim")
@@ -595,16 +662,21 @@ def print_optimization_summary(solution, summary, optimization_time, output_path
     energy = solution.metrics.get("energy_joules", 0)
     duration = solution.metrics.get("duration_seconds", 0)
 
-    results_table.add_row("Energy Consumption", f"{energy:.6f}J", "Lower is better")
-    results_table.add_row("Execution Time", f"{duration:.6f}s", "Lower is better")
+    results_table.add_row("Energy Consumption",
+                          f"{energy:.6f}J", "Lower is better")
+    results_table.add_row(
+        "Execution Time", f"{duration:.6f}s", "Lower is better")
     results_table.add_row(
         "Mutation Type", solution.mutation_type, f"Generation {solution.generation}"
     )
     results_table.add_row(
-        "Total Solutions", str(summary.get("total_solutions", 0)), "Pareto archive size"
+        "Total Solutions", str(summary.get(
+            "total_solutions", 0)), "Pareto archive size"
     )
-    results_table.add_row("Optimization Time", f"{optimization_time:.2f}s", "Wall clock time")
-    results_table.add_row("Output File", str(output_path), "Optimized code location")
+    results_table.add_row("Optimization Time",
+                          f"{optimization_time:.2f}s", "Wall clock time")
+    results_table.add_row("Output File", str(
+        output_path), "Optimized code location")
 
     console.print(results_table)
 
@@ -618,12 +690,15 @@ def print_optimization_summary(solution, summary, optimization_time, output_path
         memory_table.add_column("Metric", style="yellow")
         memory_table.add_column("Value", style="green")
 
-        memory_table.add_row("Memory Saved", f"{memory_stats.get('memory_saved_mb', 0):.1f}MB")
-        memory_table.add_row("Copy Ratio", f"{memory_stats.get('copy_ratio', 0):.1%}")
+        memory_table.add_row(
+            "Memory Saved", f"{memory_stats.get('memory_saved_mb', 0):.1f}MB")
+        memory_table.add_row(
+            "Copy Ratio", f"{memory_stats.get('copy_ratio', 0):.1%}")
         memory_table.add_row(
             "Sharing Efficiency", f"{memory_stats.get('sharing_efficiency', 0):.1%}"
         )
-        memory_table.add_row("Active Wrappers", str(memory_stats.get("active_wrappers", 0)))
+        memory_table.add_row("Active Wrappers", str(
+            memory_stats.get("active_wrappers", 0)))
 
         console.print(memory_table)
 
@@ -637,13 +712,17 @@ def print_optimization_summary(solution, summary, optimization_time, output_path
         parallel_table.add_column("Metric", style="blue")
         parallel_table.add_column("Value", style="green")
 
-        parallel_table.add_row("Total Tasks", str(parallel_stats.get("total_tasks", 0)))
-        parallel_table.add_row("Completed Tasks", str(parallel_stats.get("completed_tasks", 0)))
-        parallel_table.add_row("Success Rate", f"{parallel_stats.get('success_rate', 0):.1%}")
+        parallel_table.add_row("Total Tasks", str(
+            parallel_stats.get("total_tasks", 0)))
+        parallel_table.add_row("Completed Tasks", str(
+            parallel_stats.get("completed_tasks", 0)))
+        parallel_table.add_row(
+            "Success Rate", f"{parallel_stats.get('success_rate', 0):.1%}")
         parallel_table.add_row(
             "Parallel Efficiency", f"{parallel_stats.get('parallel_efficiency', 0):.1%}"
         )
-        parallel_table.add_row("Throughput", f"{parallel_stats.get('throughput', 0):.1f} tasks/sec")
+        parallel_table.add_row(
+            "Throughput", f"{parallel_stats.get('throughput', 0):.1f} tasks/sec")
 
         console.print(parallel_table)
 
@@ -657,8 +736,10 @@ def print_optimization_summary(solution, summary, optimization_time, output_path
         learning_table.add_column("Metric", style="magenta")
         learning_table.add_column("Value", style="green")
 
-        learning_table.add_row("Total Outcomes", str(learning_stats.get("total_outcomes", 0)))
-        learning_table.add_row("Mutator Types", str(learning_stats.get("mutator_count", 0)))
+        learning_table.add_row("Total Outcomes", str(
+            learning_stats.get("total_outcomes", 0)))
+        learning_table.add_row("Mutator Types", str(
+            learning_stats.get("mutator_count", 0)))
 
         # Show top performing mutators
         top_mutators = learning_stats.get("top_mutators", [])[:3]
@@ -674,7 +755,8 @@ def print_optimization_summary(solution, summary, optimization_time, output_path
 
 def print_performance_profile(summary):
     """Print detailed performance profiling information."""
-    profile_table = Table(title="Performance Profile", show_header=True, header_style="bold red")
+    profile_table = Table(title="Performance Profile",
+                          show_header=True, header_style="bold red")
     profile_table.add_column("Component", style="red")
     profile_table.add_column("Performance", style="green")
     profile_table.add_column("Recommendation", style="yellow")
@@ -696,7 +778,8 @@ def print_performance_profile(summary):
     )
 
     # Parallel processing
-    parallel_stats = summary.get("parallel_stats", {}).get("execution_stats", {})
+    parallel_stats = summary.get(
+        "parallel_stats", {}).get("execution_stats", {})
     parallel_eff = parallel_stats.get("parallel_efficiency", 0)
 
     if parallel_eff > 0.7:
@@ -706,7 +789,8 @@ def print_performance_profile(summary):
     else:
         parallel_rec = "Consider tuning worker count"
 
-    profile_table.add_row("Parallel Processing", f"{parallel_eff:.1%} efficiency", parallel_rec)
+    profile_table.add_row("Parallel Processing",
+                          f"{parallel_eff:.1%} efficiency", parallel_rec)
 
     # Learning system
     learning_stats = summary.get("learning_stats", {})
