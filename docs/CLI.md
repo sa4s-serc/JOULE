@@ -78,6 +78,31 @@ Starts the HEDGE API server for remote access or web interface integration.
 python hedge.py serve [--port 8000] [--host 0.0.0.0]
 ```
 
+## Configuration Files
+
+HEDGE uses a hierarchical YAML-based configuration system. Settings are loaded and merged from the following locations (highest priority first):
+
+1.  **CLI Arguments**: Explicit flags like `--generations` or `--level`.
+2.  **Explicit Config**: File passed via `--config`.
+3.  **Local Configuration**: `hedge.yaml` in the current working directory.
+4.  **Global Configuration**: `~/.hedge/config.yaml`.
+5.  **Project Defaults**: `config/default.yaml`.
+
+### Common Configuration Structure
+```yaml
+optimization:
+  default_level: "standard"
+  default_generations: 10
+  default_population_size: 8
+
+llm:
+  default_provider: "gemini"
+  gemini:
+    model: "gemini-2.0-flash"
+  openai:
+    model: "gpt-4"
+```
+
 ## Environment Variables
 
 - `GEMINI_API_KEY`: API key for Google Gemini.

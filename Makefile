@@ -1,7 +1,7 @@
 # HEDGE Makefile
 # ===============
 
-.PHONY: help setup install test clean examples benchmark docs lint format
+.PHONY: help setup install dev-install test test-coverage coverage clean examples benchmark docs lint format
 
 # Default target
 help:
@@ -12,12 +12,14 @@ help:
 	@echo "  setup      - Run automated setup script"
 	@echo "  install    - Install dependencies"
 	@echo "  test       - Run test suite"
+	@echo "  coverage   - Run tests with coverage report"
 	@echo "  examples   - Run example optimizations"
 	@echo "  benchmark  - Run performance benchmarks"
 	@echo "  clean      - Clean temporary files and caches"
-	@echo "  lint       - Run code linting"
-	@echo "  format     - Format code with black"
+	@echo "  lint       - Run code linting (flake8, mypy)"
+	@echo "  format     - Format code (black, isort)"
 	@echo "  docs       - Generate documentation"
+	@echo "  dev-install- Install development dependencies"
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make setup && source .venv/bin/activate"
@@ -36,6 +38,8 @@ test:
 
 test-coverage:
 	python -m pytest tests/ --cov=src --cov-report=html --cov-report=term
+
+coverage: test-coverage
 
 # Examples and benchmarks
 examples:

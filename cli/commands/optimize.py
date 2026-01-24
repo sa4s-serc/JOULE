@@ -65,11 +65,12 @@ console = Console()
 @click.option('--log-file', type=click.Path(path_type=Path), help='Path to log file')
 @click.option('--log-to-file/--no-log-to-file', default=True, help='Whether to log to a file (default: True)')
 @click.option('--log-to-console/--no-log-to-console', default=None, help='Whether to log to console (default: False)')
+@click.option('--config', '-c', type=click.Path(exists=True, path_type=Path), help='Path to YAML configuration file')
 def optimize_cmd(target, tests, level, layers, generations, population_size, timeout, 
                 llm, output, out_dir, visualize, save_ir, 
                 exclude_mutators, verbose, quiet, profile, parallel, intelligent, 
                 batch_llm, memory_optimization, max_workers, max_memory_mb, 
-                benchmark, adaptive, log_file, log_to_file, log_to_console):
+                benchmark, adaptive, log_file, log_to_file, log_to_console, config=None):
     """
     Optimize Python code using hierarchical evolutionary strategies.
     
@@ -112,8 +113,44 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
         else:
             llm_provider = llm
     
-    # Setup logging
-    sys_config = load_config()
+    # Setup configuration and logging
+    sys_config = load_config(config)
+    
+    # Overwrite defaults with config values if they weren't explicitly set in CLI
+    # (Click doesn't make it easy to tell if a value was explicitly set or is just the default,
+    # but we can check the context or just manually merge if needed. 
+    # For now, we'll let CLI take precedence as per standard practice).
+    
+    opt_cfg = sys_config.get("optimization", {})
+    llm_cfg = sys_config.get("llm", {})
+    out_cfg = sys_config.get("output", {})
+    
+    # Use configuration defaults if not explicitly provided
+    # Note: generations, population_size, timeout have non-None defaults in Click, 
+    # so we should check if they match those defaults.
+    perf_cfg = sys_config.get("performance", {})
+    
+    # Use configuration defaults if not explicitly provided
+    if generations == 10: generations = opt_cfg.get("default_generations", generations)
+    if population_size == 8: population_size = opt_cfg.get("default_population_size", population_size)
+    if timeout == 30: timeout = opt_cfg.get("default_timeout", timeout)
+    if level == 'standard': level = opt_cfg.get("default_level", level)
+    
+    # Performance feature overrides (only if CLI defaults are used)
+    # Default for Click options is True for these, so we check if they are True
+    if parallel: parallel = perf_cfg.get("enable_parallel_mutations", parallel)
+    if intelligent: intelligent = perf_cfg.get("enable_intelligent_selection", intelligent)
+    if batch_llm: batch_llm = perf_cfg.get("enable_batch_llm", batch_llm)
+    if memory_optimization: memory_optimization = perf_cfg.get("enable_memory_optimization", memory_optimization)
+    if not adaptive: adaptive = perf_cfg.get("adaptive_population_size", adaptive)  # Default is False
+    
+    if max_workers == 8: max_workers = perf_cfg.get("max_workers", max_workers)
+    if max_memory_mb == 2048: max_memory_mb = perf_cfg.get("max_memory_mb", max_memory_mb)
+    
+    # Output overrides
+    if not visualize: visualize = out_cfg.get("auto_visualize", visualize)
+    if not save_ir: save_ir = out_cfg.get("save_ir_snapshots", save_ir)
+
     log_cfg = sys_config.get("logging", {})
     
     # Priority: CLI argument > Config file > Default
@@ -260,6 +297,8 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
             engine_config = EngineConfig(
                 generations=generations,
                 population_size=population_size,
+                archive_max_size=opt_cfg.get("archive_max_size", 50),
+                crossover_rate=opt_cfg.get("crossover_rate", 0.3),
                 save_ir_snapshots=save_ir,
                 enable_parallel_mutations=parallel,
                 enable_intelligent_selection=intelligent,
@@ -267,8 +306,10 @@ def optimize_cmd(target, tests, level, layers, generations, population_size, tim
                 enable_memory_optimization=memory_optimization,
                 max_memory_usage_mb=max_memory_mb,
                 max_concurrent_mutations=max_workers,
+                llm_batch_size=llm_cfg.get("batch_size", 5),
                 adaptive_population_size=adaptive,
-                adaptive_mutation_rate=adaptive
+                adaptive_mutation_rate=adaptive,
+                early_stopping_patience=opt_cfg.get("early_stopping_patience", 5)
             )
             
             # Create engine

@@ -180,7 +180,7 @@ class PythonCodeGenerator:
             test = self._generate_expr(stmt.test)
             lines = [f"{prefix}if {test}:"]
             lines.append(self._generate_block(stmt.body, indent + 1))
-            if stmt.orelse:
+            if stmt.orelse and stmt.orelse.statements:
                 lines.append(f"{prefix}else:")
                 lines.append(self._generate_block(stmt.orelse, indent + 1))
             return "\n".join(lines)
@@ -471,10 +471,10 @@ class PythonCodeGenerator:
             spec_str = ""
             if expr.format_spec:
                  spec = self._generate_expr(expr.format_spec)
-                 # Handle nested f-string specifiers if simplest case
-                 if spec.startswith("f'") and spec.endswith("'"):
+                 # Handle nested f-string specifiers (strip f"..." or f'...' or "..." or '...')
+                 if (spec.startswith('f"') and spec.endswith('"')) or (spec.startswith("f'") and spec.endswith("'")):
                      spec = spec[2:-1]
-                 elif spec.startswith("'") and spec.endswith("'"):
+                 elif (spec.startswith('"') and spec.endswith('"')) or (spec.startswith("'") and spec.endswith("'")):
                      spec = spec[1:-1]
                  spec_str = f":{spec}"
             

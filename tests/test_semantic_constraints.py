@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import MagicMock
-from src.application.mutators.semantic import SemanticMutator
+from src.application.mutators.semantic_layer import AlgorithmicIntentMutator
 from src.domain.ir import schema
 
 class TestSemanticConstraints:
@@ -14,7 +14,7 @@ class TestSemanticConstraints:
         mock_llm = MagicMock()
         mock_llm.complete.return_value = "import numpy as np\nnp.array([1,2,3])"
         
-        mutator = SemanticMutator(llm_client=mock_llm)
+        mutator = AlgorithmicIntentMutator(llm_client=mock_llm)
         mutator.codegen.generate = MagicMock(return_value="pass")
         mutator.parser.parse = MagicMock(return_value=schema.Module(body=schema.Block(statements=[
             schema.Import(names=[schema.Alias(name="numpy", asname="np")]),
@@ -34,7 +34,7 @@ class TestSemanticConstraints:
         mock_llm = MagicMock()
         mock_llm.complete.return_value = "import math\nx = math.sqrt(4)"
         
-        mutator = SemanticMutator(llm_client=mock_llm)
+        mutator = AlgorithmicIntentMutator(llm_client=mock_llm)
         mutator.codegen.generate = MagicMock(return_value="pass")
         mutator.parser.parse = MagicMock(return_value=schema.Module(body=schema.Block(statements=[
             schema.Import(names=[schema.Alias(name="math")]),

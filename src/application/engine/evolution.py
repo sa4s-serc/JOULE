@@ -248,6 +248,7 @@ class EvolutionaryEngine:
         self.validator = IRValidator(strict=False)
         self.metrics_collector = IRMetricsCollector()
         self.crossover_manager = CrossoverManager()
+        self.serializer = IRSerializer()
         
         # Enhanced components
         if self.config.enable_parallel_mutations:
@@ -607,6 +608,10 @@ class EvolutionaryEngine:
         
         self.archive.update(initial_solution)
         self.best_solution = initial_solution
+        
+        # Save baseline snapshot
+        if self.config.save_ir_snapshots:
+            self._save_ir_snapshot(initial_solution)
         
         logger.info(f"Baseline metrics: {baseline_metrics}")
         

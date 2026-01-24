@@ -267,7 +267,7 @@ class WithItem(IRNode):
 
 class MatchCase(IRNode):
     pattern: "Pattern"  # Forward Ref
-    guard: Optional[Expression]
+    guard: Optional[Expression] = None
     body: List["Statement"]
 
 class Pattern(IRNode):

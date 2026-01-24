@@ -17,7 +17,8 @@ console = Console()
 @click.option('--output', '-o', type=click.Path(path_type=Path), help='Save analysis to JSON file')
 @click.option('--detailed', is_flag=True, help='Show detailed analysis including function-level metrics')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table', help='Output format')
-def analyze_cmd(code, output, detailed, format):
+@click.option('--config', '-c', type=click.Path(exists=True, path_type=Path), help='Path to YAML configuration file')
+def analyze_cmd(code, output, detailed, format, config=None):
     """
     Analyze Python code complexity and structure.
     

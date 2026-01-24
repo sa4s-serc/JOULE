@@ -47,7 +47,9 @@ BENCHMARK_PROBLEMS = {
 @click.option('--output-dir', '-o', type=click.Path(path_type=Path), help='Output directory for results')
 @click.option('--compare-levels', is_flag=True, help='Compare different optimization levels')
 @click.option('--quick', is_flag=True, help='Quick benchmark with reduced generations')
-def benchmark_cmd(problems, level, generations, output_dir, compare_levels, quick):
+@click.option('--quick', is_flag=True, help='Quick benchmark with reduced generations')
+@click.option('--config', '-c', type=click.Path(exists=True, path_type=Path), help='Path to YAML configuration file')
+def benchmark_cmd(problems, level, generations, output_dir, compare_levels, quick, config=None):
     """
     Run benchmarks on example problems to evaluate HEDGE performance.
     
@@ -82,9 +84,9 @@ def benchmark_cmd(problems, level, generations, output_dir, compare_levels, quic
     
     # Run benchmarks
     if compare_levels:
-        results = _run_level_comparison(problem_list, generations, output_dir)
+        results = _run_level_comparison(problem_list, generations, output_dir, config)
     else:
-        results = _run_single_level(problem_list, level, generations, output_dir)
+        results = _run_single_level(problem_list, level, generations, output_dir, config)
     
     # Display results
     _display_benchmark_results(results, compare_levels)
@@ -98,7 +100,7 @@ def benchmark_cmd(problems, level, generations, output_dir, compare_levels, quic
     
     return 0
 
-def _run_single_level(problem_list, level, generations, output_dir):
+def _run_single_level(problem_list, level, generations, output_dir, config_path=None):
     """Run benchmarks at a single optimization level."""
     results = {
         'level': level,
@@ -131,7 +133,7 @@ def _run_single_level(problem_list, level, generations, output_dir):
             # Run optimization
             problem_result = _run_optimization(
                 target_path, tests_path, level, generations, 
-                output_dir / problem_name
+                output_dir / problem_name, config_path
             )
             
             # Calculate improvement
@@ -151,7 +153,7 @@ def _run_single_level(problem_list, level, generations, output_dir):
     
     return results
 
-def _run_level_comparison(problem_list, generations, output_dir):
+def _run_level_comparison(problem_list, generations, output_dir, config_path=None):
     """Run benchmarks comparing different optimization levels."""
     levels = ['micro', 'basic', 'standard', 'advanced']
     results = {
@@ -195,7 +197,7 @@ def _run_level_comparison(problem_list, generations, output_dir):
                 # Run optimization
                 level_result = _run_optimization(
                     target_path, tests_path, level, generations,
-                    output_dir / f"{problem_name}_{level}"
+                    output_dir / f"{problem_name}_{level}", config_path
                 )
                 
                 if level_result:
@@ -207,7 +209,7 @@ def _run_level_comparison(problem_list, generations, output_dir):
     
     return results
 
-def _run_optimization(target_path, tests_path, level, generations, exp_dir):
+def _run_optimization(target_path, tests_path, level, generations, exp_dir, config_path=None):
     """Run a single optimization and return results."""
     try:
         from cli.commands.optimize import optimize_cmd
@@ -218,14 +220,19 @@ def _run_optimization(target_path, tests_path, level, generations, exp_dir):
         
         # Run optimization using the CLI command
         runner = CliRunner()
-        result = runner.invoke(optimize_cmd, [
+        args = [
             str(target_path),
             str(tests_path),
             '--level', level,
             '--generations', str(generations),
             '--out-dir', str(exp_dir),
             '--quiet'
-        ])
+        ]
+        
+        if config_path:
+            args.extend(['--config', str(config_path)])
+            
+        result = runner.invoke(optimize_cmd, args)
         
         if result.exit_code != 0:
             return {'error': f"Optimization failed: {result.output}"}

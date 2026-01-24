@@ -1,83 +1,80 @@
 # HEDGE Default Configuration
 # ===========================
+# This file defines the default settings for the Hierarchical Evolutionary Darwin-Green Engine.
+# These can be overridden by ~/.hedge/config.yaml or a local hedge.yaml file.
 
-# Optimization settings
+# Optimization Core Settings
 optimization:
-  default_level: "standard"
-  default_generations: 10
-  default_population_size: 8
-  default_timeout: 30
+  default_level: "standard"      # micro, basic, standard, advanced, aggressive
+  default_generations: 10        # Number of evolutionary cycles
+  default_population_size: 8     # Number of variants per generation
+  default_timeout: 30            # Max execution time per test run (seconds)
+  archive_max_size: 50           # Max size of the Pareto archive
+  crossover_rate: 0.3            # Probability of performing crossover
+  min_mutator_prob: 0.2          # Minimum probability for any single mutator
+  early_stopping_patience: 5     # Stop if no Pareto improvement for N generations
   
-  # Layer-specific settings
+  # Layer-specific flags
   layers:
     semantic:
       enabled: true
-      confidence_threshold: 0.7
       max_retries: 3
     algorithmic:
       enabled: true
-      complexity_threshold: 10
     syntactic:
       enabled: true
-      pythonic_only: false
     micro:
       enabled: true
-      aggressive_folding: false
 
-# LLM Configuration
+# LLM Configuration for Advanced Optimization
 llm:
-  default_provider: "gemini"
+  default_provider: "gemini"      # 'gemini' or 'openai'
   
   openai:
-    model: "gpt-4"
-    temperature: 0.1
+    model: "gpt-4o"
+    temperature: 0.2
     max_tokens: 2000
     
   gemini:
-    model: "gemini-pro"
+    model: "gemini-2.5-flash"
     temperature: 0.1
     
-  # Fallback behavior
-  fallback_on_error: true
-  cache_responses: true
+  # Batch Processing
+  batch_size: 5                  # Number of concurrent LLM requests
+  cache_responses: true          # Cache LLM responses to save costs
 
-# Execution settings
+# Performance & Resource Management
+performance:
+  enable_parallel_mutations: true
+  enable_intelligent_selection: true
+  enable_batch_llm: true
+  enable_memory_optimization: true
+  max_workers: 8                 # Max CPU workers for parallel tasks
+  max_memory_mb: 2048            # Max memory usage for IR storage
+  
+  # Adaptive Parameters
+  adaptive_population_size: true
+  adaptive_mutation_rate: true
+
+# Execution Environment
 execution:
   runner_type: "green_gym"
   energy_monitoring: true
-  memory_limit_mb: 512
-  parallel_evaluation: false
-  
-# Output and visualization
+  samples_per_test: 3
+
+# Output & Visualization
 output:
   experiment_base_dir: "experiments"
-  auto_visualize: false
-  save_ir_snapshots: false
-  save_intermediate_results: true
+  auto_visualize: false          # Automatically run visualization after optimization
+  save_ir_snapshots: false       # Save IR state for every variant (high storage usage)
   
-  # Visualization settings
-  visualization:
-    theme: "auto"
-    interactive_plots: true
-    export_formats: ["html", "png"]
-    
-# UI and CLI settings
-ui:
-  show_progress: true
-  verbose_by_default: false
-  color_output: true
-  banner_enabled: true
-  
-# Performance settings
-performance:
-  cache_enabled: true
-  cache_size_mb: 100
-  parallel_mutations: false
-  batch_size: 5
-  
-# Logging configuration
+  # Visualization theme
+  theme: "auto"                  # auto, light, dark
+
+# Logging Configuration
 logging:
-  level: "INFO"
-  file_logging: false
+  level: "INFO"                  # DEBUG, INFO, WARNING, ERROR
   log_file: "hedge.log"
+  log_to_file: true
+  log_to_console: false
   structured_logging: false

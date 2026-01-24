@@ -9,7 +9,12 @@ from rich.table import Table
 from rich.panel import Panel
 
 from cli.utils.banner import print_success, print_error, print_info, print_warning
-from src.utils.config import load_config, merge_config, save_config, CONFIG_FILE, DEFAULT_CONFIG
+from src.utils.config import (
+    load_config, merge_config, save_config, 
+    GLOBAL_CONFIG as CONFIG_FILE, get_default_config
+)
+
+DEFAULT_CONFIG = get_default_config()
 
 console = Console()
 
@@ -130,6 +135,10 @@ def init_config():
     )
     config['llm']['default_provider'] = provider
     
+    # Initialize provider section if missing
+    if provider not in config['llm']:
+        config['llm'][provider] = {}
+    
     # Check for API keys with helpful guidance
     if provider == 'openai':
         api_key = os.getenv('OPENAI_API_KEY')
@@ -199,7 +208,7 @@ def init_config():
         config['ui'] = {}
     config['ui']['theme'] = theme
     
-    # Save configuration
+    # Save configuration to global config by default
     save_config(config)
     
     # Success summary

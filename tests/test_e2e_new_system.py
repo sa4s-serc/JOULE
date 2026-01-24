@@ -6,7 +6,7 @@ Tests error handling, edge cases, and end-to-end workflows.
 import pytest
 from pathlib import Path
 from src.application.engine.evolution import EvolutionaryEngine
-from src.application.mutators.structural import StructuralMutator
+from src.application.mutators.syntactic_layer import PythonicIdiomOptimizer
 from src.infrastructure.execution.runner import GreenGymRunner
 from src.infrastructure.parsing.python_parser import PythonParser
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
@@ -29,11 +29,12 @@ def test():
 """
         
         runner = GreenGymRunner(timeout_seconds=10)
-        mutator = StructuralMutator(use_context=False)
+        mutator = PythonicIdiomOptimizer()
         engine = EvolutionaryEngine(
             mutators=[mutator],
             runner=runner,
-            generations=2
+            config=None,
+            llm_client=None
         )
         
         solutions = engine.optimize(code, test_code)
@@ -45,7 +46,8 @@ def test():
         for sol in solutions:
             assert sol.ir is not None
             assert sol.metrics is not None
-            assert 'energy_joules' in sol.metrics or 'duration_seconds' in sol.metrics
+            # metrics keys changed in some runners, check for any common metric
+            assert any(k in sol.metrics for k in ['energy_joules', 'duration_seconds', 'time_seconds'])
     
     def test_optimization_with_no_mutations(self):
         """Test when no mutations are possible."""
@@ -62,11 +64,11 @@ def test():
 """
         
         runner = GreenGymRunner(timeout_seconds=10)
-        mutator = StructuralMutator(use_context=False)
+        mutator = PythonicIdiomOptimizer()
         engine = EvolutionaryEngine(
             mutators=[mutator],
             runner=runner,
-            generations=1
+            config=None
         )
         
         solutions = engine.optimize(code, test_code)
@@ -90,11 +92,11 @@ def test():
 """
         
         runner = GreenGymRunner(timeout_seconds=5)
-        mutator = StructuralMutator()
+        mutator = PythonicIdiomOptimizer()
         engine = EvolutionaryEngine(
             mutators=[mutator],
             runner=runner,
-            generations=1
+            config=None
         )
         
         # Should return empty list, not crash
@@ -114,11 +116,11 @@ def test():
 """
         
         runner = GreenGymRunner(timeout_seconds=5)
-        mutator = StructuralMutator()
+        mutator = PythonicIdiomOptimizer()
         engine = EvolutionaryEngine(
             mutators=[mutator],
             runner=runner,
-            generations=1
+            config=None
         )
         
         solutions = engine.optimize(code, test_code)
@@ -140,11 +142,11 @@ def test():
 """
         
         runner = GreenGymRunner(timeout_seconds=1)
-        mutator = StructuralMutator()
+        mutator = PythonicIdiomOptimizer()
         engine = EvolutionaryEngine(
             mutators=[mutator],
             runner=runner,
-            generations=1
+            config=None
         )
         
         solutions = engine.optimize(infinite_loop, test_code)
@@ -160,7 +162,6 @@ class TestParserRobustness:
     def test_parse_whitespace_only(self):
         """Test parsing code with only whitespace."""
         code = """
-
 
         
 """
@@ -284,7 +285,7 @@ class TestMutatorRobustness:
     
     def setup_method(self):
         self.parser = PythonParser()
-        self.mutator = StructuralMutator(use_context=False)
+        self.mutator = PythonicIdiomOptimizer()
     
     def test_mutate_single_statement(self):
         """Test mutating function with single statement."""
