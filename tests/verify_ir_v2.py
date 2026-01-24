@@ -1,38 +1,42 @@
-import sys
 import ast
-from src.infrastructure.parsing.python_parser import PythonParser
+import sys
+
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+from src.infrastructure.parsing.python_parser import PythonParser
+
 
 def test_round_trip(code: str, name: str):
     print(f"Testing {name}...")
     try:
         parser = PythonParser()
         codegen = PythonCodeGenerator()
-        
+
         # 1. Parse to IR
         ir_module = parser.parse(code)
-        
+
         # 2. Generate Code
         gen_code = codegen.generate(ir_module)
-        
+
         print(f"Original:\n{code.strip()}")
         print(f"Generated:\n{gen_code.strip()}")
-        
+
         # 3. Verify Equality (ignoring whitespace nuances for now, or just re-parsing generated)
         # Ideally we check if ASTs match
         ast1 = ast.dump(ast.parse(code), indent=2)
         ast2 = ast.dump(ast.parse(gen_code), indent=2)
-        
+
         if ast1 == ast2:
             print("SUCCESS: ASTs match")
         else:
             print("WARNING: ASTs differ (might be formatting)")
             # print(f"Diff:\n{gen_code}")
-            
+
     except Exception as e:
         print(f"FAILED: {e}")
         import traceback
+
         traceback.print_exc()
+
 
 # Test Cases
 

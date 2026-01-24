@@ -69,10 +69,12 @@ lint:
 	-mypy src/ --ignore-missing-imports
 
 format:
+	@echo "Removing unused imports and variables..."
+	autoflake --in-place --remove-all-unused-imports --remove-unused-variables --recursive src/ cli/ scripts/ tests/
 	@echo "Formatting with black..."
-	black src/ cli/ scripts/ --line-length=100
+	black src/ cli/ scripts/ tests/ --line-length=100
 	@echo "Sorting imports with isort..."
-	isort src/ cli/ scripts/
+	isort src/ cli/ scripts/ tests/
 
 # Documentation
 docs:
@@ -86,7 +88,7 @@ docs:
 # Development helpers
 dev-install:
 	pip install -r requirements.txt
-	pip install black flake8 mypy isort pytest-cov
+	pip install black flake8 mypy isort pytest-cov autoflake
 
 check-config:
 	python hedge.py config validate

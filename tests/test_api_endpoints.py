@@ -1,7 +1,7 @@
-
-import pytest
 from fastapi.testclient import TestClient
+
 from api.main import app
+
 
 class TestAPI:
     def setup_method(self):
@@ -12,7 +12,7 @@ class TestAPI:
         # We don't want to start a real long-running task, so we just check for validation error
         # or mock the manager later if needed. For now, check validation.
         response = self.client.post("/optimize", json={})
-        assert response.status_code == 422 # Validation Error (missing fields)
+        assert response.status_code == 422  # Validation Error (missing fields)
 
     def test_get_task_not_found(self):
         """Test status retrieval for non-existent task."""
@@ -25,7 +25,7 @@ class TestAPI:
         request_data = {
             "target_code": "def test(): pass",
             "test_code": "def check(): pass",
-            "config": {"generations": 1}
+            "config": {"generations": 1},
         }
         # This will actually call start_task which is async and uses the task manager.
         # It should return a TaskStatus object.

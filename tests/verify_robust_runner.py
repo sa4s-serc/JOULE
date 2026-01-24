@@ -1,7 +1,6 @@
-
 import logging
-import sys
 import os
+import sys
 
 # Ensure src is in path
 sys.path.append(os.getcwd())
@@ -11,10 +10,11 @@ from src.infrastructure.execution.runner import GreenGymRunner
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
+
 def verify_robust_runner():
     print("Initializing Robust Runner (samples=3)...")
     runner = GreenGymRunner(timeout_seconds=30, samples=3)
-    
+
     # Simple code that does some work
     code = """
 import time
@@ -26,16 +26,16 @@ def compute():
     time.sleep(0.01) # Sleep to ensure non-zero duration
     return val
 """
-    
+
     # Test harness calls compute
     test_code = """
 import candidate
 candidate.compute()
 """
-    
+
     print("Running execution...")
     success, metrics, output = runner.run(code, test_code)
-    
+
     if success:
         print("SUCCESS: Execution passed.")
         print(f"Aggregated Metrics: {metrics}")
@@ -46,6 +46,7 @@ candidate.compute()
     else:
         print("FAILED: Execution failed.")
         print("Output:", output)
+
 
 if __name__ == "__main__":
     verify_robust_runner()

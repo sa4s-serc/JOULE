@@ -3,33 +3,27 @@ Test Suite for Enhanced Mutators
 
 Tests the new advanced mutator implementations.
 """
+
 import pytest
-from src.application.mutators.syntactic_layer import (
-    PythonicIdiomOptimizer,
-    ComprehensionOptimizer
-)
-from src.application.mutators.micro_layer import (
-    LoopMicroOptimizer,
-    ArithmeticConstantSimplifier,
-    LoopInvariantMover
-)
+
 from src.application.mutators.algorithmic_layer import (
-    DataStructureOptimizer,
-    DuplicateWorkEliminator
-)
-from src.infrastructure.parsing.python_parser import PythonParser
+    DataStructureOptimizer, DuplicateWorkEliminator)
+from src.application.mutators.micro_layer import (LoopInvariantMover,
+                                                  LoopMicroOptimizer)
+from src.application.mutators.syntactic_layer import PythonicIdiomOptimizer
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+from src.infrastructure.parsing.python_parser import PythonParser
 
 
 class TestEnhancedSyntacticMutator:
     """Test suite for enhanced syntactic mutator."""
-    
+
     def setup_method(self):
         """Set up test fixtures."""
         self.mutator = PythonicIdiomOptimizer()
         self.parser = PythonParser()
         self.codegen = PythonCodeGenerator()
-    
+
     def test_comprehension_optimization(self):
         """Test loop to comprehension conversion."""
         code = """
@@ -41,11 +35,11 @@ def test():
 """
         ir = self.parser.parse(code)
         variants = self.mutator.mutate(ir)
-        
+
         # Should produce comprehension variants
         assert isinstance(variants, list)
         assert len(variants) > 0
-        
+
         # Check if any variant contains comprehension
         for variant_ir, name in variants:
             if "Comprehension" in name:
@@ -55,13 +49,13 @@ def test():
 
 class TestDataStructureOptimization:
     """Test suite for data structure optimization mutator."""
-    
+
     def setup_method(self):
         """Set up test fixtures."""
         self.mutator = DataStructureOptimizer()
         self.parser = PythonParser()
         self.codegen = PythonCodeGenerator()
-    
+
     def test_list_to_set_membership(self):
         """Test list to set conversion for membership testing."""
         code = """
@@ -72,9 +66,9 @@ def test(x):
 """
         ir = self.parser.parse(code)
         variants = self.mutator.mutate(ir)
-        
+
         assert isinstance(variants, list)
-        
+
         # Check for set conversion
         found = False
         for variant_ir, name in variants:
@@ -84,7 +78,7 @@ def test(x):
                 assert "{" in generated_code or "set(" in generated_code
                 found = True
         assert found
-    
+
     def test_insertion_optimization(self):
         """Test list to deque conversion for insertions."""
         code = """
@@ -95,7 +89,7 @@ def test():
 """
         ir = self.parser.parse(code)
         variants = self.mutator.mutate(ir)
-        
+
         assert isinstance(variants, list)
         found = False
         for variant_ir, name in variants:
@@ -108,12 +102,12 @@ def test():
 
 class TestAlgorithmicMutators:
     """Test suite for algorithmic layer mutators."""
-    
+
     def setup_method(self):
         """Set up test fixtures."""
         self.parser = PythonParser()
         self.codegen = PythonCodeGenerator()
-    
+
     def test_duplicate_work_elimination(self):
         """Test duplicate computation elimination."""
         code = """
@@ -125,7 +119,7 @@ def test(a, b):
         ir = self.parser.parse(code)
         transformer = DuplicateWorkEliminator()
         new_ir = transformer.visit(ir)
-        
+
         if transformer.changed:
             generated_code = self.codegen.generate(new_ir)
             # Second a+b should be replaced by x
@@ -134,13 +128,13 @@ def test(a, b):
 
 class TestLoopOptimization:
     """Test suite for loop optimization."""
-    
+
     def setup_method(self):
         """Set up test fixtures."""
         self.parser = PythonParser()
         self.codegen = PythonCodeGenerator()
         self.mutator = LoopMicroOptimizer()
-    
+
     def test_multiplier_strength_reduction(self):
         """Test strength reduction in loops."""
         code = """
@@ -152,7 +146,7 @@ def test(n):
 """
         ir = self.parser.parse(code)
         variants = self.mutator.mutate(ir)
-        
+
         assert isinstance(variants, list)
         found = False
         for variant_ir, name in variants:
@@ -176,7 +170,7 @@ def test(n):
         ir = self.parser.parse(code)
         transformer = LoopInvariantMover()
         new_ir = transformer.visit(ir)
-        
+
         # LICM should attempt to move x declaration OR operations
         # Wait, the current implementation might only move certain things.
         # Let's just ensure it doesn't crash and returns valid IR.

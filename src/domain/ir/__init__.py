@@ -8,20 +8,16 @@ Provides the core IR schema and utilities for:
 - Tree traversal and transformation
 - Complexity metrics
 """
+
 from src.domain.ir import schema
-from src.domain.ir.utils import (
-    NodeVisitor,
-    NodeTransformer,
-    find_nodes,
-    find_all_nodes,
-    collect_names,
-    traverse,
-    VariableReplacer,
-)
-from src.domain.ir.context import MutationContext, DependencyGraph, SymbolInfo, ScopeInfo
-from src.domain.ir.validators import IRValidator, ValidationResult
-from src.domain.ir.serialization import IRSerializer
+from src.domain.ir.context import (DependencyGraph, MutationContext, ScopeInfo,
+                                   SymbolInfo)
 from src.domain.ir.metrics import IRMetricsCollector, MutationStatistics
+from src.domain.ir.serialization import IRSerializer
+from src.domain.ir.utils import (NodeTransformer, NodeVisitor,
+                                 VariableReplacer, collect_names,
+                                 find_all_nodes, find_nodes, traverse)
+from src.domain.ir.validators import IRValidator, ValidationResult
 
 __all__ = [
     # Schema module

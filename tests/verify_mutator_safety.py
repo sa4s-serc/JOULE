@@ -1,12 +1,12 @@
-
 import logging
-from src.infrastructure.parsing.python_parser import PythonParser
-from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+
 from src.application.mutators.structural import StructuralMutator
-from src.domain.ir.context import MutationContext
+from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+from src.infrastructure.parsing.python_parser import PythonParser
 
 # Configure logging to see mutator decisions
 logging.basicConfig(level=logging.DEBUG)
+
 
 def verify_safety():
     parser = PythonParser()
@@ -39,7 +39,7 @@ print("B")
     for _ in range(20):
         variants = mutator.mutate(ir_side)
         for var, name in variants:
-             if name == "Structural_ReorderStatements":
+            if name == "Structural_ReorderStatements":
                 print("FAILED: Reordered side-effect statements!")
                 print(codegen.generate(var))
                 return
@@ -59,9 +59,9 @@ y = 2
                 reordered_count += 1
                 gen = codegen.generate(var)
                 # Check if it actually swapped
-                if "y = 2" in gen.split('\n')[0]: 
-                    pass # Good
-    
+                if "y = 2" in gen.split("\n")[0]:
+                    pass  # Good
+
     if reordered_count > 0:
         print(f"PASSED: Reordered independent statements {reordered_count} times.")
     else:
@@ -81,7 +81,7 @@ z = f() + g()
                 swapped = True
                 print("FAILED: Swapped impure operands!")
                 print(codegen.generate(var))
-    
+
     if not swapped:
         print("PASSED: Did not swap impure operands.")
 
@@ -96,11 +96,12 @@ z = a + b
         for var, name in variants:
             if name == "Structural_SwapOperands":
                 swapped_pure = True
-    
+
     if swapped_pure:
         print("PASSED: Swapped pure operands.")
     else:
         print("WARNING: Did not swap pure operands (random luck?)")
+
 
 if __name__ == "__main__":
     verify_safety()

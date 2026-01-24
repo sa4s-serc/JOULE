@@ -1,8 +1,6 @@
-
-import ast
-import sys
-from src.infrastructure.parsing.python_parser import PythonParser
 from src.domain.ir import schema
+from src.infrastructure.parsing.python_parser import PythonParser
+
 
 def test_metadata():
     code = """
@@ -13,7 +11,7 @@ y = foo(10)
 """
     parser = PythonParser()
     ir_module = parser.parse(code.strip())
-    
+
     # Check FunctionDef
     func_def = ir_module.body.statements[0]
     assert isinstance(func_def, schema.FunctionDef)
@@ -27,7 +25,7 @@ y = foo(10)
     assert isinstance(ret_stmt, schema.Return)
     print(f"Return loc: line={ret_stmt.lineno}, col={ret_stmt.col_offset}")
     assert ret_stmt.lineno is not None
-    
+
     # Check Expression (x + 1)
     bin_op = ret_stmt.value
     assert isinstance(bin_op, schema.BinaryOp)
@@ -42,10 +40,12 @@ y = foo(10)
 
     print("SUCCESS: Metadata populated correctly.")
 
+
 if __name__ == "__main__":
     try:
         test_metadata()
     except Exception as e:
         print(f"FAILED: {e}")
         import traceback
+
         traceback.print_exc()

@@ -19,37 +19,27 @@ Layers:
 - MICRO: Low-level optimizations (constant folding, dead code elimination)
 """
 
+from .advanced_performance import (AdvancedAlgorithmicOptimizer,
+                                   MemoryOptimizer, VectorizationOptimizer)
+from .algorithmic_layer import ComplexityReducer, DataStructureOptimizer
 # Core base classes
-from .base import (
-    MutationLayer,
-    MutationResult,
-    LayeredMutator,
-    MutationOrchestrator as LegacyMutationOrchestrator,  # Legacy
-    create_mutation_result,
-    safe_deepcopy_ir,
-    mutate_ir,
-    LazyIRWrapper
-)
-
+from .base import (LayeredMutator, MutationLayer, MutationResult,
+                   create_mutation_result, mutate_ir, safe_deepcopy_ir)
+from .ir_mutator_base import (IRMutationMetadata, IROnlyMutator,
+                              IRTransformerBase)
+from .micro_layer import (ConstantOptimizer, DeadCodeEliminator,
+                          LoopMicroOptimizer)
 # Enhanced system
-from .orchestrator import MutationOrchestrator, OrchestrationConfig, LayerResult
-from .registry import (
-    MutatorRegistry,
-    get_registry,
-    register_mutator,
-    auto_discover_mutators
-)
-from .ir_mutator_base import IROnlyMutator, IRTransformerBase, IRMutationMetadata
-
+from .orchestrator import (LayerResult, MutationOrchestrator,
+                           OrchestrationConfig)
+from .registry import (MutatorRegistry, auto_discover_mutators, get_registry,
+                       register_mutator)
 # LLM base with security
 from .semantic_base import LLMMutatorBase, get_llm_cache
-
 # Layer implementations
 from .semantic_layer import AlgorithmicIntentMutator, ProgramIntentMutator
-from .algorithmic_layer import DataStructureOptimizer, ComplexityReducer
-from .syntactic_layer import PythonicIdiomOptimizer, CodePatternOptimizer
-from .micro_layer import ConstantOptimizer, DeadCodeEliminator, LoopMicroOptimizer
-from .advanced_performance import AdvancedAlgorithmicOptimizer, MemoryOptimizer, VectorizationOptimizer
+from .syntactic_layer import CodePatternOptimizer, PythonicIdiomOptimizer
+
 
 # Utility functions
 def initialize_mutator_system():
@@ -57,66 +47,63 @@ def initialize_mutator_system():
     auto_discover_mutators()
     return get_registry()
 
+
 def get_available_mutators():
     """Get all available mutators organized by layer."""
     registry = get_registry()
-    return {
-        layer: registry.get_layer_mutators(layer)
-        for layer in MutationLayer
-    }
+    return {layer: registry.get_layer_mutators(layer) for layer in MutationLayer}
+
 
 def create_orchestrator(config=None):
     """Create a new mutation orchestrator with optional configuration."""
     return MutationOrchestrator(config)
+
 
 # Auto-initialize on import
 try:
     initialize_mutator_system()
 except Exception as e:
     import logging
+
     logging.warning(f"Failed to auto-initialize mutator system: {e}")
 
 __all__ = [
     # Core classes
-    'MutationLayer',
-    'MutationResult', 
-    'LayeredMutator',
-    'MutationOrchestrator',
-    'OrchestrationConfig',
-    'LayerResult',
-    
+    "MutationLayer",
+    "MutationResult",
+    "LayeredMutator",
+    "MutationOrchestrator",
+    "OrchestrationConfig",
+    "LayerResult",
     # Registry system
-    'MutatorRegistry',
-    'get_registry',
-    'register_mutator',
-    'auto_discover_mutators',
-    
+    "MutatorRegistry",
+    "get_registry",
+    "register_mutator",
+    "auto_discover_mutators",
     # Enhanced base classes
-    'IROnlyMutator',
-    'IRTransformerBase',
-    'IRMutationMetadata',
-    'LLMMutatorBase',
-    
+    "IROnlyMutator",
+    "IRTransformerBase",
+    "IRMutationMetadata",
+    "LLMMutatorBase",
     # Layer mutators
-    'AlgorithmicIntentMutator',
-    'ProgramIntentMutator', 
-    'DataStructureOptimizer',
-    'ComplexityReducer',
-    'PythonicIdiomOptimizer',
-    'CodePatternOptimizer',
-    'ConstantOptimizer',
-    'DeadCodeEliminator',
-    'LoopMicroOptimizer',
-    'AdvancedAlgorithmicOptimizer',
-    'MemoryOptimizer',
-    'VectorizationOptimizer',
-    
+    "AlgorithmicIntentMutator",
+    "ProgramIntentMutator",
+    "DataStructureOptimizer",
+    "ComplexityReducer",
+    "PythonicIdiomOptimizer",
+    "CodePatternOptimizer",
+    "ConstantOptimizer",
+    "DeadCodeEliminator",
+    "LoopMicroOptimizer",
+    "AdvancedAlgorithmicOptimizer",
+    "MemoryOptimizer",
+    "VectorizationOptimizer",
     # Utility functions
-    'initialize_mutator_system',
-    'get_available_mutators',
-    'create_orchestrator',
-    'create_mutation_result',
-    'safe_deepcopy_ir',
-    'mutate_ir',
-    'get_llm_cache'
+    "initialize_mutator_system",
+    "get_available_mutators",
+    "create_orchestrator",
+    "create_mutation_result",
+    "safe_deepcopy_ir",
+    "mutate_ir",
+    "get_llm_cache",
 ]

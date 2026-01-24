@@ -6,10 +6,13 @@ These mutators operate at the highest abstraction level, focusing on:
 - High-level program intent and logic flow
 - Architectural patterns and design improvements
 """
+
 import logging
 from typing import List, Optional, Set
+
+from src.application.mutators.base import (MutationLayer, MutationResult,
+                                           create_mutation_result)
 from src.application.mutators.ir_mutator_base import IROnlyMutator
-from src.application.mutators.base import MutationLayer, MutationResult, create_mutation_result
 from src.application.mutators.semantic_base import LLMMutatorBase
 from src.domain.ir import schema
 
@@ -19,67 +22,75 @@ logger = logging.getLogger(__name__)
 class AlgorithmicIntentMutator(IROnlyMutator, LLMMutatorBase):
     """
     Focuses on high-level algorithmic improvements and intent optimization.
-    
+
     This mutator understands the program's purpose and suggests algorithmic
     alternatives that maintain the same intent but with better characteristics.
     """
-    
+
     def __init__(self, llm_client=None, enabled_strategies: Optional[Set[str]] = None):
         IROnlyMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
         LLMMutatorBase.__init__(self, llm_client)
-    
+
     def get_available_strategies(self) -> List[str]:
         return [
             "AlgorithmicIntent_ComplexityReduction",
-            "AlgorithmicIntent_PatternRecognition", 
-            "AlgorithmicIntent_ArchitecturalImprovement"
+            "AlgorithmicIntent_PatternRecognition",
+            "AlgorithmicIntent_ArchitecturalImprovement",
         ]
-    
+
     def _apply_ir_mutations(self, ir: schema.Module) -> List[MutationResult]:
         """Apply semantic-level algorithmic mutations."""
         results = []
         code = self.codegen.generate(ir)
         allowed_imports = self._get_imports(ir)
-        
+
         # Strategy 1: Complexity Reduction
         if self._is_strategy_enabled("AlgorithmicIntent_ComplexityReduction"):
             variant = self._optimize_algorithmic_complexity(code, allowed_imports)
             if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="AlgorithmicIntent_ComplexityReduction",
-                    layer=MutationLayer.SEMANTIC,
-                    confidence=0.8,
-                    description="Reduced algorithmic complexity through better algorithm selection"
-                ))
-        
+                results.append(
+                    create_mutation_result(
+                        ir=variant,
+                        strategy_name="AlgorithmicIntent_ComplexityReduction",
+                        layer=MutationLayer.SEMANTIC,
+                        confidence=0.8,
+                        description="Reduced algorithmic complexity through better algorithm selection",
+                    )
+                )
+
         # Strategy 2: Pattern Recognition and Replacement
         if self._is_strategy_enabled("AlgorithmicIntent_PatternRecognition"):
             variant = self._recognize_and_optimize_patterns(code, allowed_imports)
             if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="AlgorithmicIntent_PatternRecognition", 
-                    layer=MutationLayer.SEMANTIC,
-                    confidence=0.7,
-                    description="Recognized common algorithmic patterns and applied optimizations"
-                ))
-        
+                results.append(
+                    create_mutation_result(
+                        ir=variant,
+                        strategy_name="AlgorithmicIntent_PatternRecognition",
+                        layer=MutationLayer.SEMANTIC,
+                        confidence=0.7,
+                        description="Recognized common algorithmic patterns and applied optimizations",
+                    )
+                )
+
         # Strategy 3: Architectural Improvements
         if self._is_strategy_enabled("AlgorithmicIntent_ArchitecturalImprovement"):
             variant = self._improve_program_architecture(code, allowed_imports)
             if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="AlgorithmicIntent_ArchitecturalImprovement",
-                    layer=MutationLayer.SEMANTIC,
-                    confidence=0.6,
-                    description="Improved program architecture and design patterns"
-                ))
-        
+                results.append(
+                    create_mutation_result(
+                        ir=variant,
+                        strategy_name="AlgorithmicIntent_ArchitecturalImprovement",
+                        layer=MutationLayer.SEMANTIC,
+                        confidence=0.6,
+                        description="Improved program architecture and design patterns",
+                    )
+                )
+
         return results
-    
-    def _optimize_algorithmic_complexity(self, code: str, allowed_imports: Set[str]) -> Optional[schema.Module]:
+
+    def _optimize_algorithmic_complexity(
+        self, code: str, allowed_imports: Set[str]
+    ) -> Optional[schema.Module]:
         """Focus on reducing Big-O complexity through algorithm selection."""
         prompt = f"""You are an expert algorithm designer and complexity analyst.
 
@@ -105,8 +116,10 @@ Code to optimize:
 Return ONLY the optimized Python code with better algorithmic complexity.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
-    
-    def _recognize_and_optimize_patterns(self, code: str, allowed_imports: Set[str]) -> Optional[schema.Module]:
+
+    def _recognize_and_optimize_patterns(
+        self, code: str, allowed_imports: Set[str]
+    ) -> Optional[schema.Module]:
         """Recognize common algorithmic patterns and apply known optimizations."""
         prompt = f"""You are an expert in algorithmic patterns and optimizations.
 
@@ -136,8 +149,10 @@ Code:
 Return ONLY the optimized code with recognized patterns efficiently implemented.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
-    
-    def _improve_program_architecture(self, code: str, allowed_imports: Set[str]) -> Optional[schema.Module]:
+
+    def _improve_program_architecture(
+        self, code: str, allowed_imports: Set[str]
+    ) -> Optional[schema.Module]:
         """Improve high-level program architecture and design patterns."""
         prompt = f"""You are a software architect focused on program design and efficiency.
 
@@ -170,67 +185,75 @@ Return ONLY the architecturally improved code that maintains functionality.
 class ProgramIntentMutator(IROnlyMutator, LLMMutatorBase):
     """
     Focuses on understanding and optimizing program intent and logic flow.
-    
+
     This mutator analyzes what the program is trying to accomplish and
     suggests alternative approaches that achieve the same goal more efficiently.
     """
-    
+
     def __init__(self, llm_client=None, enabled_strategies: Optional[Set[str]] = None):
         IROnlyMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
         LLMMutatorBase.__init__(self, llm_client)
-    
+
     def get_available_strategies(self) -> List[str]:
         return [
             "ProgramIntent_LogicSimplification",
             "ProgramIntent_FlowOptimization",
-            "ProgramIntent_PurposeAlignment"
+            "ProgramIntent_PurposeAlignment",
         ]
-    
+
     def _apply_ir_mutations(self, ir: schema.Module) -> List[MutationResult]:
         """Apply program intent optimization mutations."""
         results = []
         code = self.codegen.generate(ir)
         allowed_imports = self._get_imports(ir)
-        
+
         # Strategy 1: Logic Simplification
         if self._is_strategy_enabled("ProgramIntent_LogicSimplification"):
             variant = self._simplify_program_logic(code, allowed_imports)
             if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="ProgramIntent_LogicSimplification",
-                    layer=MutationLayer.SEMANTIC,
-                    confidence=0.9,
-                    description="Simplified program logic while maintaining intent"
-                ))
-        
-        # Strategy 2: Control Flow Optimization  
+                results.append(
+                    create_mutation_result(
+                        ir=variant,
+                        strategy_name="ProgramIntent_LogicSimplification",
+                        layer=MutationLayer.SEMANTIC,
+                        confidence=0.9,
+                        description="Simplified program logic while maintaining intent",
+                    )
+                )
+
+        # Strategy 2: Control Flow Optimization
         if self._is_strategy_enabled("ProgramIntent_FlowOptimization"):
             variant = self._optimize_control_flow(code, allowed_imports)
             if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="ProgramIntent_FlowOptimization",
-                    layer=MutationLayer.SEMANTIC,
-                    confidence=0.8,
-                    description="Optimized control flow and execution paths"
-                ))
-        
+                results.append(
+                    create_mutation_result(
+                        ir=variant,
+                        strategy_name="ProgramIntent_FlowOptimization",
+                        layer=MutationLayer.SEMANTIC,
+                        confidence=0.8,
+                        description="Optimized control flow and execution paths",
+                    )
+                )
+
         # Strategy 3: Purpose Alignment
         if self._is_strategy_enabled("ProgramIntent_PurposeAlignment"):
             variant = self._align_implementation_with_purpose(code, allowed_imports)
             if variant:
-                results.append(create_mutation_result(
-                    ir=variant,
-                    strategy_name="ProgramIntent_PurposeAlignment",
-                    layer=MutationLayer.SEMANTIC,
-                    confidence=0.7,
-                    description="Aligned implementation more closely with intended purpose"
-                ))
-        
+                results.append(
+                    create_mutation_result(
+                        ir=variant,
+                        strategy_name="ProgramIntent_PurposeAlignment",
+                        layer=MutationLayer.SEMANTIC,
+                        confidence=0.7,
+                        description="Aligned implementation more closely with intended purpose",
+                    )
+                )
+
         return results
-    
-    def _simplify_program_logic(self, code: str, allowed_imports: Set[str]) -> Optional[schema.Module]:
+
+    def _simplify_program_logic(
+        self, code: str, allowed_imports: Set[str]
+    ) -> Optional[schema.Module]:
         """Simplify complex logic while preserving functionality."""
         prompt = f"""You are an expert in program logic simplification and clarity.
 
@@ -257,8 +280,10 @@ Code:
 Return ONLY the logically simplified code.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
-    
-    def _optimize_control_flow(self, code: str, allowed_imports: Set[str]) -> Optional[schema.Module]:
+
+    def _optimize_control_flow(
+        self, code: str, allowed_imports: Set[str]
+    ) -> Optional[schema.Module]:
         """Optimize control flow for better performance and clarity."""
         prompt = f"""You are an expert in control flow optimization and program efficiency.
 
@@ -286,8 +311,10 @@ Code:
 Return ONLY the control-flow optimized code.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
-    
-    def _align_implementation_with_purpose(self, code: str, allowed_imports: Set[str]) -> Optional[schema.Module]:
+
+    def _align_implementation_with_purpose(
+        self, code: str, allowed_imports: Set[str]
+    ) -> Optional[schema.Module]:
         """Align the implementation more closely with its intended purpose."""
         prompt = f"""You are an expert in program design and implementation alignment.
 

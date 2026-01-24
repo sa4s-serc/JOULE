@@ -1,7 +1,9 @@
 import unittest
-from src.infrastructure.parsing.python_parser import PythonParser
-from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+
 from src.domain.ir import schema
+from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
+from src.infrastructure.parsing.python_parser import PythonParser
+
 
 class TestExtendedIR(unittest.TestCase):
     def setUp(self):
@@ -24,8 +26,8 @@ finally:
         generated = self.codegen.generate(ir)
         # Normalize whitespace and quotes for comparison
         self.assertEqual(
-            generated.replace(" ", "").replace("\n", "").replace('"', "'"), 
-            code.replace(" ", "").replace("\n", "").replace('"', "'")
+            generated.replace(" ", "").replace("\n", "").replace('"', "'"),
+            code.replace(" ", "").replace("\n", "").replace('"', "'"),
         )
 
     def test_with_statement(self):
@@ -37,8 +39,8 @@ with open("file.txt") as f:
         self.assertIsInstance(ir.body.statements[0], schema.With)
         generated = self.codegen.generate(ir)
         self.assertEqual(
-            generated.replace(" ", "").replace("\n", "").replace('"', "'"), 
-            code.replace(" ", "").replace("\n", "").replace('"', "'")
+            generated.replace(" ", "").replace("\n", "").replace('"', "'"),
+            code.replace(" ", "").replace("\n", "").replace('"', "'"),
         )
 
     def test_lambda(self):
@@ -50,8 +52,8 @@ with open("file.txt") as f:
         # Expected: f = lambda x: (x + 1)
         expected = "f = lambda x: (x + 1)"
         self.assertEqual(
-            generated.replace(" ", "").replace("\n", ""), 
-            expected.replace(" ", "").replace("\n", "")
+            generated.replace(" ", "").replace("\n", ""),
+            expected.replace(" ", "").replace("\n", ""),
         )
 
     def test_set_and_yield(self):
@@ -66,12 +68,13 @@ def gen():
         self.assertIsInstance(func_def.body.statements[0].value, schema.Yield)
         self.assertIsInstance(func_def.body.statements[1].value, schema.YieldFrom)
         self.assertIsInstance(func_def.body.statements[2].value, schema.SetExpr)
-        
+
         generated = self.codegen.generate(ir)
         self.assertEqual(
-            generated.replace(" ", "").replace("\n", "").replace('"', "'"), 
-            code.replace(" ", "").replace("\n", "").replace('"', "'")
+            generated.replace(" ", "").replace("\n", "").replace('"', "'"),
+            code.replace(" ", "").replace("\n", "").replace('"', "'"),
         )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
