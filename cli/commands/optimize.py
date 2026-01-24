@@ -7,11 +7,12 @@ from datetime import datetime
 from pathlib import Path
 
 import click
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+from rich.text import Text
 
 from cli.utils.banner import (create_progress_table, print_error,
                               print_optimization_summary, print_step,
@@ -377,6 +378,38 @@ def optimize_cmd(
                 early_stopping_patience=opt_cfg.get("early_stopping_patience", 5),
             )
 
+            # Event callback for status updates
+            def on_event(event):
+                if quiet:
+                    return
+
+                if event.type == "mutation_attempt":
+                    mutator = event.data.get("mutator", "Unknown")
+                    strategy = event.data.get("strategy", "Unknown")
+                    status_text.plain = f"Mutating: {mutator} using {strategy}..."
+                    status_text.style = "yellow"
+                elif event.type == "mutation_result":
+                    success = event.data.get("success", False)
+                    if success:
+                        status_text.plain = f"Mutation successful! ({event.data.get('strategy')})"
+                        status_text.style = "green"
+                    else:
+                        status_text.plain = (
+                            f"Mutation rejected: {event.data.get('error', 'Unknown error')}"
+                        )
+                        status_text.style = "red"
+                elif event.type == "generation_start":
+                    status_text.plain = f"Starting Generation {event.data.get('generation')}..."
+                    status_text.style = "bold blue"
+                elif event.type == "new_best_solution":
+                    status_text.plain = (
+                        f"✨ New Best Solution Found! (Energy: {event.data.get('energy', 0):.4f}J)"
+                    )
+                    status_text.style = "bold gold1"
+                elif event.type == "optimization_complete":
+                    status_text.plain = "Optimization Completed."
+                    status_text.style = "bold green"
+
             # Create engine
             engine = EvolutionaryEngine(
                 mutators=mutators,
@@ -384,6 +417,7 @@ def optimize_cmd(
                 config=engine_config,
                 llm_client=llm_client,
                 experiment_dir=exp_dir,
+                event_callback=on_event,
             )
 
             progress.update(task, description="✓ Engine initialized")
@@ -396,7 +430,16 @@ def optimize_cmd(
         start_time = time.time()
 
         # Create live progress display
+        # Create live progress display
         progress_table = create_progress_table()
+        status_text = Text("Ready to start...", style="italic cyan")
+
+        # Combine table and status text
+        display_group = Group(
+            progress_table,
+            Text(""),  # Spacer
+            Panel(status_text, title="Current Activity", border_style="blue", padding=(0, 1)),
+        )
 
         def update_progress(generation: int, total_generations: int):
             """Update progress callback with enhanced metrics."""
@@ -424,7 +467,7 @@ def optimize_cmd(
                 )
 
         if not quiet:
-            with Live(progress_table, refresh_per_second=2, console=console):
+            with Live(display_group, refresh_per_second=4, console=console):
                 solutions = engine.optimize(
                     initial_code,
                     test_code,

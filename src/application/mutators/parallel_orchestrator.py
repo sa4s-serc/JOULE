@@ -15,7 +15,7 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
                                 as_completed)
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import psutil
 
@@ -34,7 +34,8 @@ class ParallelConfig:
     """Configuration for parallel mutation processing."""
 
     max_workers: int = field(default_factory=lambda: min(8, mp.cpu_count()))
-    enable_process_pool: bool = False  # Use threads by default for better memory sharing
+    # Use threads by default for better memory sharing
+    enable_process_pool: bool = False
     layer_timeout_seconds: float = 60.0
     mutation_timeout_seconds: float = 30.0
     max_memory_usage_mb: int = 2048
@@ -47,7 +48,8 @@ class ParallelConfig:
         available_memory_mb = psutil.virtual_memory().available // (1024 * 1024)
         if self.max_memory_usage_mb > available_memory_mb * 0.8:
             self.max_memory_usage_mb = int(available_memory_mb * 0.8)
-            logger.warning(f"Adjusted max memory usage to {self.max_memory_usage_mb}MB")
+            logger.warning(
+                f"Adjusted max memory usage to {self.max_memory_usage_mb}MB")
 
         # Adjust workers based on CPU count and memory
         optimal_workers = min(
@@ -138,7 +140,8 @@ class ConflictResolver:
                     merged_results.append(merged)
                 else:
                     # Fall back to highest confidence
-                    merged_results.append(max(group, key=lambda r: r.confidence))
+                    merged_results.append(
+                        max(group, key=lambda r: r.confidence))
 
         return merged_results
 
@@ -202,7 +205,8 @@ class ParallelMutationOrchestrator:
         self.config = config or ParallelConfig()
         self.registry = get_registry()
         self.validator = IRValidator(strict=False)
-        self.conflict_resolver = ConflictResolver(self.config.conflict_resolution_strategy)
+        self.conflict_resolver = ConflictResolver(
+            self.config.conflict_resolution_strategy)
         self.stats = ParallelExecutionStats()
         self._task_counter = 0
         self._task_lock = Lock()
@@ -212,6 +216,7 @@ class ParallelMutationOrchestrator:
         ir: schema.Module,
         enabled_layers: Optional[Set[MutationLayer]] = None,
         llm_client=None,
+        selected_mutations: Optional[List[Tuple[LayeredMutator, str, float]]] = None,
     ) -> List[MutationResult]:
         """
         Orchestrate mutations with parallel processing.
@@ -220,29 +225,31 @@ class ParallelMutationOrchestrator:
             ir: Input IR module
             enabled_layers: Set of enabled layers (None = all)
             llm_client: LLM client for semantic mutations
-
-        Returns:
-            List of optimized mutation results
+            selected_mutations: Optional list of pre-selected (mutator, strategy, score) tuples
         """
         start_time = time.time()
 
         if enabled_layers is None:
             enabled_layers = set(MutationLayer)
 
-        logger.info(f"Starting parallel orchestration with {len(enabled_layers)} layers")
+        logger.info(
+            f"Starting parallel orchestration with {len(enabled_layers)} layers")
 
         # Create lazy wrapper for memory efficiency
         ir_wrapper = create_lazy_wrapper(ir)
 
         # Generate mutation tasks
-        tasks = self._generate_mutation_tasks(ir_wrapper, enabled_layers, llm_client)
+        tasks = self._generate_mutation_tasks(
+            ir_wrapper, enabled_layers, llm_client, selected_mutations
+        )
         self.stats.total_tasks = len(tasks)
 
         # Execute tasks in parallel
         results = self._execute_parallel_tasks(tasks)
 
         # Resolve conflicts
-        resolved_results = self.conflict_resolver.resolve_conflicts(results, ir)
+        resolved_results = self.conflict_resolver.resolve_conflicts(
+            results, ir)
         self.stats.conflict_resolutions = self.conflict_resolver.resolution_count
 
         # Update statistics
@@ -256,13 +263,42 @@ class ParallelMutationOrchestrator:
         return resolved_results
 
     def _generate_mutation_tasks(
-        self, ir_wrapper: Any, enabled_layers: Set[MutationLayer], llm_client=None
+        self,
+        ir_wrapper: Any,
+        enabled_layers: Set[MutationLayer],
+        llm_client=None,
+        selected_mutations: Optional[List[Tuple[LayeredMutator, str, float]]] = None,
     ) -> List[MutationTask]:
         """Generate mutation tasks for parallel execution."""
         tasks = []
 
-        for layer in enabled_layers:
-            mutators = self.registry.get_mutators_for_layer(layer, llm_client=llm_client)
+        # If specific mutations are selected, use those
+        if selected_mutations:
+            for mutator, strategy, score in selected_mutations:
+                # Configure mutator if needed
+                if hasattr(mutator, "set_llm_client") and llm_client:
+                    mutator.set_llm_client(llm_client)
+
+                task_id = self._generate_task_id()
+                # Use score as base for priority
+                priority = score * 2.0  # Boost priority for selected items
+
+                task = MutationTask(
+                    task_id=task_id,
+                    mutator=mutator,
+                    ir_wrapper=ir_wrapper,
+                    layer=mutator.layer,
+                    strategy_name=strategy,
+                    priority=priority,
+                    dependencies=set(),  # Selected mutations are assumed independent or pre-ordered
+                )
+                tasks.append(task)
+
+            return self._sort_tasks_by_priority(tasks)
+
+        # Otherwise generate all possible tasks from enabled layers
+            mutators = self.registry.get_mutators_for_layer(
+                layer, llm_client=llm_client)
 
             for mutator in mutators:
                 # Configure mutator for parallel execution
@@ -274,7 +310,8 @@ class ParallelMutationOrchestrator:
 
                 for strategy in strategies:
                     task_id = self._generate_task_id()
-                    priority = self._calculate_task_priority(layer, strategy, mutator)
+                    priority = self._calculate_task_priority(
+                        layer, strategy, mutator)
 
                     task = MutationTask(
                         task_id=task_id,
@@ -283,7 +320,8 @@ class ParallelMutationOrchestrator:
                         layer=layer,
                         strategy_name=strategy,
                         priority=priority,
-                        dependencies=self._calculate_dependencies(layer, strategy),
+                        dependencies=self._calculate_dependencies(
+                            layer, strategy),
                     )
                     tasks.append(task)
 
@@ -310,12 +348,15 @@ class ParallelMutationOrchestrator:
             for future in as_completed(future_to_task, timeout=self.config.layer_timeout_seconds):
                 task = future_to_task[future]
                 try:
-                    result = future.result(timeout=self.config.mutation_timeout_seconds)
+                    result = future.result(
+                        timeout=self.config.mutation_timeout_seconds)
                     if result:
                         results.extend(result)
-                        logger.debug(f"Task {task.task_id} completed successfully")
+                        logger.debug(
+                            f"Task {task.task_id} completed successfully")
                     else:
-                        logger.debug(f"Task {task.task_id} produced no results")
+                        logger.debug(
+                            f"Task {task.task_id} produced no results")
                 except Exception as e:
                     logger.warning(f"Task {task.task_id} failed: {e}")
                     self.stats.failed_tasks += 1
@@ -337,7 +378,8 @@ class ParallelMutationOrchestrator:
             results = mutator.mutate(ir)
 
             # Filter results for the current strategy if necessary
-            meta_results = [r for r in results if r.strategy_name == task.strategy_name]
+            meta_results = [
+                r for r in results if r.strategy_name == task.strategy_name]
             return meta_results
 
         except Exception as e:
@@ -365,7 +407,8 @@ class ParallelMutationOrchestrator:
         base_priority = layer_priorities.get(layer, 0.5)
 
         # Adjust based on mutator success rate
-        success_rate = mutator.get_success_rate() if hasattr(mutator, "get_success_rate") else 0.5
+        success_rate = mutator.get_success_rate() if hasattr(
+            mutator, "get_success_rate") else 0.5
 
         return base_priority * (0.5 + success_rate)
 
@@ -394,7 +437,8 @@ class ParallelMutationOrchestrator:
         # Efficiency = (Sequential Time) / (Parallel Time * Workers)
         return min(
             1.0,
-            estimated_sequential_time / (self.stats.total_execution_time * self.config.max_workers),
+            estimated_sequential_time /
+            (self.stats.total_execution_time * self.config.max_workers),
         )
 
     def _log_performance_metrics(self):
@@ -407,9 +451,11 @@ class ParallelMutationOrchestrator:
         )
         logger.info(f"  Time: {self.stats.total_execution_time:.2f}s")
         logger.info(f"  Throughput: {self.stats.throughput:.1f} tasks/sec")
-        logger.info(f"  Parallel efficiency: {self.stats.parallel_efficiency:.1%}")
+        logger.info(
+            f"  Parallel efficiency: {self.stats.parallel_efficiency:.1%}")
         logger.info(f"  Conflicts resolved: {self.stats.conflict_resolutions}")
-        logger.info(f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
+        logger.info(
+            f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
 
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get detailed performance statistics."""

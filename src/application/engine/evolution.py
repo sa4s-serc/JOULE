@@ -179,7 +179,8 @@ class ParetoArchive:
         # Check for duplicates
         solution_hash = self._get_solution_hash(new_solution)
         if solution_hash in self._solution_hashes:
-            logger.debug(f"Solution {new_solution.variant_id[:8]} rejected as duplicate")
+            logger.debug(
+                f"Solution {new_solution.variant_id[:8]} rejected as duplicate")
             return False
 
         # Check if dominated by existing solution
@@ -192,7 +193,8 @@ class ParetoArchive:
 
         # Remove solutions dominated by new one
         original_count = len(self.solutions)
-        self.solutions = [s for s in self.solutions if not self._dominates(new_solution, s)]
+        self.solutions = [
+            s for s in self.solutions if not self._dominates(new_solution, s)]
         removed_count = original_count - len(self.solutions)
         if removed_count > 0:
             logger.debug(
@@ -200,7 +202,8 @@ class ParetoArchive:
             )
 
         # Update hash set
-        self._solution_hashes = {self._get_solution_hash(s) for s in self.solutions}
+        self._solution_hashes = {
+            self._get_solution_hash(s) for s in self.solutions}
 
         # Add new solution
         self.solutions.append(new_solution)
@@ -242,7 +245,8 @@ class ParetoArchive:
         distances = {sol.variant_id: 0.0 for sol in solutions}
 
         for obj in self._objectives:
-            sorted_sols = sorted(solutions, key=lambda s: self._get_objective(s, obj))
+            sorted_sols = sorted(
+                solutions, key=lambda s: self._get_objective(s, obj))
 
             distances[sorted_sols[0].variant_id] = float("inf")
             distances[sorted_sols[-1].variant_id] = float("inf")
@@ -256,7 +260,8 @@ class ParetoArchive:
                     if distances[sorted_sols[i].variant_id] != float("inf"):
                         prev_val = self._get_objective(sorted_sols[i - 1], obj)
                         next_val = self._get_objective(sorted_sols[i + 1], obj)
-                        distances[sorted_sols[i].variant_id] += (next_val - prev_val) / obj_range
+                        distances[sorted_sols[i].variant_id] += (
+                            next_val - prev_val) / obj_range
 
         return distances
 
@@ -350,7 +355,8 @@ class EvolutionaryEngine:
                 max_concurrent_requests=self.config.llm_batch_size,
             )
             if self.batch_llm_client is None:
-                logger.warning("Batch LLM client creation failed, disabling batch processing")
+                logger.warning(
+                    "Batch LLM client creation failed, disabling batch processing")
         else:
             self.batch_llm_client = None
 
@@ -370,11 +376,14 @@ class EvolutionaryEngine:
 
         logger.info(f"Initialized EvolutionaryEngine:")
         logger.info(f"  Mutators: {len(mutators)}")
-        logger.info(f"  Parallel mutations: {self.config.enable_parallel_mutations}")
-        logger.info(f"  Intelligent selection: {self.config.enable_intelligent_selection}")
+        logger.info(
+            f"  Parallel mutations: {self.config.enable_parallel_mutations}")
+        logger.info(
+            f"  Intelligent selection: {self.config.enable_intelligent_selection}")
         logger.info(f"  Batch LLM: {self.config.enable_batch_llm}")
         if self.config.enable_memory_optimization:
-            logger.info(f"  Memory optimization: {self.config.enable_memory_optimization}")
+            logger.info(
+                f"  Memory optimization: {self.config.enable_memory_optimization}")
 
     def _emit_event(self, event_type: EventType, data: Dict[str, Any]):
         """Emit an optimization event."""
@@ -447,61 +456,133 @@ class EvolutionaryEngine:
                         parent.ir, enabled_layers, max_mutators=10, llm_client=self.llm_client
                     )
 
-                    # Apply selected mutations
-                    for m, strategy, confidence in selected_mutators:
-                        self._emit_event(
-                            EventType.MUTATION_ATTEMPT,
-                            {
-                                "mutator": m.__class__.__name__,
-                                "strategy": strategy,
-                                "parent": parent.variant_id,
-                            },
+                    # Create lookup map for learning
+                    strategy_map = {s: (m, c) for m, s, c in selected_mutators}
+
+                    if self.orchestrator:
+                        # Parallel execution of selected mutations
+                        mutation_results = self.orchestrator.orchestrate_parallel_mutations(
+                            parent.ir,
+                            enabled_layers,
+                            self.batch_llm_client,
+                            selected_mutations=selected_mutators,
                         )
-                        self.statistics.record_attempt(m.__class__.__name__)
-                        variants = m.mutate(parent.ir)
-                        for result in variants:
-                            if result.strategy_name == strategy:
-                                # Validate variant
-                                val_result = self.validator.validate(result.ir)
-                                if val_result.valid:
-                                    self.statistics.record_success(m.__class__.__name__)
-                                    solution = Solution(
+
+                        for result in mutation_results:
+                            val_result = self.validator.validate(result.ir)
+                            mutator_info = strategy_map.get(
+                                result.strategy_name)
+                            mutator = mutator_info[0] if mutator_info else None
+                            mutator_name = mutator.__class__.__name__ if mutator else "Unknown"
+
+                            if val_result.valid:
+                                self.statistics.record_success(mutator_name)
+                                all_variants.append(
+                                    Solution(
                                         ir=result.ir,
                                         metrics={},
                                         variant_id=str(uuid.uuid4()),
                                         parent_id=parent.variant_id,
-                                        mutation_type=f"{m.__class__.__name__}:{strategy}",
+                                        mutation_type=result.strategy_name,
                                         generation=self.generation + 1,
                                     )
-                                    all_variants.append(solution)
+                                )
 
-                                    # Record outcome for learning
+                                if mutator:
                                     self.intelligent_selector.record_mutation_outcome(
-                                        parent.ir, m, strategy, True, confidence  # type: ignore
+                                        parent.ir,
+                                        mutator,
+                                        result.strategy_name,
+                                        True,
+                                        result.confidence,
                                     )
-                                    self._emit_event(
-                                        EventType.MUTATION_RESULT,
-                                        {
-                                            "success": True,
-                                            "strategy": strategy,
-                                            "mutator": m.__class__.__name__,
-                                        },
+
+                                self._emit_event(
+                                    EventType.MUTATION_RESULT,
+                                    {
+                                        "success": True,
+                                        "strategy": result.strategy_name,
+                                        "mutator": mutator_name,
+                                    },
+                                )
+                            else:
+                                self.statistics.failed_validations += 1
+                                if mutator:
+                                    self.intelligent_selector.record_mutation_outcome(
+                                        parent.ir,
+                                        mutator,
+                                        result.strategy_name,
+                                        False,
+                                        0.0,
                                     )
-                                else:
-                                    self.statistics.failed_validations += 1
-                                    self._emit_event(
-                                        EventType.MUTATION_RESULT,
-                                        {
-                                            "success": False,
-                                            "error": "Validation failed",
-                                            "strategy": strategy,
-                                        },
-                                    )
-                                    # Record failed outcome
-                                    if self.intelligent_selector:
-                                        self.intelligent_selector.record_mutation_outcome(
-                                            parent.ir, m, strategy, False, 0.0  # type: ignore
+                                self._emit_event(
+                                    EventType.MUTATION_RESULT,
+                                    {
+                                        "success": False,
+                                        "error": "Validation failed",
+                                        "strategy": result.strategy_name,
+                                    },
+                                )
+
+                    else:
+                        # Fallback to sequential execution
+                        for m, strategy, confidence in selected_mutators:
+                            self._emit_event(
+                                EventType.MUTATION_ATTEMPT,
+                                {
+                                    "mutator": m.__class__.__name__,
+                                    "strategy": strategy,
+                                    "parent": parent.variant_id,
+                                },
+                            )
+                            self.statistics.record_attempt(
+                                m.__class__.__name__)
+                            variants = m.mutate(parent.ir)
+                            for result in variants:
+                                if result.strategy_name == strategy:
+                                    # Validate variant
+                                    val_result = self.validator.validate(
+                                        result.ir)
+                                    if val_result.valid:
+                                        self.statistics.record_success(
+                                            m.__class__.__name__)
+                                        solution = Solution(
+                                            ir=result.ir,
+                                            metrics={},
+                                            variant_id=str(uuid.uuid4()),
+                                            parent_id=parent.variant_id,
+                                            mutation_type=f"{m.__class__.__name__}:{strategy}",
+                                            generation=self.generation + 1,
                                         )
+                                        all_variants.append(solution)
+
+                                        # Record outcome for learning
+                                        self.intelligent_selector.record_mutation_outcome(
+                                            parent.ir, m, strategy, True, confidence  # type: ignore
+                                        )
+                                        self._emit_event(
+                                            EventType.MUTATION_RESULT,
+                                            {
+                                                "success": True,
+                                                "strategy": strategy,
+                                                "mutator": m.__class__.__name__,
+                                            },
+                                        )
+                                    else:
+                                        self.statistics.failed_validations += 1
+                                        self._emit_event(
+                                            EventType.MUTATION_RESULT,
+                                            {
+                                                "success": False,
+                                                "error": "Validation failed",
+                                                "strategy": strategy,
+                                            },
+                                        )
+                                        # Record failed outcome
+                                        if self.intelligent_selector:
+                                            self.intelligent_selector.record_mutation_outcome(
+                                                parent.ir, m, strategy, False, 0.0  # type: ignore
+                                            )
 
                 # Use parallel orchestration if enabled
                 elif self.orchestrator:
@@ -513,7 +594,8 @@ class EvolutionaryEngine:
                         self.statistics.record_attempt("ParallelOrchestrator")
                         val_result = self.validator.validate(result.ir)
                         if val_result.valid:
-                            self.statistics.record_success("ParallelOrchestrator")
+                            self.statistics.record_success(
+                                "ParallelOrchestrator")
                             solution = Solution(
                                 ir=result.ir,
                                 metrics={},
@@ -529,12 +611,14 @@ class EvolutionaryEngine:
                 # Fallback to traditional mutation
                 else:
                     for mutator in self.mutators:
-                        self.statistics.record_attempt(mutator.__class__.__name__)
+                        self.statistics.record_attempt(
+                            mutator.__class__.__name__)
 
                         # Log attempt
                         self._emit_event(
                             EventType.MUTATION_ATTEMPT,
-                            {"mutator": mutator.__class__.__name__, "parent": parent.variant_id},
+                            {"mutator": mutator.__class__.__name__,
+                                "parent": parent.variant_id},
                         )
 
                         results = mutator.mutate(parent.ir)
@@ -542,7 +626,8 @@ class EvolutionaryEngine:
                             logger.info(
                                 f"Mutator {mutator.__class__.__name__} produced {len(results)} variants"
                             )
-                            self.statistics.record_success(mutator.__class__.__name__)
+                            self.statistics.record_success(
+                                mutator.__class__.__name__)
 
                         for result in results:
                             val_result = self.validator.validate(result.ir)
@@ -576,7 +661,8 @@ class EvolutionaryEngine:
                                 )
 
             except Exception as e:
-                logger.error(f"Mutation generation failed for parent {parent.variant_id}: {e}")
+                logger.error(
+                    f"Mutation generation failed for parent {parent.variant_id}: {e}")
 
         return all_variants
 
@@ -605,12 +691,14 @@ class EvolutionaryEngine:
             return 1.0
 
         # Simple diversity measure based on fitness variance
-        fitness_scores = [self._compute_fitness(sol) for sol in self.archive.solutions]
+        fitness_scores = [self._compute_fitness(
+            sol) for sol in self.archive.solutions]
         if not fitness_scores:
             return 1.0
 
         mean_fitness = sum(fitness_scores) / len(fitness_scores)
-        variance = sum((f - mean_fitness) ** 2 for f in fitness_scores) / len(fitness_scores)
+        variance = sum((f - mean_fitness) **
+                       2 for f in fitness_scores) / len(fitness_scores)
 
         return min(1.0, variance / (mean_fitness**2 + 1e-9))
 
@@ -630,19 +718,23 @@ class EvolutionaryEngine:
 
         if self.orchestrator and hasattr(self.orchestrator, "get_performance_stats"):
             orchestrator_stats = self.orchestrator.get_performance_stats()
-            performance_data.update(orchestrator_stats.get("execution_stats", {}))
+            performance_data.update(
+                orchestrator_stats.get("execution_stats", {}))
 
         self.performance_history.append(performance_data)
 
         logger.info(f"Generation {self.generation} performance:")
         logger.info(f"  Archive size: {len(self.archive.solutions)}")
-        logger.info(f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
-        logger.info(f"  Copy efficiency: {memory_stats.get('sharing_efficiency', 0):.1%}")
+        logger.info(
+            f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
+        logger.info(
+            f"  Copy efficiency: {memory_stats.get('sharing_efficiency', 0):.1%}")
 
         if self.best_solution:
             best_energy = self.best_solution.metrics.get("energy_joules", 0)
             best_time = self.best_solution.metrics.get("duration_seconds", 0)
-            logger.info(f"  Best solution: {best_energy:.6f}J, {best_time:.6f}s")
+            logger.info(
+                f"  Best solution: {best_energy:.6f}J, {best_time:.6f}s")
 
     def optimize(
         self,
@@ -670,7 +762,8 @@ class EvolutionaryEngine:
             initial_ir = self.parser.parse(initial_code)
             val_result = self.validator.validate(initial_ir)
             if not val_result.valid:
-                raise ValueError(f"Initial code validation failed: {val_result.errors}")
+                raise ValueError(
+                    f"Initial code validation failed: {val_result.errors}")
         except Exception as e:
             logger.error(f"Failed to parse initial code: {e}")
             return []
@@ -740,11 +833,13 @@ class EvolutionaryEngine:
             current_pop_size = self._adaptive_population_size()
 
             # Select parents
-            parents = self._select_parents(self.archive.solutions, current_pop_size)
+            parents = self._select_parents(
+                self.archive.solutions, current_pop_size)
 
             # Generate mutations
             logger.info(f"Generating mutations for {len(parents)} parents...")
-            variants = self._generate_mutations_enhanced(parents, enabled_layers)
+            variants = self._generate_mutations_enhanced(
+                parents, enabled_layers)
             logger.info(f"Generated {len(variants)} variants.")
 
             # Generate crossovers
@@ -756,7 +851,8 @@ class EvolutionaryEngine:
             improved_count = 0
             logger.info("Evaluating variants...")
             for i, variant in enumerate(variants):
-                logger.debug(f"Evaluating variant {i+1}/{len(variants)}: {variant.mutation_type}")
+                logger.debug(
+                    f"Evaluating variant {i+1}/{len(variants)}: {variant.mutation_type}")
                 success, metrics, output = self._evaluate(variant, test_code)
 
                 if success:
@@ -765,7 +861,8 @@ class EvolutionaryEngine:
                     # Update archive
                     if self.archive.update(variant):
                         improved_count += 1
-                        self.statistics.record_improvement(variant.mutation_type)
+                        self.statistics.record_improvement(
+                            variant.mutation_type)
 
                         # Update best solution
                         if not self.best_solution or self._compute_fitness(
@@ -833,7 +930,8 @@ class EvolutionaryEngine:
                 "total_solutions": len(self.archive.solutions),
                 "best_metrics": self.best_solution.metrics if self.best_solution else {},
                 "best_code": (
-                    self.codegen.generate(self.best_solution.ir) if self.best_solution else ""
+                    self.codegen.generate(
+                        self.best_solution.ir) if self.best_solution else ""
                 ),
                 "duration": total_time,
             },
