@@ -7,13 +7,13 @@ Tests the new hierarchical mutation architecture and layer orchestration.
 import pytest
 
 from src.application.mutators.algorithmic_layer import DataStructureOptimizer
-from src.application.mutators.base import (MutationLayer, MutationOrchestrator,
-                                           create_mutation_result)
+from src.application.mutators.base import MutationLayer, MutationOrchestrator
 from src.application.mutators.micro_layer import (ConstantOptimizer,
                                                   DeadCodeEliminator)
 from src.application.mutators.syntactic_layer import PythonicIdiomOptimizer
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
 from src.infrastructure.parsing.python_parser import PythonParser
+from src.utils.mutation_factory import create_mutation_result
 
 
 class TestLayeredMutationSystem:

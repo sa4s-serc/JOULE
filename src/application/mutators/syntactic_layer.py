@@ -12,12 +12,11 @@ import logging
 from typing import List, Optional, Set
 
 from src.application.mutators.base import (LayeredMutator, MutationLayer,
-                                           MutationResult,
-                                           create_mutation_result,
-                                           safe_deepcopy_ir)
+                                           MutationResult, safe_deepcopy_ir)
 from src.application.mutators.semantic_base import LLMMutatorBase
 from src.domain.ir import schema
 from src.domain.ir.utils import NodeTransformer
+from src.utils.mutation_factory import create_mutation_result
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +53,7 @@ class PythonicIdiomOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Idiom_ComprehensionOptimization",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.9,
                         description="Converted loops to comprehensions for better performance and readability",
                     )
@@ -68,6 +68,7 @@ class PythonicIdiomOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Idiom_BuiltinUtilization",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.85,
                         description="Replaced manual implementations with efficient built-in functions",
                     )
@@ -82,6 +83,7 @@ class PythonicIdiomOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Idiom_IteratorOptimization",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.8,
                         description="Optimized iteration patterns using generators and iterators",
                     )
@@ -96,6 +98,7 @@ class PythonicIdiomOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Idiom_ContextManagerUsage",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.75,
                         description="Improved resource management using context managers",
                     )
@@ -140,9 +143,14 @@ class CodePatternOptimizer(LayeredMutator, LLMMutatorBase):
     made more efficient or readable through syntactic changes.
     """
 
-    def __init__(self, llm_client, enabled_strategies: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        llm_client,
+        enabled_strategies: Optional[Set[str]] = None,
+        allowed_imports: Optional[Set[str]] = None,
+    ):
         LayeredMutator.__init__(self, MutationLayer.SYNTACTIC, enabled_strategies)
-        LLMMutatorBase.__init__(self, llm_client)
+        LLMMutatorBase.__init__(self, llm_client, allowed_imports=allowed_imports)
 
     def get_available_strategies(self) -> List[str]:
         return [
@@ -167,6 +175,7 @@ class CodePatternOptimizer(LayeredMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="Pattern_LoopOptimization",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.8,
                         description="Optimized loop patterns for better performance and readability",
                     )
@@ -181,6 +190,7 @@ class CodePatternOptimizer(LayeredMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="Pattern_ConditionalSimplification",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.85,
                         description="Simplified conditional logic and boolean expressions",
                     )
@@ -195,6 +205,7 @@ class CodePatternOptimizer(LayeredMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="Pattern_FunctionComposition",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.7,
                         description="Improved function composition and call patterns",
                     )
@@ -209,6 +220,7 @@ class CodePatternOptimizer(LayeredMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="Pattern_ErrorHandling",
                         layer=MutationLayer.SYNTACTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.75,
                         description="Improved error handling patterns and exception management",
                     )
@@ -359,7 +371,8 @@ class ComprehensionOptimizer(NodeTransformer):
 
     def __init__(self):
         self.changed = False
-        self._pending_list_inits = {}  # list_name -> (assign_stmt, block, index)
+        # list_name -> (assign_stmt, block, index)
+        self._pending_list_inits = {}
 
     def visit_Block(self, node: schema.Block) -> schema.Block:
         """Process blocks to find list init + append loop patterns."""

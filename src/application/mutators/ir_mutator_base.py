@@ -11,12 +11,12 @@ from dataclasses import dataclass
 from typing import List, Optional, Set
 
 from src.application.mutators.base import (LayeredMutator, MutationLayer,
-                                           MutationResult,
-                                           create_mutation_result)
+                                           MutationResult)
 from src.domain.ir import schema
 from src.domain.ir.context import MutationContext
 from src.domain.ir.utils import NodeTransformer, find_nodes
 from src.domain.ir.validators import IRValidator
+from src.utils.mutation_factory import create_mutation_result
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +177,11 @@ class IROnlyMutator(LayeredMutator):
         # Deep copy IR for mutation
         mutated_ir = self._safe_deepcopy_ir(ir)
 
-        # Apply transformation
-        transformer.visit(mutated_ir)
+        # Apply transformation - ensure we call visit_Module for module-level transformers
+        if hasattr(transformer, "visit_Module"):
+            mutated_ir = transformer.visit_Module(mutated_ir)
+        else:
+            transformer.visit(mutated_ir)
 
         # Check if changes were made
         if hasattr(transformer, "changed") and not transformer.changed:
@@ -189,6 +192,7 @@ class IROnlyMutator(LayeredMutator):
             ir=mutated_ir,
             strategy_name=strategy_name,
             layer=self.layer,
+            mutator_name=self.__class__.__name__,
             confidence=confidence,
             description=description,
         )

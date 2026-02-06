@@ -14,6 +14,9 @@ class PythonCodeGenerator:
         lines = []
         for stmt in block.statements:
             lines.append(self._generate_stmt(stmt, indent))
+        # Handle empty blocks - Python requires at least 'pass'
+        if not lines:
+            lines.append(self._indent(indent) + "pass")
         return "\n".join(lines)
 
     def _indent(self, indent: int) -> str:

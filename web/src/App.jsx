@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Sprout, Github, BookOpen } from 'lucide-react';
 import OptimizationForm from './components/OptimizationForm';
 import Dashboard from './components/Dashboard';
+import { config } from './config';
 
 function App() {
   const [task, setTask] = useState(null);
@@ -19,10 +20,10 @@ function App() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-          <a href="http://localhost:8000/docs" target="_blank" className="btn-small" style={{ textDecoration: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <a href={`${config.API_BASE_URL}/docs`} target="_blank" rel="noopener noreferrer" className="btn-small" style={{ textDecoration: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <BookOpen size={16} /> API Docs
           </a>
-          <a href="#" className="btn-small" style={{ textDecoration: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="btn-small" style={{ textDecoration: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <Github size={16} /> GitHub
           </a>
           {task && (

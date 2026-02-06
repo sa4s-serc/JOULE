@@ -26,6 +26,7 @@ from cli.commands.analyze import analyze_cmd
 from cli.commands.app import app_cmd
 from cli.commands.benchmark import benchmark_cmd
 from cli.commands.config import config_cmd
+from cli.commands.mutators import mutators_cmd
 from cli.commands.optimize import optimize_cmd
 from cli.commands.project import project_cmd
 from cli.commands.serve import serve_cmd
@@ -63,6 +64,14 @@ def cli(ctx, features):
                 [
                     "hedge optimize mycode.py tests.py",
                     "hedge optimize mycode.py tests.py --level advanced --visualize",
+                ],
+            ),
+            (
+                "mutators",
+                "Inspect and manage HEDGE mutators",
+                [
+                    "hedge mutators list --detailed",
+                    "hedge mutators info AdvancedAlgorithmicOptimizer",
                 ],
             ),
             (
@@ -110,6 +119,7 @@ def cli(ctx, features):
 
 # Register command groups
 cli.add_command(optimize_cmd, name="optimize")
+cli.add_command(mutators_cmd, name="mutators")
 cli.add_command(analyze_cmd, name="analyze")
 cli.add_command(visualize_cmd, name="visualize")
 cli.add_command(benchmark_cmd, name="benchmark")

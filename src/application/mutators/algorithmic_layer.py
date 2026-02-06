@@ -12,12 +12,12 @@ import logging
 from typing import List, Optional, Set
 
 from src.application.mutators.base import (MutationLayer, MutationResult,
-                                           create_mutation_result,
                                            safe_deepcopy_ir)
 from src.application.mutators.ir_mutator_base import (IROnlyMutator,
                                                       IRTransformerBase)
 from src.domain.ir import schema
 from src.domain.ir.utils import NodeTransformer, collect_names
+from src.utils.mutation_factory import create_mutation_result
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +163,7 @@ class ComplexityReducer(IROnlyMutator):
                         ir=variant,
                         strategy_name="Complexity_NestedLoopReduction",
                         layer=MutationLayer.ALGORITHMIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.8,
                         description="Reduced nested loop complexity using mathematical optimization",
                     )
@@ -177,6 +178,7 @@ class ComplexityReducer(IROnlyMutator):
                         ir=variant,
                         strategy_name="Complexity_SortingOptimization",
                         layer=MutationLayer.ALGORITHMIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.9,
                         description="Optimized sorting operations for better complexity",
                     )
@@ -191,6 +193,7 @@ class ComplexityReducer(IROnlyMutator):
                         ir=variant,
                         strategy_name="Complexity_DuplicateWorkElimination",
                         layer=MutationLayer.ALGORITHMIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.85,
                         description="Eliminated duplicate computations and redundant work",
                     )
@@ -205,6 +208,7 @@ class ComplexityReducer(IROnlyMutator):
                         ir=variant,
                         strategy_name="Complexity_MathematicalOptimization",
                         layer=MutationLayer.ALGORITHMIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.7,
                         description="Applied mathematical optimizations to reduce computational complexity",
                     )

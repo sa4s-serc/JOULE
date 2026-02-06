@@ -42,6 +42,15 @@ class SubtreeCrossover(CrossoverOperator):
     def crossover(self, parent1: schema.Module, parent2: schema.Module) -> List[schema.Module]:
         """Perform subtree crossover with type safety."""
         try:
+            # Validate parents first
+            if not parent1 or not parent2:
+                logger.warning("Cannot perform crossover on None parents")
+                return []
+
+            if not hasattr(parent1, "body") or not hasattr(parent2, "body"):
+                logger.warning("Parents missing body attribute")
+                return []
+
             # Create deep copies
             offspring1 = copy.deepcopy(parent1)
             offspring2 = copy.deepcopy(parent2)
@@ -50,10 +59,13 @@ class SubtreeCrossover(CrossoverOperator):
             success = self._perform_safe_crossover(offspring1, offspring2)
 
             if success:
-                return [offspring1, offspring2]
+                # Validate offspring before returning
+                if self._validate_offspring(offspring1) and self._validate_offspring(offspring2):
+                    return [offspring1, offspring2]
+                else:
+                    return []
             else:
                 # Fall back to uniform crossover if subtree crossover fails
-                logger.debug("Subtree crossover failed, falling back to uniform crossover")
                 uniform = UniformCrossover(mix_probability=0.5)
                 return uniform.crossover(parent1, parent2)
 
@@ -61,6 +73,32 @@ class SubtreeCrossover(CrossoverOperator):
             logger.error(f"Subtree crossover failed: {e}")
 
         return []
+
+    def _validate_offspring(self, offspring: schema.Module) -> bool:
+        """Basic validation of offspring IR structure."""
+        try:
+            # Check basic structure
+            if not hasattr(offspring, "body"):
+                return False
+
+            if not isinstance(offspring.body, schema.Block):
+                return False
+
+            if not hasattr(offspring.body, "statements"):
+                return False
+
+            # Check that statements is a list
+            if not isinstance(offspring.body.statements, list):
+                return False
+
+            # Basic check that statements are valid
+            for stmt in offspring.body.statements:
+                if not isinstance(stmt, schema.Statement):
+                    return False
+
+            return True
+        except Exception:
+            return False
 
     def _perform_safe_crossover(self, offspring1: schema.Module, offspring2: schema.Module) -> bool:
         """Perform crossover with type safety checks."""
@@ -131,9 +169,6 @@ class SubtreeCrossover(CrossoverOperator):
 
         # Check type compatibility before swapping
         if not self._are_compatible_types(node1, node2):
-            logger.debug(
-                f"Skipping crossover: incompatible types {type(node1).__name__} and {type(node2).__name__}"
-            )
             return
 
         # Get the field values
@@ -142,23 +177,31 @@ class SubtreeCrossover(CrossoverOperator):
 
         try:
             if isinstance(field_value1, list) and isinstance(field_value2, list):
-                # Both are lists
-                field_value1[index1] = node2
-                field_value2[index2] = node1
-            elif isinstance(field_value1, list):
+                # Both are lists - need valid indices
+                if index1 is not None and index2 is not None:
+                    if 0 <= index1 < len(field_value1) and 0 <= index2 < len(field_value2):
+                        field_value1[index1] = node2
+                        field_value2[index2] = node1
+                    else:
+                        pass  # Invalid indices
+                else:
+                    pass  # Missing indices
+            elif isinstance(field_value1, list) and index1 is not None:
                 # First is list, second is single value
-                field_value1[index1] = node2
-                setattr(parent2, field2, node1)
-            elif isinstance(field_value2, list):
+                if 0 <= index1 < len(field_value1):
+                    field_value1[index1] = node2
+                    setattr(parent2, field2, node1)
+            elif isinstance(field_value2, list) and index2 is not None:
                 # First is single value, second is list
-                setattr(parent1, field1, node2)
-                field_value2[index2] = node1
+                if 0 <= index2 < len(field_value2):
+                    setattr(parent1, field1, node2)
+                    field_value2[index2] = node1
             else:
                 # Both are single values
                 setattr(parent1, field1, node2)
                 setattr(parent2, field2, node1)
-        except Exception as e:
-            logger.debug(f"Crossover swap failed: {e}")
+        except Exception:
+            pass  # Crossover swap failed
 
     def _are_compatible_types(self, node1: schema.IRNode, node2: schema.IRNode) -> bool:
         """Check if two nodes are type-compatible for swapping."""
@@ -202,6 +245,15 @@ class UniformCrossover(CrossoverOperator):
     def crossover(self, parent1: schema.Module, parent2: schema.Module) -> List[schema.Module]:
         """Perform uniform crossover."""
         try:
+            # Validate parents
+            if not parent1 or not parent2:
+                logger.warning("Cannot perform uniform crossover on None parents")
+                return []
+
+            if not hasattr(parent1, "body") or not hasattr(parent2, "body"):
+                logger.warning("Parents missing body attribute")
+                return []
+
             offspring1 = copy.deepcopy(parent1)
             offspring2 = copy.deepcopy(parent2)
 
@@ -216,6 +268,18 @@ class UniformCrossover(CrossoverOperator):
 
     def _mix_blocks(self, block1: schema.Block, block2: schema.Block):
         """Mix statements between two blocks."""
+        if not isinstance(block1, schema.Block) or not isinstance(block2, schema.Block):
+            logger.warning("Invalid block types for mixing")
+            return
+
+        if not hasattr(block1, "statements") or not hasattr(block2, "statements"):
+            logger.warning("Blocks missing statements attribute")
+            return
+
+        if not isinstance(block1.statements, list) or not isinstance(block2.statements, list):
+            logger.warning("Block statements are not lists")
+            return
+
         min_len = min(len(block1.statements), len(block2.statements))
 
         for i in range(min_len):
@@ -329,6 +393,9 @@ class ParentFinder(NodeVisitor):
                     self.parent_info = (node, field, None)
                     return
                 elif isinstance(value, schema.IRNode):
+                    self.visit(value)
+                # Handle Block objects specially
+                elif isinstance(value, schema.Block):
                     self.visit(value)
 
 

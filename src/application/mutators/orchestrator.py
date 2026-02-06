@@ -90,78 +90,108 @@ class MutationOrchestrator:
 
         logger.info(f"Starting orchestration with {len(enabled_layers)} layers")
 
-        # Start with the original IR
-        current_variants = [
-            MutationResult(
-                ir=ir,
-                strategy_name="original",
-                layer=MutationLayer.SEMANTIC,  # Placeholder
-                confidence=1.0,
-                description="Original code",
-            )
-        ]
-
-        all_results = []
+        # Initialize orchestration state
+        orchestration_state = self._initialize_orchestration(ir)
         layer_order = self._get_layer_order(enabled_layers)
 
+        # Process each layer
         for layer in layer_order:
-            logger.info(f"Processing layer: {layer.value}")
+            layer_result = self._process_single_layer(layer, orchestration_state, llm_client)
 
-            layer_start_time = time.time()
-            layer_variants = []
+            if layer_result:
+                self._update_orchestration_state(orchestration_state, layer_result)
 
-            # Get mutators for this layer
-            mutators = self._get_layer_mutators(layer, llm_client)
+        # Finalize and return results
+        return self._finalize_orchestration(orchestration_state)
 
-            if not mutators:
-                logger.warning(f"No mutators available for layer {layer.value}")
-                continue
+    def _initialize_orchestration(self, ir: schema.Module) -> Dict[str, Any]:
+        """Initialize orchestration state with original IR."""
+        from src.utils.mutation_factory import create_mutation_result
 
-            # Apply mutations to current variants
-            if self.config.enable_parallel_mutations:
-                layer_variants = self.mutate_parallel(current_variants, mutators, layer)
-            else:
-                layer_variants = self.mutate_sequential(current_variants, mutators, layer)
+        original_result = create_mutation_result(
+            ir=ir,
+            strategy_name="original",
+            layer=MutationLayer.SEMANTIC,
+            mutator_name="Orchestrator",
+            confidence=1.0,
+            description="Original code",
+        )
 
-            # Early pruning
-            pruned_variants, pruned_count = self._prune_variants(
-                layer_variants, self.config.max_variants_per_layer
+        return {"current_variants": [original_result], "all_results": [], "layer_results": []}
+
+    def _process_single_layer(
+        self, layer: MutationLayer, state: Dict[str, Any], llm_client
+    ) -> Optional[LayerResult]:
+        """Process mutations for a single layer."""
+        logger.info(f"Processing layer: {layer.value}")
+
+        # Get mutators for this layer
+        mutators = self._get_layer_mutators(layer, llm_client)
+        if not mutators:
+            logger.warning(f"No mutators available for layer {layer.value}")
+            return None
+
+        # Apply mutations
+        layer_start_time = time.time()
+        layer_variants = self._apply_layer_mutations(state["current_variants"], mutators, layer)
+
+        # Prune and evaluate results
+        pruned_variants, pruned_count = self._prune_variants(
+            layer_variants, self.config.max_variants_per_layer
+        )
+
+        # Calculate metrics
+        layer_time = time.time() - layer_start_time
+        success_rate = len(pruned_variants) / max(1, len(layer_variants))
+
+        # Record performance
+        self.layer_history[layer].append(success_rate)
+
+        # Create and log layer result
+        layer_result = LayerResult(
+            layer=layer,
+            variants=pruned_variants,
+            execution_time=layer_time,
+            success_rate=success_rate,
+            pruned_count=pruned_count,
+        )
+
+        logger.info(
+            f"Layer {layer.value} completed: "
+            f"{len(pruned_variants)} variants, "
+            f"{success_rate:.2%} success rate, "
+            f"{layer_time:.2f}s"
+        )
+
+        return layer_result
+
+    def _apply_layer_mutations(
+        self, variants: List[MutationResult], mutators: List[LayeredMutator], layer: MutationLayer
+    ) -> List[MutationResult]:
+        """Apply mutations for a layer using configured strategy."""
+        if self.config.enable_parallel_mutations:
+            return self.mutate_parallel(variants, mutators, layer)
+        else:
+            return self.mutate_sequential(variants, mutators, layer)
+
+    def _update_orchestration_state(self, state: Dict[str, Any], layer_result: LayerResult) -> None:
+        """Update orchestration state with layer results."""
+        # Add new variants to current set
+        state["current_variants"].extend(layer_result.variants)
+        state["all_results"].extend(layer_result.variants)
+        state["layer_results"].append(layer_result)
+
+        # Apply global pruning if needed
+        if len(state["current_variants"]) > self.config.max_total_variants:
+            state["current_variants"], _ = self._prune_variants(
+                state["current_variants"], self.config.max_total_variants
             )
 
-            layer_time = time.time() - layer_start_time
-            success_rate = len(pruned_variants) / max(1, len(layer_variants))
-
-            # Record layer performance
-            self.layer_history[layer].append(success_rate)
-
-            # Create layer result
-            layer_result = LayerResult(
-                layer=layer,
-                variants=pruned_variants,
-                execution_time=layer_time,
-                success_rate=success_rate,
-                pruned_count=pruned_count,
-            )
-
-            logger.info(
-                f"Layer {layer.value} completed: "
-                f"{len(pruned_variants)} variants, "
-                f"{success_rate:.2%} success rate, "
-                f"{layer_time:.2f}s"
-            )
-
-            # Update current variants for next layer
-            current_variants.extend(pruned_variants)
-            all_results.extend(pruned_variants)
-
-            # Global pruning if too many variants
-            if len(current_variants) > self.config.max_total_variants:
-                current_variants, _ = self._prune_variants(
-                    current_variants, self.config.max_total_variants
-                )
-
-        # Final pruning and ranking
-        final_results, _ = self._prune_variants(all_results, self.config.max_total_variants)
+    def _finalize_orchestration(self, state: Dict[str, Any]) -> List[MutationResult]:
+        """Finalize orchestration and return pruned results."""
+        final_results, _ = self._prune_variants(
+            state["all_results"], self.config.max_total_variants
+        )
 
         logger.info(f"Orchestration completed: {len(final_results)} final variants")
         return final_results

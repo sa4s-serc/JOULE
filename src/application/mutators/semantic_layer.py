@@ -10,11 +10,11 @@ These mutators operate at the highest abstraction level, focusing on:
 import logging
 from typing import List, Optional, Set
 
-from src.application.mutators.base import (MutationLayer, MutationResult,
-                                           create_mutation_result)
+from src.application.mutators.base import MutationLayer, MutationResult
 from src.application.mutators.ir_mutator_base import IROnlyMutator
 from src.application.mutators.semantic_base import LLMMutatorBase
 from src.domain.ir import schema
+from src.utils.mutation_factory import create_mutation_result
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +27,14 @@ class AlgorithmicIntentMutator(IROnlyMutator, LLMMutatorBase):
     alternatives that maintain the same intent but with better characteristics.
     """
 
-    def __init__(self, llm_client=None, enabled_strategies: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        llm_client=None,
+        enabled_strategies: Optional[Set[str]] = None,
+        allowed_imports: Optional[Set[str]] = None,
+    ):
         IROnlyMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
-        LLMMutatorBase.__init__(self, llm_client)
+        LLMMutatorBase.__init__(self, llm_client, allowed_imports=allowed_imports)
 
     def get_available_strategies(self) -> List[str]:
         return [
@@ -48,15 +53,18 @@ class AlgorithmicIntentMutator(IROnlyMutator, LLMMutatorBase):
         if self._is_strategy_enabled("AlgorithmicIntent_ComplexityReduction"):
             variant = self._optimize_algorithmic_complexity(code, allowed_imports)
             if variant:
-                results.append(
-                    create_mutation_result(
-                        ir=variant,
-                        strategy_name="AlgorithmicIntent_ComplexityReduction",
-                        layer=MutationLayer.SEMANTIC,
-                        confidence=0.8,
-                        description="Reduced algorithmic complexity through better algorithm selection",
-                    )
+                result = create_mutation_result(
+                    ir=variant,
+                    strategy_name="AlgorithmicIntent_ComplexityReduction",
+                    layer=MutationLayer.SEMANTIC,
+                    mutator_name=self.__class__.__name__,
+                    confidence=0.8,
+                    description="Reduced algorithmic complexity through better algorithm selection",
                 )
+                logger.debug(
+                    f"[SEMANTIC_DEBUG] Created result with mutator_name='{result.mutator_name}'"
+                )
+                results.append(result)
 
         # Strategy 2: Pattern Recognition and Replacement
         if self._is_strategy_enabled("AlgorithmicIntent_PatternRecognition"):
@@ -67,6 +75,7 @@ class AlgorithmicIntentMutator(IROnlyMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="AlgorithmicIntent_PatternRecognition",
                         layer=MutationLayer.SEMANTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.7,
                         description="Recognized common algorithmic patterns and applied optimizations",
                     )
@@ -81,6 +90,7 @@ class AlgorithmicIntentMutator(IROnlyMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="AlgorithmicIntent_ArchitecturalImprovement",
                         layer=MutationLayer.SEMANTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.6,
                         description="Improved program architecture and design patterns",
                     )
@@ -108,12 +118,13 @@ Focus on:
 - Dynamic programming opportunities
 - Divide and conquer optimizations
 
-CONSTRAINT: Only use standard library imports that are already present: {allowed_imports}
+CONSTRAINT: Only use standard library imports that are already present or explicitly allowed: {allowed_imports | self.allowed_imports}
 
 Code to optimize:
 {code}
 
-Return ONLY the optimized Python code with better algorithmic complexity.
+CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
+INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -141,12 +152,13 @@ OPTIMIZATION STRATEGIES:
 - Implement early termination conditions
 - Use bit manipulation where appropriate
 
-Current imports available: {allowed_imports}
+Current imports available: {allowed_imports | self.allowed_imports}
 
 Code:
 {code}
 
-Return ONLY the optimized code with recognized patterns efficiently implemented.
+CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
+INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -172,12 +184,13 @@ PERFORMANCE ARCHITECTURE:
 - Optimize hot paths and critical sections
 - Improve cache locality in data access patterns
 
-Available imports: {allowed_imports}
+Available imports: {allowed_imports | self.allowed_imports}
 
 Code:
 {code}
 
-Return ONLY the architecturally improved code that maintains functionality.
+CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
+INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -190,9 +203,14 @@ class ProgramIntentMutator(IROnlyMutator, LLMMutatorBase):
     suggests alternative approaches that achieve the same goal more efficiently.
     """
 
-    def __init__(self, llm_client=None, enabled_strategies: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        llm_client=None,
+        enabled_strategies: Optional[Set[str]] = None,
+        allowed_imports: Optional[Set[str]] = None,
+    ):
         IROnlyMutator.__init__(self, MutationLayer.SEMANTIC, enabled_strategies)
-        LLMMutatorBase.__init__(self, llm_client)
+        LLMMutatorBase.__init__(self, llm_client, allowed_imports=allowed_imports)
 
     def get_available_strategies(self) -> List[str]:
         return [
@@ -216,6 +234,7 @@ class ProgramIntentMutator(IROnlyMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="ProgramIntent_LogicSimplification",
                         layer=MutationLayer.SEMANTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.9,
                         description="Simplified program logic while maintaining intent",
                     )
@@ -230,6 +249,7 @@ class ProgramIntentMutator(IROnlyMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="ProgramIntent_FlowOptimization",
                         layer=MutationLayer.SEMANTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.8,
                         description="Optimized control flow and execution paths",
                     )
@@ -244,6 +264,7 @@ class ProgramIntentMutator(IROnlyMutator, LLMMutatorBase):
                         ir=variant,
                         strategy_name="ProgramIntent_PurposeAlignment",
                         layer=MutationLayer.SEMANTIC,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.7,
                         description="Aligned implementation more closely with intended purpose",
                     )
@@ -272,12 +293,13 @@ MAINTAIN:
 - All edge case handling
 - Error conditions and exceptions
 
-Available imports: {allowed_imports}
+Available imports: {allowed_imports | self.allowed_imports}
 
 Code:
 {code}
 
-Return ONLY the logically simplified code.
+CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
+INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -303,12 +325,13 @@ PERFORMANCE IMPROVEMENTS:
 - Reduce function call overhead in hot paths
 - Minimize state changes and side effects
 
-Available imports: {allowed_imports}
+Available imports: {allowed_imports | self.allowed_imports}
 
 Code:
 {code}
 
-Return ONLY the control-flow optimized code.
+CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
+INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -339,6 +362,7 @@ Available imports: {allowed_imports}
 Code:
 {code}
 
-Return ONLY the purpose-aligned optimized code.
+CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
+INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)

@@ -725,6 +725,22 @@ class AdvancedMemoizationTransformer(IRTransformerBase):
         self.changed = False
         self.needs_functools_import = False
 
+    def visit_Module(self, node: schema.Module) -> schema.Module:
+        """Visit module to add functools import if needed."""
+        # First, visit all children to determine if we need functools
+        new_node = self.generic_visit(node)
+
+        if self.needs_functools_import and not self._has_functools_import(new_node):
+            # Add functools import at the beginning
+            functools_import = schema.Import(names=[schema.Alias(name="functools", asname=None)])
+
+            # Insert import at the beginning of the body
+            new_statements = [functools_import] + list(new_node.body.statements)
+            new_body = new_node.body.model_copy(update={"statements": new_statements})
+            return new_node.model_copy(update={"body": new_body})
+
+        return new_node
+
     def visit_FunctionDef(self, node: schema.FunctionDef) -> schema.FunctionDef:
         """Add memoization decorator to recursive functions."""
         if self._is_recursive_function(node) and self._is_pure_function(node):
@@ -745,6 +761,18 @@ class AdvancedMemoizationTransformer(IRTransformerBase):
                 return node.model_copy(update={"decorator_list": new_decorators})
 
         return node
+
+    def _has_functools_import(self, module: schema.Module) -> bool:
+        """Check if functools is already imported in the module."""
+        for stmt in module.body.statements:
+            if isinstance(stmt, schema.Import):
+                for alias in stmt.names:
+                    if alias.name == "functools":
+                        return True
+            elif isinstance(stmt, schema.ImportFrom):
+                if stmt.module == "functools":
+                    return True
+        return False
 
     def _is_recursive_function(self, func: schema.FunctionDef) -> bool:
         """Check if function calls itself."""

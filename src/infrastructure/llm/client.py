@@ -191,7 +191,7 @@ def create_llm_client(
     # Load defaults from config if needed
     if provider is None or model is None:
         try:
-            from src.utils.config import get_llm_config
+            from src.utils.config_manager import get_llm_config
 
             llm_cfg = get_llm_config()
             provider = provider or llm_cfg["provider"]

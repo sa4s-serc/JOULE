@@ -19,12 +19,14 @@ Layers:
 - MICRO: Low-level optimizations (constant folding, dead code elimination)
 """
 
+from src.utils.mutation_factory import create_mutation_result
+
 from .advanced_performance import (AdvancedAlgorithmicOptimizer,
                                    MemoryOptimizer, VectorizationOptimizer)
 from .algorithmic_layer import ComplexityReducer, DataStructureOptimizer
 # Core base classes
-from .base import (LayeredMutator, MutationLayer, MutationResult,
-                   create_mutation_result, mutate_ir, safe_deepcopy_ir)
+from .base import (LayeredMutator, MutationLayer, MutationResult, mutate_ir,
+                   safe_deepcopy_ir)
 from .ir_mutator_base import (IRMutationMetadata, IROnlyMutator,
                               IRTransformerBase)
 from .micro_layer import (ConstantOptimizer, DeadCodeEliminator,

@@ -16,7 +16,7 @@ import sys
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from src.domain.interfaces import CodeRunner as ICodeRunner
 
@@ -55,13 +55,16 @@ class GreenGymRunner(ICodeRunner):
         self.samples = samples
         self.max_workers = max_workers
 
-    def run(self, code_str: str, test_code_str: str) -> Tuple[bool, Dict[str, float], str]:
+    def run(
+        self, code_str: str, test_code_str: str, allowed_imports: Optional[List[str]] = None
+    ) -> Tuple[bool, Dict[str, float], str]:
         """
         Run code and collect metrics.
 
         Args:
             code_str: The candidate code to evaluate
             test_code_str: The test harness code
+            allowed_imports: List of allowed module names to inject
 
         Returns:
             Tuple of (success, metrics_dict, output_string)
@@ -73,7 +76,9 @@ class GreenGymRunner(ICodeRunner):
                 f.write(code_str)
 
             # Write harness
-            harness_code = self._get_harness_code(test_code_str, tmpdir)
+            harness_code = self._get_harness_code(
+                test_code_str, tmpdir, allowed_imports=allowed_imports
+            )
             harness_path = os.path.join(tmpdir, "harness.py")
             with open(harness_path, "w") as f:
                 f.write(harness_code)
@@ -108,7 +113,8 @@ class GreenGymRunner(ICodeRunner):
 
     def run_batch(
         self,
-        candidates: List[Tuple[str, str, str]],  # (code, test_code, identifier)
+        # (code, test_code, identifier)
+        candidates: List[Tuple[str, str, str]],
     ) -> List[EvaluationResult]:
         """
         Evaluate multiple candidates in parallel.
@@ -154,10 +160,10 @@ class GreenGymRunner(ICodeRunner):
         return results
 
     def _run_isolated(
-        self, code_str: str, test_code_str: str
+        self, code_str: str, test_code_str: str, allowed_imports: Optional[List[str]] = None
     ) -> Tuple[bool, Dict[str, float], str]:
         """Run evaluation in isolation (for parallel execution)."""
-        return self.run(code_str, test_code_str)
+        return self.run(code_str, test_code_str, allowed_imports=allowed_imports)
 
     def _median(self, values: List[float]) -> float:
         """Calculate median of a list of values."""
@@ -205,8 +211,15 @@ class GreenGymRunner(ICodeRunner):
         except Exception as e:
             return False, {}, str(e)
 
-    def _get_harness_code(self, test_code_str: str, tmpdir: str) -> str:
+    def _get_harness_code(
+        self, test_code_str: str, tmpdir: str, allowed_imports: Optional[List[str]] = None
+    ) -> str:
         """Generate the test harness code."""
+        import_lines = ""
+        if allowed_imports:
+            for imp in allowed_imports:
+                import_lines += f"try: import {imp}\nexcept ImportError: pass\n"
+
         return f"""
 import sys
 import os
@@ -229,6 +242,8 @@ except ImportError:
 # Import candidate
 import candidate
 from candidate import *
+
+{import_lines}
 
 # Module aliasing for test compatibility
 for alias in ['complex_target', 'target_complex', 'target', 'target_opt', 

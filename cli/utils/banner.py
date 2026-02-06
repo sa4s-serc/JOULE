@@ -1,4 +1,5 @@
 import random
+
 from rich.align import Align
 from rich.columns import Columns
 from rich.console import Console
@@ -30,8 +31,7 @@ def print_banner():
     ╚═╝  ╚═╝╚══════╝╚═════╝  ╚═════╝ ╚══════╝
     """
 
-    subtitle = Text(
-        "Hierarchical Evolutionary Darwin-Green Engine", style="italic cyan")
+    subtitle = Text("Hierarchical Evolutionary Darwin-Green Engine", style="italic cyan")
 
     # Create the main banner panel
     banner_panel = Panel(

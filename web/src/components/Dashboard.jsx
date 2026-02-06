@@ -1,9 +1,14 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    ScatterChart, Scatter, Legend
+    ScatterChart, Scatter, Legend, Cell
 } from 'recharts';
-import { Terminal, Activity, Zap, Clock, Save, ArrowRight, TrendingDown } from 'lucide-react';
+import { Terminal, Activity, Zap, Clock, Save, ArrowRight, TrendingDown, Eye, BarChart2, Info, Wifi, WifiOff } from 'lucide-react';
+import axios from 'axios';
+import { config } from '../config';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { safeToLocaleTimeString } from '../utils/dateUtils';
+import DeepAnalysis from './DeepAnalysis';
 
 const Dashboard = ({ task }) => {
     const [status, setStatus] = useState(task);
@@ -12,74 +17,157 @@ const Dashboard = ({ task }) => {
     const [paretoData, setParetoData] = useState([]);
     const [mutatorStats, setMutatorStats] = useState({});
     const [bestCode, setBestCode] = useState(task.best_code || '');
-    const wsRef = useRef(null);
+    const [inspectedSolution, setInspectedSolution] = useState(null);
+    const [evaluationHistory, setEvaluationHistory] = useState([]);
+    const [activeTab, setActiveTab] = useState('overview');
     const logEndRef = useRef(null);
 
-    const [isConnected, setIsConnected] = useState(false);
+    // Limit log entries to prevent memory issues
+    const addLog = useCallback((source, message, level = "info") => {
+        try {
+            let timestamp = '--:--:--';
+            try {
+                timestamp = safeToLocaleTimeString();
+            } catch (timeError) {
+                console.warn('Error getting timestamp:', timeError);
+                timestamp = new Date().toLocaleTimeString();
+            }
+            setLogs(prev => {
+                const newLogs = [...prev, { timestamp, source, message, level }];
+                // Keep only the last N entries
+                return newLogs.slice(-config.LOG_MAX_ENTRIES);
+            });
+        } catch (error) {
+            console.error('Error adding log:', error);
+            // Fallback without timestamp
+            setLogs(prev => {
+                const newLogs = [...prev, { timestamp: '--:--:--', source, message, level }];
+                return newLogs.slice(-config.LOG_MAX_ENTRIES);
+            });
+        }
+    }, []);
 
-    useEffect(() => {
-        const ws = new WebSocket(`ws://localhost:8000/ws/${task.task_id}`);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-            setIsConnected(true);
-            addLog("System", "Connected to live stream", "success");
+    // Helper function to normalize mutator names
+    const normalizeMutatorName = useCallback((name) => {
+        if (!name || typeof name !== 'string') {
+            return 'Unknown';
+        }
+        
+        // Remove common prefixes and suffixes
+        let normalized = name
+            .replace(/Mutator$/, '')
+            .replace(/^.*\./, '') // Remove module path
+            .replace(/([A-Z])/g, ' $1') // Add spaces before capitals
+            .trim();
+        
+        // Handle specific cases
+        const mappings = {
+            'Loop Unroller': 'Loop Unroll',
+            'Constant Folder': 'Constant Fold',
+            'Dead Code Eliminator': 'Dead Code',
+            'Variable Renamer': 'Rename Vars',
+            'Function Inliner': 'Inline Funcs',
+            'Algorithmic Optimizer': 'Algorithm',
+            'Semantic Optimizer': 'Semantic',
+            'Syntactic Optimizer': 'Syntactic',
+            'Micro Optimizer': 'Micro'
         };
+        
+        return mappings[normalized] || normalized || 'Unknown';
+    }, []);
 
-        ws.onclose = () => {
-            setIsConnected(false);
-            addLog("System", "Disconnected from live stream", "error");
-        };
+    // Update mutator statistics
+    const updateMutatorStats = useCallback((mutatorName, type) => {
+        const normalizedName = normalizeMutatorName(mutatorName);
+        
+        // Debug logging for unknown mutators
+        if (normalizedName === 'Unknown' || mutatorName === 'Unknown') {
+            console.warn('Unknown mutator detected:', {
+                original: mutatorName,
+                normalized: normalizedName,
+                type: type,
+                timestamp: new Date().toISOString()
+            });
+        }
+        
+        setMutatorStats(prev => {
+            const current = prev[normalizedName] || { attempts: 0, successes: 0 };
+            return {
+                ...prev,
+                [normalizedName]: {
+                    attempts: type === 'attempt' ? current.attempts + 1 : current.attempts,
+                    successes: type === 'success' ? current.successes + 1 : current.successes
+                }
+            };
+        });
+    }, [normalizeMutatorName]);
 
-        ws.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            handleMessage(message);
-        };
-
-        ws.onerror = (err) => {
-            console.error("WebSocket error:", err);
-            addLog("System", "WebSocket connection failed", "error");
-        };
-
-        return () => {
-            if (ws.readyState === 1) ws.close();
-        };
-    }, [task.task_id]);
-
-    useEffect(() => {
-        logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [logs]);
-
-    const handleMessage = (msg) => {
+    const handleMessage = useCallback((msg) => {
         const { type, payload } = msg;
 
+        // Debug logging for mutation events
+        if (type === 'mutation_attempt' || type === 'mutation_result') {
+            console.debug('Mutation event received:', {
+                type,
+                mutator: payload?.mutator,
+                mutator_display: payload?.mutator_display,
+                strategy: payload?.strategy,
+                success: payload?.success
+            });
+        }
+
+        // Validate payload structure
+        if (!payload) {
+            console.warn('Received message with empty payload:', msg);
+            return;
+        }
+
         if (type === 'mutation_attempt') {
-            addLog("Mutator", `Trying ${payload.strategy} using ${payload.mutator}...`, "info");
-            updateMutatorStats(payload.mutator, 'attempt');
+            const mutatorName = payload.mutator || 'Unknown';
+            const displayName = payload.mutator_display || mutatorName;
+            const strategy = payload.strategy || 'Unknown Strategy';
+            addLog("Mutator", `Trying ${strategy} using ${displayName}...`, "info");
+            updateMutatorStats(mutatorName, 'attempt');
         } else if (type === 'mutation_result') {
+            const mutatorName = payload.mutator || 'Unknown';
+            const displayName = payload.mutator_display || mutatorName;
+            const strategy = payload.strategy || 'Unknown Strategy';
+            
             if (payload.success) {
-                addLog("Mutator", `Success: ${payload.strategy}`, "success");
-                updateMutatorStats(payload.mutator, 'success');
+                addLog("Mutator", `Success: ${strategy}`, "success");
+                updateMutatorStats(mutatorName, 'success');
             } else {
-                addLog("Mutator", `Failed: ${payload.error || payload.strategy}`, "error");
-                updateMutatorStats(payload.mutator, 'failure');
+                const errorMsg = payload.error || payload.message || 'Unknown error';
+                addLog("Mutator", `Failed: ${strategy} - ${errorMsg}`, "error");
+                updateMutatorStats(mutatorName, 'failure');
             }
         } else if (type === 'generation_start') {
-            addLog("System", `Starting Generation ${payload.generation + 1}/${payload.total_generations}`, "system");
-            setStatus(prev => ({ ...prev, current_generation: payload.generation + 1 }));
+            const generation = payload.generation ?? 0;
+            const totalGenerations = payload.total_generations ?? status.total_generations;
+            addLog("System", `Starting Generation ${generation + 1}/${totalGenerations}`, "system");
+            setStatus(prev => ({ ...prev, current_generation: generation + 1 }));
         } else if (type === 'generation_complete') {
-            addLog("System", `Generation ${payload.generation + 1} complete. Improved: ${payload.improved_count}`, "system");
+            const generation = payload.generation ?? 0;
+            const improvedCount = payload.improved_count ?? 0;
+            addLog("System", `Generation ${generation + 1} complete. Improved: ${improvedCount}`, "system");
+            
             if (payload.best_metrics) {
                 setStatus(prev => ({ ...prev, best_metrics: payload.best_metrics }));
                 setMetricsHistory(prev => [...prev, {
-                    generation: payload.generation,
+                    generation: generation,
                     energy: payload.best_metrics.energy_joules,
                     time: payload.best_metrics.duration_seconds
                 }]);
             }
         } else if (type === 'new_best_solution') {
-            addLog("System", `New Best Solution! Energy: ${payload.energy?.toExponential(2)}J`, "success");
-            setBestCode(payload.code);
+            const energy = payload.energy;
+            const energyStr = energy ? energy.toExponential(2) : 'Unknown';
+            addLog("System", `New Best Solution! Energy: ${energyStr}J`, "success");
+            
+            if (payload.code) {
+                setBestCode(payload.code);
+            }
+            
             setStatus(prev => ({
                 ...prev,
                 best_metrics: {
@@ -89,306 +177,470 @@ const Dashboard = ({ task }) => {
                 improvement: payload.improvement
             }));
         } else if (type === 'pareto_update') {
-            setParetoData(payload.solutions);
+            const solutions = payload.solutions || [];
+            setParetoData(solutions);
         } else if (type === 'evaluation_failure') {
-            addLog("System", `Evaluation Failed for ${payload.mutation}: ${payload.error}`, "error");
+            const mutation = payload.mutation || 'Unknown';
+            const error = payload.error || 'Unknown error';
+            addLog("System", `Evaluation Failed for ${mutation}: ${error}`, "error");
         } else if (type === 'error') {
             addLog("System", `Critical Error: ${payload.message}`, "error");
             setStatus(prev => ({ ...prev, status: 'failed' }));
+        } else if (type === 'evaluation_start') {
+            // Optional: highlight that something is being evaluated
+        } else if (type === 'evaluation_result') {
+            setEvaluationHistory(prev => [{
+                ...payload,
+                time: new Date(),
+                id: Math.random().toString(36).substr(2, 9),
+                code: payload.code || null,
+                generation: status.current_generation || 0
+            }, ...prev.slice(0, 49)]);
+
+            if (payload.success) {
+                // If it was very successful (improved pareto), maybe add a special log
+            } else {
+                addLog("Evaluator", `Failed: ${payload.mutation} - ${payload.output?.split('\n')[0]}`, "error");
+            }
         } else if (type === 'optimization_complete') {
             addLog("System", "Optimization Completed!", "success");
             setStatus(prev => ({ ...prev, status: 'completed' }));
             if (payload.best_code) setBestCode(payload.best_code);
         }
+    }, [addLog, updateMutatorStats, status.total_generations]);
+
+    // WebSocket message handler
+    const handleWebSocketMessage = useCallback((message) => {
+        handleMessage(message);
+    }, [handleMessage]);
+
+    // WebSocket error handler
+    const handleWebSocketError = useCallback((error) => {
+        console.error('WebSocket error:', error);
+        addLog("System", `Connection error: ${error}`, "error");
+    }, [addLog]);
+
+    // Use custom WebSocket hook
+    const { isConnected, connectionStatus, reconnect } = useWebSocket(
+        task.task_id,
+        handleWebSocketMessage,
+        handleWebSocketError
+    );
+
+    // Auto-scroll logs to bottom
+    useEffect(() => {
+        logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [logs]);
+
+    const handleParetoClick = (data) => {
+        // Recharts Scatter click data can be the payload itself or have a payload property
+        const solution = data?.payload || data;
+        if (solution && solution.variant_id) {
+            setInspectedSolution(solution);
+        }
     };
 
-    const updateMutatorStats = (mutatorName, type) => {
-        setMutatorStats(prev => {
-            const current = prev[mutatorName] || { attempts: 0, successes: 0 };
-            return {
-                ...prev,
-                [mutatorName]: {
-                    attempts: type === 'attempt' ? current.attempts + 1 : current.attempts,
-                    successes: type === 'success' ? current.successes + 1 : current.successes
-                }
-            };
-        });
-    };
-
-    const addLog = (source, message, type = 'info') => {
-        setLogs(prev => [...prev.slice(-199), { source, message, type, time: new Date() }]);
-    };
+    // Helper function to get display name for mutators
+    const getMutatorDisplayName = useCallback((name) => {
+        // Use the normalized name or return as-is
+        return normalizeMutatorName(name);
+    }, [normalizeMutatorName]);
 
     const progress = (status.current_generation / status.total_generations) * 100;
 
+    const displayedCode = inspectedSolution ? inspectedSolution.code : bestCode;
+    const displayedMetrics = inspectedSolution ? { energy: inspectedSolution.energy, time: inspectedSolution.time } :
+        status.best_metrics ? { energy: status.best_metrics.energy_joules, time: status.best_metrics.duration_seconds } : null;
+
     return (
-        <div className="grid">
-            {/* Progress Bar */}
-            {status.status === 'running' && (
-                <div style={{ width: '100%', height: '4px', background: 'var(--glass)', borderRadius: '2px', overflow: 'hidden' }}>
-                    <div style={{
-                        width: `${progress}%`,
-                        height: '100%',
-                        background: 'linear-gradient(90deg, var(--primary), var(--secondary))',
-                        boxShadow: '0 0 10px var(--primary)',
-                        transition: 'width 0.5s ease-out'
-                    }} />
-                </div>
-            )}
-
-            {/* Metrics Cards */}
-            <div className="grid cols-4">
-                <div className="card glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
-                        <Activity size={18} /> Status
-                        {isConnected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', marginLeft: 'auto', boxShadow: '0 0 5px var(--success)' }} title="Connected" />}
-                    </div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', textTransform: 'capitalize', color: 'var(--text-main)' }}>
-                        {status.status}
-                    </div>
-                    <div className="status-badge" style={{ marginTop: '0.75rem' }}>
-                        Gen {status.current_generation} / {status.total_generations}
-                    </div>
-                </div>
-
-                <div className="card glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
-                        <Zap size={18} /> Energy
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', color: 'var(--primary)' }}>
-                            {status.best_metrics?.energy_joules
-                                ? `${status.best_metrics.energy_joules.toExponential(4)} J`
-                                : '-'}
-                        </div>
-                        {status.improvement?.energy_percent > 0 && (
-                            <div style={{ color: 'var(--success)', fontSize: '0.9rem', display: 'flex', alignItems: 'center' }}>
-                                <TrendingDown size={14} style={{ marginRight: '4px' }} />
-                                {status.improvement.energy_percent.toFixed(1)}%
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="card glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
-                        <Clock size={18} /> Duration
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', color: 'var(--secondary)' }}>
-                            {status.best_metrics?.duration_seconds
-                                ? `${(status.best_metrics.duration_seconds * 1000).toFixed(2)} ms`
-                                : '-'}
-                        </div>
-                        {status.improvement?.time_percent > 0 && (
-                            <div style={{ color: 'var(--secondary)', fontSize: '0.9rem', display: 'flex', alignItems: 'center' }}>
-                                <TrendingDown size={14} style={{ marginRight: '4px' }} />
-                                {status.improvement.time_percent.toFixed(1)}%
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="card glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
-                        <Save size={18} /> Best Solution
-                    </div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', color: 'var(--text-main)' }}>
-                        {status.best_metrics ? 'Optimized' : 'None yet'}
-                    </div>
-                    {status.best_metrics && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Updated just now</div>}
-                </div>
+        <div className="dashboard-container">
+            <div className="dashboard-tabs" style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+                <button
+                    className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('overview')}
+                >
+                    Overview
+                </button>
+                <button
+                    className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('analysis')}
+                >
+                    Deep Analysis
+                </button>
             </div>
 
-            <div className="grid cols-2">
-                {/* Convergence Chart */}
-                <div className="card glass" style={{ height: '400px' }}>
-                    <h3 style={{ marginBottom: '1.5rem', fontSize: '1.1rem', fontWeight: 600 }}>Convergence History</h3>
-                    <ResponsiveContainer width="100%" height="85%">
-                        <LineChart data={metricsHistory}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                            <XAxis
-                                dataKey="generation"
-                                stroke="var(--text-muted)"
-                                tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                                tickLine={false}
-                                axisLine={false}
-                            />
-                            <YAxis
-                                stroke="var(--text-muted)"
-                                tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                                tickLine={false}
-                                axisLine={false}
-                            />
-                            <Tooltip
-                                contentStyle={{
-                                    backgroundColor: 'rgba(13, 17, 26, 0.95)',
-                                    border: '1px solid var(--border)',
-                                    borderRadius: '8px',
-                                    boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-                                }}
-                                itemStyle={{ color: '#F1F5F9' }}
-                                labelStyle={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}
-                            />
-                            <Legend />
-                            <Line
-                                type="monotone"
-                                dataKey="energy"
-                                name="Energy (J)"
-                                stroke="#00ff9d"
-                                strokeWidth={3}
-                                dot={{ r: 4, fill: '#00ff9d', strokeWidth: 0 }}
-                                activeDot={{ r: 6, stroke: '#fff', strokeWidth: 2 }}
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="time"
-                                name="Time (s)"
-                                stroke="#00b8ff"
-                                strokeWidth={3}
-                                dot={{ r: 4, fill: '#00b8ff', strokeWidth: 0 }}
-                                activeDot={{ r: 6, stroke: '#fff', strokeWidth: 2 }}
-                            />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </div>
+            {activeTab === 'overview' ? (
+                <div className="grid">
+                    {/* Progress Bar */}
+                    {status.status === 'running' && (
+                        <div style={{ width: '100%', height: '4px', background: 'var(--glass)', borderRadius: '2px', overflow: 'hidden', position: 'fixed', top: 0, left: 0, zIndex: 1000 }}>
+                            <div style={{
+                                width: `${progress}%`,
+                                height: '100%',
+                                background: 'linear-gradient(90deg, var(--primary), var(--secondary))',
+                                boxShadow: '0 0 10px var(--primary)',
+                                transition: 'width 0.5s ease-out'
+                            }} />
+                        </div>
+                    )}
 
-                {/* Pareto Frontier Chart */}
-                <div className="card glass" style={{ height: '400px' }}>
-                    <h3 style={{ marginBottom: '1.5rem', fontSize: '1.1rem', fontWeight: 600 }}>Pareto Frontier (Trade-offs)</h3>
-                    <ResponsiveContainer width="100%" height="85%">
-                        <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                            <XAxis
-                                type="number"
-                                dataKey="time"
-                                name="Time"
-                                unit="s"
-                                stroke="var(--text-muted)"
-                                tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                                tickLine={false}
-                                axisLine={false}
-                                label={{ value: 'Execution Time (s)', position: 'bottom', fill: 'var(--text-muted)', fontSize: 12 }}
-                            />
-                            <YAxis
-                                type="number"
-                                dataKey="energy"
-                                name="Energy"
-                                unit="J"
-                                stroke="var(--text-muted)"
-                                tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                                tickLine={false}
-                                axisLine={false}
-                                label={{ value: 'Energy (J)', angle: -90, position: 'left', fill: 'var(--text-muted)', fontSize: 12 }}
-                            />
-                            <Tooltip
-                                cursor={{ strokeDasharray: '3 3' }}
-                                contentStyle={{
-                                    backgroundColor: 'rgba(13, 17, 26, 0.95)',
-                                    border: '1px solid var(--border)',
-                                    borderRadius: '8px'
-                                }}
-                            />
-                            <Scatter name="Solutions" data={paretoData} fill="var(--primary)" />
-                        </ScatterChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
+                    {/* Metrics Cards */}
+                    <div className="grid cols-4">
+                        <div className="card glass">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                                <Activity size={18} /> Status
+                                {isConnected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', marginLeft: 'auto', boxShadow: '0 0 5px var(--success)' }} title="Connected" />}
+                            </div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', textTransform: 'capitalize', color: 'var(--text-main)' }}>
+                                {status.status}
+                            </div>
+                            <div className="status-badge" style={{ marginTop: '0.75rem' }}>
+                                Gen {status.current_generation} / {status.total_generations}
+                            </div>
+                        </div>
 
-            <div className="grid cols-2">
-                {/* Mutator Stats & Logs */}
-                <div className="card glass" style={{ height: '500px', display: 'flex', flexDirection: 'column' }}>
-                    {/* Tabs or Header for Logs/Stats. For now simple separation */}
-                    <div style={{ paddingBottom: '1rem', borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
-                        <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Active Mutators</h3>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-                            {Object.entries(mutatorStats).map(([name, stats]) => (
-                                <div key={name} className="status-badge" style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <span>{name}</span>
-                                    <span style={{ color: 'var(--text-muted)' }}>{stats.successes}/{stats.attempts}</span>
+                        <div className="card glass">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                                <Zap size={18} /> Energy Efficiency
+                            </div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', color: 'var(--primary)' }}>
+                                {displayedMetrics?.energy ? `${displayedMetrics.energy.toExponential(2)}J` : 'Pending...'}
+                            </div>
+                            {status.improvement && (
+                                <div style={{ fontSize: '0.8rem', color: 'var(--success)', marginTop: '0.5rem' }}>
+                                    {status.improvement > 0 ? '↓' : '↑'} {Math.abs(status.improvement * 100).toFixed(1)}%
                                 </div>
-                            ))}
-                            {Object.keys(mutatorStats).length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No data yet</span>}
+                            )}
+                        </div>
+
+                        <div className="card glass">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                                <Clock size={18} /> Execution Time
+                            </div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', color: 'var(--secondary)' }}>
+                                {displayedMetrics?.time ? `${(displayedMetrics.time * 1000).toFixed(2)}ms` : 'Pending...'}
+                            </div>
+                        </div>
+
+                        <div className="card glass">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                                <BarChart2 size={18} /> Active Mutators
+                            </div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem', color: 'var(--accent)' }}>
+                                {Object.keys(mutatorStats).length}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                                {Object.values(mutatorStats).reduce((sum, stat) => sum + stat.successes, 0)} successes
+                            </div>
                         </div>
                     </div>
 
-                    <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem', fontWeight: 600 }}>
-                            <Terminal size={18} /> Event Log
-                        </h3>
-                        <button onClick={() => setLogs([])} className="btn-small" style={{ border: 'none' }}>
-                            Clear
-                        </button>
-                    </div>
-                    <div className="log-container" style={{ flex: 1 }}>
-                        {logs.length === 0 && <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Waiting for events...</div>}
-                        {logs.map((log, i) => (
-                            <div key={i} className={`log-entry`} style={{
-                                borderLeft: `2px solid ${log.type === 'error' ? 'var(--danger)' :
-                                    log.type === 'success' ? 'var(--success)' :
-                                        log.type === 'system' ? 'var(--secondary)' : 'var(--text-muted)'
-                                    }`,
-                                paddingLeft: '0.75rem',
-                                color: log.type === 'error' ? '#fca5a5' : 'inherit'
-                            }}>
-                                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginRight: '0.75rem', minWidth: '60px', display: 'inline-block' }}>
-                                    [{log.time.toLocaleTimeString([], { hour12: false })}]
-                                </span>
-                                <span style={{ fontWeight: 600, marginRight: '0.5rem', color: 'var(--text-main)' }}>
-                                    {log.source}:
-                                </span>
-                                {log.message}
+                    {/* Debug Information Panel (only show if there are issues) */}
+                    {(Object.keys(mutatorStats).some(name => name === 'Unknown' || name.includes('undefined')) || 
+                      logs.some(log => log.message.includes('Unknown'))) && (
+                        <div className="card glass" style={{ borderColor: 'var(--warning)', marginBottom: '1rem' }}>
+                            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--warning)' }}>
+                                ⚠️ Debug Information
+                            </h3>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                <p>Detected potential issues with mutator identification:</p>
+                                <ul style={{ marginLeft: '1rem', marginTop: '0.5rem' }}>
+                                    {Object.keys(mutatorStats).filter(name => name === 'Unknown' || name.includes('undefined')).map(name => (
+                                        <li key={name}>Unknown mutator: {name}</li>
+                                    ))}
+                                    {logs.filter(log => log.message.includes('Unknown')).slice(-3).map((log, idx) => (
+                                        <li key={idx}>Recent log: {log.message}</li>
+                                    ))}
+                                </ul>
+                                <p style={{ marginTop: '0.5rem', fontStyle: 'italic' }}>
+                                    This information helps developers identify and fix mutator naming issues.
+                                </p>
                             </div>
-                        ))}
-                        <div ref={logEndRef} />
+                        </div>
+                    )}
+
+                    {/* Mutator Performance Overview */}
+                    {Object.keys(mutatorStats).length > 0 && (
+                        <div className="card glass">
+                            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                                <Info size={20} /> Mutator Performance
+                            </h3>
+                            <div className="mutator-stats-grid">
+                                {Object.entries(mutatorStats)
+                                    .sort(([,a], [,b]) => (b.successes / Math.max(b.attempts, 1)) - (a.successes / Math.max(a.attempts, 1)))
+                                    .map(([name, stats]) => {
+                                        const successRate = stats.attempts > 0 ? (stats.successes / stats.attempts) * 100 : 0;
+                                        const color = successRate > 50 ? 'var(--success)' : successRate > 20 ? 'var(--warning)' : 'var(--danger)';
+                                        const displayName = getMutatorDisplayName(name);
+                                        
+                                        return (
+                                            <div key={name} className="mutator-stat-card">
+                                                <div className="mutator-stat-header">
+                                                    <span className="mutator-name" title={`Original: ${name}`}>
+                                                        {displayName}
+                                                    </span>
+                                                    <span className="success-rate" style={{ color }}>
+                                                        {successRate.toFixed(0)}%
+                                                    </span>
+                                                </div>
+                                                <div className="mutator-stat-bar">
+                                                    <div 
+                                                        className="mutator-stat-fill" 
+                                                        style={{ 
+                                                            width: `${successRate}%`, 
+                                                            background: color 
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="mutator-stat-details">
+                                                    {stats.successes}/{stats.attempts} attempts
+                                                    {stats.attempts === 0 && (
+                                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginLeft: '0.5rem' }}>
+                                                            (Not used yet)
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="grid cols-2">
+                        {/* Convergence Chart */}
+                        <div className="card glass" style={{ height: '400px' }}>
+                            <h3 style={{ marginBottom: '1.5rem', fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <TrendingDown size={18} /> Convergence History
+                            </h3>
+                            <ResponsiveContainer width="100%" height="85%">
+                                <LineChart data={metricsHistory}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                                    <XAxis
+                                        dataKey="generation"
+                                        stroke="var(--text-muted)"
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
+                                        tickLine={false}
+                                        axisLine={false}
+                                    />
+                                    <YAxis
+                                        stroke="var(--text-muted)"
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
+                                        tickLine={false}
+                                        axisLine={false}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'rgba(13, 17, 26, 0.95)',
+                                            border: '1px solid var(--border)',
+                                            borderRadius: '8px',
+                                            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+                                        }}
+                                        itemStyle={{ color: '#F1F5F9' }}
+                                        labelStyle={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}
+                                    />
+                                    <Legend />
+                                    <Line
+                                        type="monotone"
+                                        dataKey="energy"
+                                        name="Energy (J)"
+                                        stroke="#00ff9d"
+                                        strokeWidth={3}
+                                        dot={{ r: 4, fill: '#00ff9d', strokeWidth: 0 }}
+                                        activeDot={{ r: 6, stroke: '#fff', strokeWidth: 2 }}
+                                    />
+                                    <Line
+                                        type="monotone"
+                                        dataKey="time"
+                                        name="Time (s)"
+                                        stroke="#00b8ff"
+                                        strokeWidth={3}
+                                        dot={{ r: 4, fill: '#00b8ff', strokeWidth: 0 }}
+                                        activeDot={{ r: 6, stroke: '#fff', strokeWidth: 2 }}
+                                    />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        {/* Pareto Frontier Chart */}
+                        <div className="card glass" style={{ height: '400px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <Activity size={18} /> Pareto Frontier
+                                </h3>
+                                <div className="label-hint" style={{ fontSize: '0.7rem' }}>Click points to inspect</div>
+                            </div>
+                            <ResponsiveContainer width="100%" height="85%">
+                                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                    <XAxis
+                                        type="number"
+                                        dataKey="time"
+                                        name="Time"
+                                        unit="s"
+                                        stroke="var(--text-muted)"
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        label={{ value: 'Execution Time (s)', position: 'bottom', fill: 'var(--text-muted)', fontSize: 12 }}
+                                    />
+                                    <YAxis
+                                        type="number"
+                                        dataKey="energy"
+                                        name="Energy"
+                                        unit="J"
+                                        stroke="var(--text-muted)"
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        label={{ value: 'Energy (J)', angle: -90, position: 'left', fill: 'var(--text-muted)', fontSize: 12 }}
+                                    />
+                                    <Tooltip
+                                        cursor={{ strokeDasharray: '3 3' }}
+                                        contentStyle={{
+                                            backgroundColor: 'rgba(13, 17, 26, 0.95)',
+                                            border: '1px solid var(--border)',
+                                            borderRadius: '8px'
+                                        }}
+                                    />
+                                    <Scatter
+                                        name="Solutions"
+                                        data={paretoData}
+                                        onClick={(data) => handleParetoClick(data)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        {paretoData.map((entry, index) => (
+                                            <Cell
+                                                key={`cell-${index}`}
+                                                fill={inspectedSolution?.variant_id === entry.variant_id ? 'var(--secondary)' : 'var(--primary)'}
+                                                stroke={inspectedSolution?.variant_id === entry.variant_id ? '#fff' : 'none'}
+                                                strokeWidth={2}
+                                            />
+                                        ))}
+                                    </Scatter>
+                                </ScatterChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    <div className="grid cols-2">
+                        {/* Mutator Stats & Logs */}
+                        <div className="card glass" style={{ height: '550px', display: 'flex', flexDirection: 'column' }}>
+                            <div style={{ paddingBottom: '1rem', borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <Zap size={18} color="var(--primary)" /> Mutator Effectiveness
+                                </h3>
+                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                                    {Object.entries(mutatorStats).map(([name, stats]) => (
+                                        <div key={name} className="status-badge" style={{
+                                            display: 'flex',
+                                            gap: '0.5rem',
+                                            background: stats.successes > 0 ? 'rgba(0, 255, 157, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                                            borderColor: stats.successes > 0 ? 'rgba(0, 255, 157, 0.3)' : 'var(--border)'
+                                        }}>
+                                            <span style={{ color: stats.successes > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{name}</span>
+                                            <span style={{ fontWeight: 'bold' }}>{(stats.successes / (stats.attempts || 1) * 100).toFixed(0)}%</span>
+                                        </div>
+                                    ))}
+                                    {Object.keys(mutatorStats).length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No mutation data available yet...</span>}
+                                </div>
+                            </div>
+
+                            <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem', fontWeight: 600 }}>
+                                    <Terminal size={18} /> Event Log
+                                </h3>
+                                <button onClick={() => setLogs([])} className="btn-small" style={{ border: 'none' }}>
+                                    Clear
+                                </button>
+                            </div>
+                            <div className="log-container" style={{ flex: 1 }}>
+                                {logs.length === 0 && <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Waiting for evolution events...</div>}
+                                {logs.map((log, i) => (
+                                    <div key={i} className={`log-entry`} style={{
+                                        borderLeft: `2px solid ${log.level === 'error' ? 'var(--danger)' :
+                                            log.level === 'success' ? 'var(--success)' :
+                                                log.level === 'system' ? 'var(--secondary)' : 'var(--text-muted)'
+                                            }`,
+                                        paddingLeft: '0.75rem',
+                                        color: log.level === 'error' ? '#fca5a5' : 'inherit'
+                                    }}>
+                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginRight: '0.75rem', minWidth: '60px', display: 'inline-block' }}>
+                                            [{log.timestamp}]
+                                        </span>
+                                        <span style={{ fontWeight: 600, marginRight: '0.5rem', color: 'var(--text-main)' }}>
+                                            {log.source}:
+                                        </span>
+                                        {log.message}
+                                    </div>
+                                ))}
+                                <div ref={logEndRef} />
+                            </div>
+                        </div>
+
+                        {/* Code Diff */}
+                        {(bestCode || status.original_code) && (
+                            <div className="card glass" style={{ display: 'flex', flexDirection: 'column' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <Eye size={18} /> {inspectedSolution ? 'Inspecting Variant' : 'Current Best Evolution'}
+                                    </h3>
+                                    {inspectedSolution && (
+                                        <button className="btn-small" onClick={() => setInspectedSolution(null)} style={{ color: 'var(--primary)', borderColor: 'var(--glass-border)' }}>
+                                            Back to Best
+                                        </button>
+                                    )}
+                                </div>
+
+                                {displayedMetrics && (
+                                    <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem', padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                                            <Zap size={14} color="var(--primary)" /> {displayedMetrics.energy.toExponential(4)} J
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                                            <Clock size={14} color="var(--secondary)" /> {(displayedMetrics.time * 1000).toFixed(2)} ms
+                                        </div>
+                                        {inspectedSolution && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                <Info size={14} /> {inspectedSolution.mutation}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <div className="diff-container">
+                                    <div className="diff-pane">
+                                        <div className="diff-header">Original Code</div>
+                                        <pre className="diff-code">
+                                            {status.original_code}
+                                        </pre>
+                                    </div>
+                                    <div className="diff-pane">
+                                        <div className="diff-header" style={{ color: 'var(--primary)' }}>
+                                            {inspectedSolution ? 'Selected Solution' : 'Optimized Code'}
+                                        </div>
+                                        <pre className="diff-code optimized">
+                                            {displayedCode || 'Waiting for first improvement...'}
+                                        </pre>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
-
-                {/* Code Diff */}
-                {(bestCode || status.original_code) && (
-                    <div className="card glass">
-                        <h3 style={{ marginBottom: '1.5rem', fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            Code Evolution <ArrowRight size={16} color="var(--text-muted)" />
-                        </h3>
-                        <div style={{ display: 'flex', flexDirection: 'column', height: '90%' }}>
-                            <div style={{ flex: 1, marginBottom: '1rem', display: 'flex', flexDirection: 'column' }}>
-                                <label className="label-hint" style={{ marginBottom: '0.5rem' }}>Original Code</label>
-                                <pre style={{
-                                    padding: '1rem',
-                                    background: '#050505',
-                                    borderRadius: '8px',
-                                    overflow: 'auto',
-                                    fontSize: '0.8rem',
-                                    border: '1px solid var(--border)',
-                                    flex: 1,
-                                    color: 'var(--text-muted)',
-                                    lineHeight: '1.5'
-                                }}>
-                                    {status.original_code}
-                                </pre>
-                            </div>
-                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                                <label className="label-hint" style={{ marginBottom: '0.5rem', color: 'var(--primary)' }}>Optimized Code</label>
-                                <pre style={{
-                                    padding: '1rem',
-                                    background: '#050505',
-                                    borderRadius: '8px',
-                                    overflow: 'auto',
-                                    fontSize: '0.8rem',
-                                    border: '1px solid var(--primary)',
-                                    flex: 1,
-                                    color: 'var(--text-code)',
-                                    lineHeight: '1.5',
-                                    boxShadow: '0 0 20px rgba(0, 255, 157, 0.05)'
-                                }}>
-                                    {bestCode || 'Waiting for first improvement...'}
-                                </pre>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
+            ) : (
+                <DeepAnalysis
+                    mutatorStats={mutatorStats}
+                    evaluationHistory={evaluationHistory}
+                    paretoData={paretoData}
+                    metricsHistory={metricsHistory}
+                    originalCode={status.original_code}
+                    bestCode={bestCode}
+                    status={status}
+                />
+            )}
         </div>
     );
 };
+
 export default Dashboard;

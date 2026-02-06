@@ -131,8 +131,6 @@ class LazyIRWrapper(Generic[T]):
         if self._copied is not None:
             return
 
-        logger.debug(f"Performing copy-on-write for {type(self._original).__name__}")
-
         # Use incremental copy if possible
         if self._can_use_incremental_copy():
             self._copied = self._incremental_copy()
@@ -248,7 +246,7 @@ class LazyIRManager:
         cleaned_count = active_count - len(self.active_wrappers)
 
         if cleaned_count > 0:
-            logger.debug(f"Cleaned up {cleaned_count} unused lazy wrappers")
+            logger.info(f"Cleaned up {cleaned_count} unused lazy wrappers")
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """Get memory usage statistics."""

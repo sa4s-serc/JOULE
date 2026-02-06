@@ -42,6 +42,7 @@ class MutationResult:
     ir: schema.Module
     strategy_name: str
     layer: MutationLayer
+    mutator_name: str = ""
     confidence: float = 1.0  # Confidence in the mutation (0.0 to 1.0)
     description: str = ""  # Human-readable description of the change
 
@@ -59,6 +60,21 @@ class LayeredMutator(Mutator):
         self.enabled_strategies = enabled_strategies or set()
         self.mutation_count = 0
         self.success_count = 0
+
+    def _create_result(
+        self, ir: schema.Module, strategy_name: str, confidence: float = 1.0, description: str = ""
+    ) -> MutationResult:
+        """Helper to create a MutationResult with this mutator's metadata."""
+        from src.utils.mutation_factory import create_mutation_result
+
+        return create_mutation_result(
+            ir=ir,
+            strategy_name=strategy_name,
+            layer=self.layer,
+            mutator_name=self.__class__.__name__,
+            confidence=confidence,
+            description=description,
+        )
 
     @abstractmethod
     def get_available_strategies(self) -> List[str]:
@@ -152,20 +168,3 @@ def mutate_ir(ir: schema.Module) -> LazyIRWrapper:
             return mutated
     """
     return LazyIRWrapper(ir)
-
-
-def create_mutation_result(
-    ir: schema.Module,
-    strategy_name: str,
-    layer: MutationLayer,
-    confidence: float = 1.0,
-    description: str = "",
-) -> MutationResult:
-    """Helper to create a MutationResult with proper metadata."""
-    return MutationResult(
-        ir=ir,
-        strategy_name=strategy_name,
-        layer=layer,
-        confidence=confidence,
-        description=description,
-    )

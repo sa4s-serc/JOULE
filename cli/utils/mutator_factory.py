@@ -24,6 +24,7 @@ def create_mutators(
     llm_provider: Optional[str] = None,
     llm_model: Optional[str] = None,
     exclude_mutators: Optional[str] = None,
+    allowed_imports: Optional[Set[str]] = None,
     progress=None,
     task=None,
 ) -> Tuple[List, Set[MutationLayer], Any]:
@@ -73,7 +74,12 @@ def create_mutators(
 
     # Semantic Layer Mutators
     if MutationLayer.SEMANTIC in enabled_layers and llm:
-        mutators.extend([AlgorithmicIntentMutator(llm), ProgramIntentMutator(llm)])
+        mutators.extend(
+            [
+                AlgorithmicIntentMutator(llm, allowed_imports=allowed_imports),
+                ProgramIntentMutator(llm, allowed_imports=allowed_imports),
+            ]
+        )
         if progress:
             progress.update(task, description="✓ Semantic layer mutators enabled")
 
@@ -87,7 +93,7 @@ def create_mutators(
     if MutationLayer.SYNTACTIC in enabled_layers:
         syntactic_mutators = [PythonicIdiomOptimizer()]
         if llm:  # LLM-based syntactic mutators
-            syntactic_mutators.append(CodePatternOptimizer(llm))
+            syntactic_mutators.append(CodePatternOptimizer(llm, allowed_imports=allowed_imports))
         mutators.extend(syntactic_mutators)
         if progress:
             progress.update(task, description="✓ Syntactic layer mutators enabled")

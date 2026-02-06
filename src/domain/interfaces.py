@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.domain.ir.schema import Module
 
@@ -32,7 +32,9 @@ class CodeRunner(ABC):
     """
 
     @abstractmethod
-    def run(self, code: str, test_code: str) -> Tuple[bool, Dict[str, float], str]:
+    def run(
+        self, code: str, test_code: str, allowed_imports: Optional[List[str]] = None
+    ) -> Tuple[bool, Dict[str, float], str]:
         """
         Execute the code and return metrics.
 

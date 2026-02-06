@@ -10,8 +10,9 @@ from rich.table import Table
 
 from cli.utils.banner import (print_error, print_info, print_success,
                               print_warning)
-from src.utils.config import GLOBAL_CONFIG as CONFIG_FILE
-from src.utils.config import get_default_config, load_config, save_config
+from src.utils.config_manager import GLOBAL_CONFIG as CONFIG_FILE
+from src.utils.config_manager import (get_default_config, load_config,
+                                      save_config)
 
 DEFAULT_CONFIG = get_default_config()
 

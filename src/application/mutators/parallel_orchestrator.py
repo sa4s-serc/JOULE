@@ -48,8 +48,7 @@ class ParallelConfig:
         available_memory_mb = psutil.virtual_memory().available // (1024 * 1024)
         if self.max_memory_usage_mb > available_memory_mb * 0.8:
             self.max_memory_usage_mb = int(available_memory_mb * 0.8)
-            logger.warning(
-                f"Adjusted max memory usage to {self.max_memory_usage_mb}MB")
+            logger.warning(f"Adjusted max memory usage to {self.max_memory_usage_mb}MB")
 
         # Adjust workers based on CPU count and memory
         optimal_workers = min(
@@ -111,16 +110,26 @@ class ConflictResolver:
     ) -> List[MutationResult]:
         """Resolve conflicts between mutation results."""
         if len(results) <= 1:
+            logger.debug(f"[CONFLICT_RESOLVER] No conflicts to resolve ({len(results)} results)")
             return results
 
+        logger.info(
+            f"[CONFLICT_RESOLVER] Resolving conflicts for {len(results)} results using strategy: {self.strategy}"
+        )
         self.resolution_count += len(results) - 1
 
         if self.strategy == "merge":
-            return self._merge_compatible_mutations(results, original_ir)
+            resolved = self._merge_compatible_mutations(results, original_ir)
+            logger.info(f"[CONFLICT_RESOLVER] Merge strategy produced {len(resolved)} results")
+            return resolved
         elif self.strategy == "priority":
-            return self._select_by_priority(results)
+            resolved = self._select_by_priority(results)
+            logger.info(f"[CONFLICT_RESOLVER] Priority strategy produced {len(resolved)} results")
+            return resolved
         else:  # discard
-            return results[:1]  # Keep only the first result
+            resolved = results[:1]  # Keep only the first result
+            logger.info(f"[CONFLICT_RESOLVER] Discard strategy produced {len(resolved)} results")
+            return resolved
 
     def _merge_compatible_mutations(
         self, results: List[MutationResult], original_ir: schema.Module
@@ -140,8 +149,7 @@ class ConflictResolver:
                     merged_results.append(merged)
                 else:
                     # Fall back to highest confidence
-                    merged_results.append(
-                        max(group, key=lambda r: r.confidence))
+                    merged_results.append(max(group, key=lambda r: r.confidence))
 
         return merged_results
 
@@ -163,6 +171,14 @@ class ConflictResolver:
         """Attempt to merge a group of compatible mutations."""
         # This is a simplified merge - in practice, would need sophisticated conflict detection
         try:
+            logger.debug(f"[MERGE_DEBUG] Attempting to merge {len(group)} mutations")
+
+            # Log the mutator names in the group
+            for i, result in enumerate(group):
+                logger.debug(
+                    f"[MERGE_DEBUG] Result {i}: mutator_name='{result.mutator_name}', strategy='{result.strategy_name}'"
+                )
+
             # Start with the highest confidence mutation
             base_result = max(group, key=lambda r: r.confidence)
 
@@ -170,18 +186,126 @@ class ConflictResolver:
             descriptions = [r.description for r in group]
             merged_description = f"Merged: {'; '.join(descriptions)}"
 
+            # Collect mutator names for the merged result (filter out empty strings)
+            mutator_names = [
+                r.mutator_name for r in group if r.mutator_name and r.mutator_name.strip()
+            ]
+
+            logger.debug(
+                f"[MERGE_DEBUG] Found {len(mutator_names)} non-empty mutator names: {mutator_names}"
+            )
+
+            if mutator_names:
+                # Use the mutator names we found - join unique names
+                unique_names = list(
+                    dict.fromkeys(mutator_names)
+                )  # Preserve order, remove duplicates
+                merged_mutator_name = "+".join(unique_names)  # Use + to indicate combination
+                logger.info(f"[MERGE_DEBUG] Using collected mutator names: {merged_mutator_name}")
+            else:
+                # Fallback: try to infer from strategy names
+                # Strategy names often follow pattern: "Category_SpecificStrategy"
+                # We want to extract meaningful mutator info
+                strategy_names = [r.strategy_name for r in group if r.strategy_name]
+
+                logger.debug(
+                    f"[MERGE_DEBUG] No mutator names found, inferring from strategies: {strategy_names}"
+                )
+
+                if strategy_names:
+                    # Try to infer mutator type from strategy prefix
+                    # e.g., "Pattern_ConditionalSimplification" -> "CodePatternOptimizer"
+                    # e.g., "Idiom_ComprehensionOptimization" -> "PythonicIdiomOptimizer"
+                    inferred_names = []
+                    for strategy in strategy_names:
+                        prefix = strategy.split("_")[0] if "_" in strategy else strategy
+                        # Map common prefixes to likely mutator names
+                        prefix_map = {
+                            "Pattern": "CodePatternOptimizer",
+                            "Idiom": "PythonicIdiomOptimizer",
+                            "Constant": "ConstantOptimizer",
+                            "DeadCode": "DeadCodeEliminator",
+                            "Loop": "LoopMicroOptimizer",
+                            "Complexity": "ComplexityReducer",
+                            "AlgorithmicIntent": "AlgorithmicIntentMutator",
+                            "ProgramIntent": "ProgramIntentMutator",
+                            "Advanced": "AdvancedAlgorithmicOptimizer",
+                            "Merged": "MergedMutator",  # Handle already-merged results
+                        }
+                        inferred_name = prefix_map.get(prefix, prefix + "Mutator")
+                        inferred_names.append(inferred_name)
+                        logger.debug(
+                            f"[MERGE_DEBUG] Strategy '{strategy}' -> prefix '{prefix}' -> inferred '{inferred_name}'"
+                        )
+
+                    # Use unique inferred names
+                    unique_inferred = list(dict.fromkeys(inferred_names))
+                    merged_mutator_name = (
+                        "+".join(unique_inferred) if inferred_names else "ParallelOrchestrator"
+                    )
+                    logger.info(
+                        f"[MERGE_DEBUG] Inferred mutator name from strategies: {merged_mutator_name}"
+                    )
+                else:
+                    merged_mutator_name = "ParallelOrchestrator"
+                    logger.warning(
+                        f"[MERGE_DEBUG] No strategies found, using fallback: {merged_mutator_name}"
+                    )
+
+            # Collect unique strategy names for merged strategy
+            strategy_names = [r.strategy_name for r in group if r.strategy_name]
+            unique_strategies = list(
+                dict.fromkeys([s.split("_")[-1] for s in strategy_names])
+            )  # Get last part of strategy
+            merged_strategy = (
+                f"Merged_{'_'.join(unique_strategies[:3])}"  # Limit to 3 to avoid too long names
+            )
+
             # Average confidence (conservative approach)
             avg_confidence = sum(r.confidence for r in group) / len(group)
 
-            return MutationResult(
+            # Final validation: ensure mutator_name is not empty
+            if not merged_mutator_name or merged_mutator_name.strip() == "":
+                merged_mutator_name = "ParallelOrchestrator"
+                logger.error(
+                    f"[MERGE_DEBUG] CRITICAL: merged_mutator_name was empty after all logic! Using fallback: {merged_mutator_name}"
+                )
+
+            # CRITICAL FIX: Ensure mutator_name is never empty before creating the result
+            if not merged_mutator_name or not merged_mutator_name.strip():
+                merged_mutator_name = "MergedMutator"
+                logger.error(
+                    f"[MERGE_DEBUG] CRITICAL: merged_mutator_name was empty before MutationResult creation! Using fallback: {merged_mutator_name}"
+                )
+
+            merged_result = MutationResult(
                 ir=base_result.ir,  # Use the best IR as base
-                strategy_name=f"Merged_{base_result.strategy_name}",
+                strategy_name=merged_strategy,
                 layer=base_result.layer,
+                mutator_name=merged_mutator_name,  # Set the merged mutator name
                 confidence=avg_confidence,
                 description=merged_description,
             )
+
+            logger.info(
+                f"[MERGE_DEBUG] Created merged result: mutator_name='{merged_result.mutator_name}', strategy='{merged_result.strategy_name}'"
+            )
+
+            # Double-check the result has a valid mutator_name after creation
+            if not merged_result.mutator_name or merged_result.mutator_name.strip() == "":
+                logger.error(
+                    f"[MERGE_DEBUG] CRITICAL BUG: MutationResult.mutator_name is empty after creation despite passing '{merged_mutator_name}'!"
+                )
+                # Force set it using object.__setattr__ to bypass any potential issues
+                object.__setattr__(merged_result, "mutator_name", merged_mutator_name)
+                logger.info(
+                    f"[MERGE_DEBUG] Force-set mutator_name to: '{merged_result.mutator_name}'"
+                )
+
+            return merged_result
+
         except Exception as e:
-            logger.warning(f"Failed to merge mutations: {e}")
+            logger.warning(f"[MERGE_DEBUG] Failed to merge mutations: {e}", exc_info=True)
             return None
 
     def _select_by_priority(self, results: List[MutationResult]) -> List[MutationResult]:
@@ -205,8 +329,7 @@ class ParallelMutationOrchestrator:
         self.config = config or ParallelConfig()
         self.registry = get_registry()
         self.validator = IRValidator(strict=False)
-        self.conflict_resolver = ConflictResolver(
-            self.config.conflict_resolution_strategy)
+        self.conflict_resolver = ConflictResolver(self.config.conflict_resolution_strategy)
         self.stats = ParallelExecutionStats()
         self._task_counter = 0
         self._task_lock = Lock()
@@ -232,8 +355,7 @@ class ParallelMutationOrchestrator:
         if enabled_layers is None:
             enabled_layers = set(MutationLayer)
 
-        logger.info(
-            f"Starting parallel orchestration with {len(enabled_layers)} layers")
+        logger.info(f"Starting parallel orchestration with {len(enabled_layers)} layers")
 
         # Create lazy wrapper for memory efficiency
         ir_wrapper = create_lazy_wrapper(ir)
@@ -247,10 +369,36 @@ class ParallelMutationOrchestrator:
         # Execute tasks in parallel
         results = self._execute_parallel_tasks(tasks)
 
+        # Log results before conflict resolution
+        logger.info(f"[ORCHESTRATOR] Before conflict resolution: {len(results)} results")
+        for i, r in enumerate(results):
+            logger.debug(
+                f"[ORCHESTRATOR] Pre-resolve result {i}: mutator_name='{r.mutator_name}', strategy='{r.strategy_name}'"
+            )
+
         # Resolve conflicts
-        resolved_results = self.conflict_resolver.resolve_conflicts(
-            results, ir)
+        resolved_results = self.conflict_resolver.resolve_conflicts(results, ir)
         self.stats.conflict_resolutions = self.conflict_resolver.resolution_count
+
+        # Log results after conflict resolution with detailed attribute inspection
+        logger.info(f"[ORCHESTRATOR] After conflict resolution: {len(resolved_results)} results")
+        for i, r in enumerate(resolved_results):
+            # Check if mutator_name exists and has a value
+            has_attr = hasattr(r, "mutator_name")
+            mutator_val = r.mutator_name if has_attr else "MISSING_ATTR"
+            logger.debug(
+                f"[ORCHESTRATOR] Post-resolve result {i}: has_mutator_name={has_attr}, mutator_name='{mutator_val}', strategy='{r.strategy_name}'"
+            )
+            if not r.mutator_name or not r.mutator_name.strip():
+                logger.error(
+                    f"[ORCHESTRATOR] CRITICAL: Result {i} has empty mutator_name after conflict resolution!"
+                )
+                # Try to fix it here as a last resort
+                if "Merged" in r.strategy_name:
+                    object.__setattr__(r, "mutator_name", "MergedMutator")
+                    logger.info(
+                        f"[ORCHESTRATOR] Fixed merged result {i} mutator_name to: MergedMutator"
+                    )
 
         # Update statistics
         self.stats.total_execution_time = time.time() - start_time
@@ -296,9 +444,8 @@ class ParallelMutationOrchestrator:
 
             return self._sort_tasks_by_priority(tasks)
 
-        # Otherwise generate all possible tasks from enabled layers
-            mutators = self.registry.get_mutators_for_layer(
-                layer, llm_client=llm_client)
+            # Otherwise generate all possible tasks from enabled layers
+            mutators = self.registry.get_mutators_for_layer(layer, llm_client=llm_client)
 
             for mutator in mutators:
                 # Configure mutator for parallel execution
@@ -310,8 +457,7 @@ class ParallelMutationOrchestrator:
 
                 for strategy in strategies:
                     task_id = self._generate_task_id()
-                    priority = self._calculate_task_priority(
-                        layer, strategy, mutator)
+                    priority = self._calculate_task_priority(layer, strategy, mutator)
 
                     task = MutationTask(
                         task_id=task_id,
@@ -320,8 +466,7 @@ class ParallelMutationOrchestrator:
                         layer=layer,
                         strategy_name=strategy,
                         priority=priority,
-                        dependencies=self._calculate_dependencies(
-                            layer, strategy),
+                        dependencies=self._calculate_dependencies(layer, strategy),
                     )
                     tasks.append(task)
 
@@ -348,19 +493,27 @@ class ParallelMutationOrchestrator:
             for future in as_completed(future_to_task, timeout=self.config.layer_timeout_seconds):
                 task = future_to_task[future]
                 try:
-                    result = future.result(
-                        timeout=self.config.mutation_timeout_seconds)
+                    result = future.result(timeout=self.config.mutation_timeout_seconds)
                     if result:
+                        # Validate each result has a mutator_name
+                        for r in result:
+                            if not r.mutator_name or not r.mutator_name.strip():
+                                logger.error(
+                                    f"[PARALLEL_EXEC] Task {task.task_id} returned result with empty mutator_name! Strategy: {r.strategy_name}"
+                                )
                         results.extend(result)
                         logger.debug(
-                            f"Task {task.task_id} completed successfully")
+                            f"Task {task.task_id} completed successfully with {len(result)} results"
+                        )
                     else:
-                        logger.debug(
-                            f"Task {task.task_id} produced no results")
+                        logger.debug(f"Task {task.task_id} produced no results")
                 except Exception as e:
                     logger.warning(f"Task {task.task_id} failed: {e}")
                     self.stats.failed_tasks += 1
 
+        logger.info(
+            f"[PARALLEL_EXEC] Collected {len(results)} total results from parallel execution"
+        )
         return results
 
     def _execute_single_task(self, task: MutationTask) -> List[MutationResult]:
@@ -368,6 +521,12 @@ class ParallelMutationOrchestrator:
         try:
             # Apply the specific strategy
             mutator = task.mutator
+            mutator_class_name = mutator.__class__.__name__
+
+            logger.debug(
+                f"[MUTATOR_DEBUG] Executing task for mutator: {mutator_class_name}, strategy: {task.strategy_name}"
+            )
+
             if hasattr(mutator, "enabled_strategies"):
                 mutator.enabled_strategies = {task.strategy_name}
 
@@ -376,14 +535,55 @@ class ParallelMutationOrchestrator:
 
             # Apply mutations
             results = mutator.mutate(ir)
+            logger.debug(
+                f"[MUTATOR_DEBUG] Mutator {mutator_class_name} produced {len(results)} results"
+            )
 
             # Filter results for the current strategy if necessary
-            meta_results = [
-                r for r in results if r.strategy_name == task.strategy_name]
-            return meta_results
+            meta_results = [r for r in results if r.strategy_name == task.strategy_name]
+            logger.debug(
+                f"[MUTATOR_DEBUG] Filtered to {len(meta_results)} results for strategy {task.strategy_name}"
+            )
+
+            # Ensure all results have mutator_name set (create new results if needed)
+            fixed_results = []
+            fixed_count = 0
+            for i, result in enumerate(meta_results):
+                original_name = result.mutator_name
+                if not result.mutator_name or not result.mutator_name.strip():
+                    # Create a new result with the correct mutator_name
+                    logger.debug(
+                        f"[MUTATOR_DEBUG] Result {i} has empty mutator_name, fixing to: {mutator_class_name}"
+                    )
+                    from src.application.mutators.base import MutationResult
+
+                    fixed_result = MutationResult(
+                        ir=result.ir,
+                        strategy_name=result.strategy_name,
+                        layer=result.layer,
+                        mutator_name=mutator_class_name,
+                        confidence=result.confidence,
+                        description=result.description,
+                    )
+                    fixed_results.append(fixed_result)
+                    fixed_count += 1
+                else:
+                    logger.debug(
+                        f"[MUTATOR_DEBUG] Result {i} already has mutator_name: {original_name}"
+                    )
+                    fixed_results.append(result)
+
+            if fixed_count > 0:
+                logger.info(
+                    f"[MUTATOR_DEBUG] Fixed {fixed_count}/{len(meta_results)} results with mutator_name: {mutator_class_name}"
+                )
+
+            return fixed_results
 
         except Exception as e:
-            logger.error(f"Task execution failed: {e}")
+            logger.error(
+                f"[MUTATOR_DEBUG] Task execution failed for {task.mutator.__class__.__name__}: {e}"
+            )
             return []
 
     def _generate_task_id(self) -> str:
@@ -407,8 +607,7 @@ class ParallelMutationOrchestrator:
         base_priority = layer_priorities.get(layer, 0.5)
 
         # Adjust based on mutator success rate
-        success_rate = mutator.get_success_rate() if hasattr(
-            mutator, "get_success_rate") else 0.5
+        success_rate = mutator.get_success_rate() if hasattr(mutator, "get_success_rate") else 0.5
 
         return base_priority * (0.5 + success_rate)
 
@@ -437,8 +636,7 @@ class ParallelMutationOrchestrator:
         # Efficiency = (Sequential Time) / (Parallel Time * Workers)
         return min(
             1.0,
-            estimated_sequential_time /
-            (self.stats.total_execution_time * self.config.max_workers),
+            estimated_sequential_time / (self.stats.total_execution_time * self.config.max_workers),
         )
 
     def _log_performance_metrics(self):
@@ -451,11 +649,9 @@ class ParallelMutationOrchestrator:
         )
         logger.info(f"  Time: {self.stats.total_execution_time:.2f}s")
         logger.info(f"  Throughput: {self.stats.throughput:.1f} tasks/sec")
-        logger.info(
-            f"  Parallel efficiency: {self.stats.parallel_efficiency:.1%}")
+        logger.info(f"  Parallel efficiency: {self.stats.parallel_efficiency:.1%}")
         logger.info(f"  Conflicts resolved: {self.stats.conflict_resolutions}")
-        logger.info(
-            f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
+        logger.info(f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
 
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get detailed performance statistics."""

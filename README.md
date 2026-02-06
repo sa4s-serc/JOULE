@@ -79,6 +79,51 @@ For more detailed information, please refer to the following guides:
 - [Mutation & Optimization Layers](docs/MUTATORS.md)
 - [CLI Reference Manual](docs/CLI.md)
 - [Benchmarks & Performance](evoeval_benchmark/README.md)
+- [API Server Documentation](api/README.md)
+
+## Troubleshooting
+
+### Debug Logging
+
+If you encounter issues or want to see detailed information about the optimization process:
+
+**For the API Server:**
+```bash
+# Run with DEBUG logging
+LOG_LEVEL=DEBUG python api/main.py
+
+# Or use the helper script
+python scripts/run_api_debug.py
+```
+
+Debug logging provides detailed information about:
+- Mutation attempts and results with mutator names
+- WebSocket message flow
+- Event broadcasting
+- Merge operations in parallel orchestrator
+
+**For the CLI:**
+```bash
+# Enable verbose logging
+python hedge.py optimize target.py tests.py --verbose
+```
+
+### Common Issues
+
+**"Unknown" Mutator Names in Web Interface**
+
+If you see "Unknown" as the mutator name:
+1. Enable DEBUG logging: `LOG_LEVEL=DEBUG python api/main.py`
+2. Check logs for `[MERGE_DEBUG]` and `[MUTATOR_DEBUG]` messages
+3. The system will attempt to infer mutator names from strategy names
+4. See [API Server Documentation](api/README.md) for more details
+
+**WebSocket Connection Issues**
+
+1. Verify the API server is running on the expected port (default: 8000)
+2. Check CORS settings in `api/main.py`
+3. Enable DEBUG logging to see connection events
+4. Check browser console for WebSocket errors
 
 ---
 *Developed by the HEDGE Team*

@@ -57,6 +57,8 @@ class EventType(str, Enum):
     MUTATION_RESULT = "mutation_result"
     NEW_BEST_SOLUTION = "new_best_solution"
     PARETO_UPDATE = "pareto_update"
+    EVALUATION_START = "evaluation_start"
+    EVALUATION_RESULT = "evaluation_result"
     EVALUATION_FAILURE = "evaluation_failure"
 
 
@@ -97,6 +99,7 @@ class EngineConfig:
     crossover_rate: float = 0.3
     min_mutator_prob: float = 0.2
     save_ir_snapshots: bool = False
+    allowed_imports: List[str] = field(default_factory=list)
 
     # Performance optimizations
     enable_parallel_mutations: bool = True
@@ -181,8 +184,7 @@ class ParetoArchive:
         # Check for duplicates
         solution_hash = self._get_solution_hash(new_solution)
         if solution_hash in self._solution_hashes:
-            logger.debug(
-                f"Solution {new_solution.variant_id[:8]} rejected as duplicate")
+            logger.debug(f"Solution {new_solution.variant_id[:8]} rejected as duplicate")
             return False
 
         # Check if dominated by existing solution
@@ -195,8 +197,7 @@ class ParetoArchive:
 
         # Remove solutions dominated by new one
         original_count = len(self.solutions)
-        self.solutions = [
-            s for s in self.solutions if not self._dominates(new_solution, s)]
+        self.solutions = [s for s in self.solutions if not self._dominates(new_solution, s)]
         removed_count = original_count - len(self.solutions)
         if removed_count > 0:
             logger.debug(
@@ -204,8 +205,7 @@ class ParetoArchive:
             )
 
         # Update hash set
-        self._solution_hashes = {
-            self._get_solution_hash(s) for s in self.solutions}
+        self._solution_hashes = {self._get_solution_hash(s) for s in self.solutions}
 
         # Add new solution
         self.solutions.append(new_solution)
@@ -247,8 +247,7 @@ class ParetoArchive:
         distances = {sol.variant_id: 0.0 for sol in solutions}
 
         for obj in self._objectives:
-            sorted_sols = sorted(
-                solutions, key=lambda s: self._get_objective(s, obj))
+            sorted_sols = sorted(solutions, key=lambda s: self._get_objective(s, obj))
 
             distances[sorted_sols[0].variant_id] = float("inf")
             distances[sorted_sols[-1].variant_id] = float("inf")
@@ -262,8 +261,7 @@ class ParetoArchive:
                     if distances[sorted_sols[i].variant_id] != float("inf"):
                         prev_val = self._get_objective(sorted_sols[i - 1], obj)
                         next_val = self._get_objective(sorted_sols[i + 1], obj)
-                        distances[sorted_sols[i].variant_id] += (
-                            next_val - prev_val) / obj_range
+                        distances[sorted_sols[i].variant_id] += (next_val - prev_val) / obj_range
 
         return distances
 
@@ -357,8 +355,7 @@ class EvolutionaryEngine:
                 max_concurrent_requests=self.config.llm_batch_size,
             )
             if self.batch_llm_client is None:
-                logger.warning(
-                    "Batch LLM client creation failed, disabling batch processing")
+                logger.warning("Batch LLM client creation failed, disabling batch processing")
         else:
             self.batch_llm_client = None
 
@@ -378,14 +375,94 @@ class EvolutionaryEngine:
 
         logger.info(f"Initialized EvolutionaryEngine:")
         logger.info(f"  Mutators: {len(mutators)}")
-        logger.info(
-            f"  Parallel mutations: {self.config.enable_parallel_mutations}")
-        logger.info(
-            f"  Intelligent selection: {self.config.enable_intelligent_selection}")
+        logger.info(f"  Parallel mutations: {self.config.enable_parallel_mutations}")
+        logger.info(f"  Intelligent selection: {self.config.enable_intelligent_selection}")
         logger.info(f"  Batch LLM: {self.config.enable_batch_llm}")
         if self.config.enable_memory_optimization:
-            logger.info(
-                f"  Memory optimization: {self.config.enable_memory_optimization}")
+            logger.info(f"  Memory optimization: {self.config.enable_memory_optimization}")
+
+    def _get_mutator_display_name(self, mutator_class_name: str) -> str:
+        """Get a consistent display name for a mutator."""
+        if not mutator_class_name:
+            return "Unknown"
+
+        # Handle common patterns
+        name = mutator_class_name
+
+        # Remove common suffixes
+        for suffix in ["Mutator", "Optimizer"]:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+
+        # Add spaces before capital letters (camelCase to Title Case)
+        import re
+
+        name = re.sub(r"([A-Z])", r" \1", name).strip()
+
+        return name if name else mutator_class_name
+
+    def _emit_mutation_attempt(self, mutator, strategy: str, parent_id: str):
+        """Emit a standardized mutation attempt event."""
+        # Handle both mutator objects and string names
+        if isinstance(mutator, str):
+            mutator_name = mutator.strip() if mutator else "Unknown"
+        elif mutator:
+            mutator_name = mutator.__class__.__name__
+        else:
+            mutator_name = "Unknown"
+
+        # Ensure we don't have empty strings
+        if not mutator_name or mutator_name == "":
+            mutator_name = "Unknown"
+
+        logger.debug(
+            f"[EVENT_DEBUG] Emitting mutation_attempt: mutator='{mutator_name}', strategy='{strategy}'"
+        )
+
+        display_name = self._get_mutator_display_name(mutator_name)
+
+        self._emit_event(
+            EventType.MUTATION_ATTEMPT,
+            {
+                "mutator": mutator_name,
+                "mutator_display": display_name,
+                "strategy": strategy,
+                "parent": parent_id,
+            },
+        )
+
+    def _emit_mutation_result(self, success: bool, mutator, strategy: str, error: str = None):
+        """Emit a standardized mutation result event."""
+        # Handle both mutator objects and string names
+        if isinstance(mutator, str):
+            mutator_name = mutator.strip() if mutator else "Unknown"
+        elif mutator:
+            mutator_name = mutator.__class__.__name__
+        else:
+            mutator_name = "Unknown"
+
+        # Ensure we don't have empty strings
+        if not mutator_name or mutator_name == "":
+            mutator_name = "Unknown"
+
+        logger.debug(
+            f"[EVENT_DEBUG] Emitting mutation_result: mutator='{mutator_name}', strategy='{strategy}', success={success}"
+        )
+
+        display_name = self._get_mutator_display_name(mutator_name)
+
+        event_data = {
+            "success": success,
+            "strategy": strategy,
+            "mutator": mutator_name,
+            "mutator_display": display_name,
+        }
+
+        if not success and error:
+            event_data["error"] = error
+
+        self._emit_event(EventType.MUTATION_RESULT, event_data)
 
     def _emit_event(self, event_type: EventType, data: Dict[str, Any]):
         """Emit an optimization event."""
@@ -411,15 +488,54 @@ class EvolutionaryEngine:
         code = self.codegen.generate(ir)
         code_hash = hashlib.md5(code.encode()).hexdigest()
 
+        self._emit_event(
+            EventType.EVALUATION_START,
+            {
+                "variant_id": solution.variant_id,
+                "mutation": solution.mutation_type,
+                "generation": solution.generation,
+            },
+        )
+
         # Check cache
         if code_hash in self.cache:
+            # Even for cached results, emit the code
+            self._emit_event(
+                EventType.EVALUATION_RESULT,
+                {
+                    "variant_id": solution.variant_id,
+                    "success": True,
+                    "metrics": self.cache[code_hash],
+                    "output": "Cached",
+                    "mutation": solution.mutation_type,
+                    "generation": solution.generation,
+                    "code": code,  # Include code for frontend
+                    "cached": True,
+                },
+            )
             return True, self.cache[code_hash], "Cached"
 
         # Run evaluation
-        success, metrics, output = self.runner.run(code, test_code)
+        success, metrics, output = self.runner.run(
+            code, test_code, allowed_imports=self.config.allowed_imports
+        )
 
         if success:
             self.cache[code_hash] = metrics
+
+        self._emit_event(
+            EventType.EVALUATION_RESULT,
+            {
+                "variant_id": solution.variant_id,
+                "success": success,
+                "metrics": metrics,
+                "output": output,
+                "mutation": solution.mutation_type,
+                "generation": solution.generation,
+                "code": code,  # Include code for frontend
+                "cached": False,
+            },
+        )
 
         return success, metrics, output
 
@@ -461,6 +577,11 @@ class EvolutionaryEngine:
                     # Create lookup map for learning
                     strategy_map = {s: (m, c) for m, s, c in selected_mutators}
 
+                    # Log attempts
+                    for m, strategy, confidence in selected_mutators:
+                        self._emit_mutation_attempt(m, strategy, parent.variant_id)
+                        self.statistics.record_attempt(m.__class__.__name__)
+
                     if self.orchestrator:
                         # Parallel execution of selected mutations
                         mutation_results = self.orchestrator.orchestrate_parallel_mutations(
@@ -472,10 +593,26 @@ class EvolutionaryEngine:
 
                         for result in mutation_results:
                             val_result = self.validator.validate(result.ir)
-                            mutator_info = strategy_map.get(
-                                result.strategy_name)
-                            mutator = mutator_info[0] if mutator_info else None
-                            mutator_name = mutator.__class__.__name__ if mutator else "Unknown"
+
+                            # CRITICAL FIX: Use result.mutator_name directly instead of looking up from strategy_map
+                            # The strategy_map only contains original strategies, not merged ones
+                            if result.mutator_name and result.mutator_name.strip():
+                                # Use the mutator_name from the result (handles merged results correctly)
+                                mutator_name = result.mutator_name
+                                mutator = (
+                                    None  # We don't have the mutator object for merged results
+                                )
+                                logger.debug(
+                                    f"[EVOLUTION_FIX] Using mutator_name from result: '{mutator_name}'"
+                                )
+                            else:
+                                # Fallback to strategy_map lookup for non-merged results
+                                mutator_info = strategy_map.get(result.strategy_name)
+                                mutator = mutator_info[0] if mutator_info else None
+                                mutator_name = mutator.__class__.__name__ if mutator else "Unknown"
+                                logger.debug(
+                                    f"[EVOLUTION_FIX] Looked up mutator from strategy_map: '{mutator_name}'"
+                                )
 
                             if val_result.valid:
                                 self.statistics.record_success(mutator_name)
@@ -499,14 +636,8 @@ class EvolutionaryEngine:
                                         result.confidence,
                                     )
 
-                                self._emit_event(
-                                    EventType.MUTATION_RESULT,
-                                    {
-                                        "success": True,
-                                        "strategy": result.strategy_name,
-                                        "mutator": mutator_name,
-                                    },
-                                )
+                                # CRITICAL FIX: Pass mutator_name string, not mutator object
+                                self._emit_mutation_result(True, mutator_name, result.strategy_name)
                             else:
                                 self.statistics.failed_validations += 1
                                 if mutator:
@@ -517,43 +648,28 @@ class EvolutionaryEngine:
                                         False,
                                         0.0,
                                     )
-                                self._emit_event(
-                                    EventType.MUTATION_RESULT,
-                                    {
-                                        "success": False,
-                                        "error": "Validation failed",
-                                        "strategy": result.strategy_name,
-                                    },
+                                # CRITICAL FIX: Pass mutator_name string, not mutator object
+                                self._emit_mutation_result(
+                                    False, mutator_name, result.strategy_name, "Validation failed"
                                 )
 
                     else:
                         # Fallback to sequential execution
                         for m, strategy, confidence in selected_mutators:
-                            self._emit_event(
-                                EventType.MUTATION_ATTEMPT,
-                                {
-                                    "mutator": m.__class__.__name__,
-                                    "strategy": strategy,
-                                    "parent": parent.variant_id,
-                                },
-                            )
-                            self.statistics.record_attempt(
-                                m.__class__.__name__)
+                            mutator_name = m.__class__.__name__
                             variants = m.mutate(parent.ir)
                             for result in variants:
                                 if result.strategy_name == strategy:
                                     # Validate variant
-                                    val_result = self.validator.validate(
-                                        result.ir)
+                                    val_result = self.validator.validate(result.ir)
                                     if val_result.valid:
-                                        self.statistics.record_success(
-                                            m.__class__.__name__)
+                                        self.statistics.record_success(mutator_name)
                                         solution = Solution(
                                             ir=result.ir,
                                             metrics={},
                                             variant_id=str(uuid.uuid4()),
                                             parent_id=parent.variant_id,
-                                            mutation_type=f"{m.__class__.__name__}:{strategy}",
+                                            mutation_type=f"{mutator_name}:{strategy}",
                                             generation=self.generation + 1,
                                         )
                                         all_variants.append(solution)
@@ -562,23 +678,13 @@ class EvolutionaryEngine:
                                         self.intelligent_selector.record_mutation_outcome(
                                             parent.ir, m, strategy, True, confidence  # type: ignore
                                         )
-                                        self._emit_event(
-                                            EventType.MUTATION_RESULT,
-                                            {
-                                                "success": True,
-                                                "strategy": strategy,
-                                                "mutator": m.__class__.__name__,
-                                            },
-                                        )
+                                        # CRITICAL FIX: Pass mutator_name string, not mutator object
+                                        self._emit_mutation_result(True, mutator_name, strategy)
                                     else:
                                         self.statistics.failed_validations += 1
-                                        self._emit_event(
-                                            EventType.MUTATION_RESULT,
-                                            {
-                                                "success": False,
-                                                "error": "Validation failed",
-                                                "strategy": strategy,
-                                            },
+                                        # CRITICAL FIX: Pass mutator_name string, not mutator object
+                                        self._emit_mutation_result(
+                                            False, mutator_name, strategy, "Validation failed"
                                         )
                                         # Record failed outcome
                                         if self.intelligent_selector:
@@ -592,12 +698,45 @@ class EvolutionaryEngine:
                         parent.ir, enabled_layers, self.batch_llm_client
                     )
 
-                    for result in mutation_results:
-                        self.statistics.record_attempt("ParallelOrchestrator")
+                    logger.debug(
+                        f"[EVOLUTION] Received {len(mutation_results)} results from parallel orchestrator"
+                    )
+
+                    for i, result in enumerate(mutation_results):
+                        # Log the result details with type information
+                        logger.debug(
+                            f"[EVOLUTION] Result {i}: mutator_name='{result.mutator_name}' (type={type(result.mutator_name)}), strategy='{result.strategy_name}', layer={result.layer}"
+                        )
+
+                        # CRITICAL: Check if mutator_name attribute exists and has a value
+                        if not hasattr(result, "mutator_name"):
+                            logger.error(
+                                f"[EVOLUTION] CRITICAL: Result {i} missing mutator_name attribute!"
+                            )
+                            mutator_name = "ParallelOrchestrator"
+                        else:
+                            # Get mutator name, ensuring it's not empty
+                            mutator_name = result.mutator_name
+                            logger.debug(
+                                f"[EVOLUTION] Result {i} mutator_name value: '{mutator_name}' (len={len(mutator_name) if mutator_name else 0})"
+                            )
+
+                            if not mutator_name or not mutator_name.strip():
+                                mutator_name = "ParallelOrchestrator"
+                                logger.warning(
+                                    f"[EVOLUTION] Result {i} has empty mutator_name for strategy '{result.strategy_name}', using fallback: {mutator_name}"
+                                )
+
+                        self.statistics.record_attempt(mutator_name)
+
+                        # Emit mutation attempt with validated mutator name
+                        self._emit_mutation_attempt(
+                            mutator_name, result.strategy_name, parent.variant_id
+                        )
+
                         val_result = self.validator.validate(result.ir)
                         if val_result.valid:
-                            self.statistics.record_success(
-                                "ParallelOrchestrator")
+                            self.statistics.record_success(mutator_name)
                             solution = Solution(
                                 ir=result.ir,
                                 metrics={},
@@ -607,29 +746,30 @@ class EvolutionaryEngine:
                                 generation=self.generation + 1,
                             )
                             all_variants.append(solution)
+
+                            # Emit result with validated mutator name
+                            self._emit_mutation_result(True, mutator_name, result.strategy_name)
                         else:
                             self.statistics.failed_validations += 1
+
+                            # Emit failure with validated mutator name
+                            self._emit_mutation_result(
+                                False, mutator_name, result.strategy_name, "Validation failed"
+                            )
 
                 # Fallback to traditional mutation
                 else:
                     for mutator in self.mutators:
-                        self.statistics.record_attempt(
-                            mutator.__class__.__name__)
+                        mutator_name = mutator.__class__.__name__
+                        self.statistics.record_attempt(mutator_name)
 
                         # Log attempt
-                        self._emit_event(
-                            EventType.MUTATION_ATTEMPT,
-                            {"mutator": mutator.__class__.__name__,
-                                "parent": parent.variant_id},
-                        )
+                        self._emit_mutation_attempt(mutator, "sequential", parent.variant_id)
 
                         results = mutator.mutate(parent.ir)
                         if results:
-                            logger.info(
-                                f"Mutator {mutator.__class__.__name__} produced {len(results)} variants"
-                            )
-                            self.statistics.record_success(
-                                mutator.__class__.__name__)
+                            logger.info(f"Mutator {mutator_name} produced {len(results)} variants")
+                            self.statistics.record_success(mutator_name)
 
                         for result in results:
                             val_result = self.validator.validate(result.ir)
@@ -643,28 +783,17 @@ class EvolutionaryEngine:
                                     generation=self.generation + 1,
                                 )
                                 all_variants.append(solution)
-                                self._emit_event(
-                                    EventType.MUTATION_RESULT,
-                                    {
-                                        "success": True,
-                                        "strategy": result.strategy_name,
-                                        "mutator": mutator.__class__.__name__,
-                                    },
-                                )
+                                # CRITICAL FIX: Pass mutator_name string, not mutator object
+                                self._emit_mutation_result(True, mutator_name, result.strategy_name)
                             else:
                                 self.statistics.failed_validations += 1
-                                self._emit_event(
-                                    EventType.MUTATION_RESULT,
-                                    {
-                                        "success": False,
-                                        "error": "Validation failed",
-                                        "strategy": result.strategy_name,
-                                    },
+                                # CRITICAL FIX: Pass mutator_name string, not mutator object
+                                self._emit_mutation_result(
+                                    False, mutator_name, result.strategy_name, "Validation failed"
                                 )
 
             except Exception as e:
-                logger.error(
-                    f"Mutation generation failed for parent {parent.variant_id}: {e}")
+                logger.error(f"Mutation generation failed for parent {parent.variant_id}: {e}")
 
         return all_variants
 
@@ -693,14 +822,12 @@ class EvolutionaryEngine:
             return 1.0
 
         # Simple diversity measure based on fitness variance
-        fitness_scores = [self._compute_fitness(
-            sol) for sol in self.archive.solutions]
+        fitness_scores = [self._compute_fitness(sol) for sol in self.archive.solutions]
         if not fitness_scores:
             return 1.0
 
         mean_fitness = sum(fitness_scores) / len(fitness_scores)
-        variance = sum((f - mean_fitness) **
-                       2 for f in fitness_scores) / len(fitness_scores)
+        variance = sum((f - mean_fitness) ** 2 for f in fitness_scores) / len(fitness_scores)
 
         return min(1.0, variance / (mean_fitness**2 + 1e-9))
 
@@ -720,23 +847,19 @@ class EvolutionaryEngine:
 
         if self.orchestrator and hasattr(self.orchestrator, "get_performance_stats"):
             orchestrator_stats = self.orchestrator.get_performance_stats()
-            performance_data.update(
-                orchestrator_stats.get("execution_stats", {}))
+            performance_data.update(orchestrator_stats.get("execution_stats", {}))
 
         self.performance_history.append(performance_data)
 
         logger.info(f"Generation {self.generation} performance:")
         logger.info(f"  Archive size: {len(self.archive.solutions)}")
-        logger.info(
-            f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
-        logger.info(
-            f"  Copy efficiency: {memory_stats.get('sharing_efficiency', 0):.1%}")
+        logger.info(f"  Memory saved: {memory_stats.get('memory_saved_mb', 0):.1f}MB")
+        logger.info(f"  Copy efficiency: {memory_stats.get('sharing_efficiency', 0):.1%}")
 
         if self.best_solution:
             best_energy = self.best_solution.metrics.get("energy_joules", 0)
             best_time = self.best_solution.metrics.get("duration_seconds", 0)
-            logger.info(
-                f"  Best solution: {best_energy:.6f}J, {best_time:.6f}s")
+            logger.info(f"  Best solution: {best_energy:.6f}J, {best_time:.6f}s")
 
     def optimize(
         self,
@@ -764,8 +887,7 @@ class EvolutionaryEngine:
             initial_ir = self.parser.parse(initial_code)
             val_result = self.validator.validate(initial_ir)
             if not val_result.valid:
-                raise ValueError(
-                    f"Initial code validation failed: {val_result.errors}")
+                raise ValueError(f"Initial code validation failed: {val_result.errors}")
         except Exception as e:
             logger.error(f"Failed to parse initial code: {e}")
             return []
@@ -835,13 +957,11 @@ class EvolutionaryEngine:
             current_pop_size = self._adaptive_population_size()
 
             # Select parents
-            parents = self._select_parents(
-                self.archive.solutions, current_pop_size)
+            parents = self._select_parents(self.archive.solutions, current_pop_size)
 
             # Generate mutations
             logger.info(f"Generating mutations for {len(parents)} parents...")
-            variants = self._generate_mutations_enhanced(
-                parents, enabled_layers)
+            variants = self._generate_mutations_enhanced(parents, enabled_layers)
             logger.info(f"Generated {len(variants)} variants.")
 
             # Generate crossovers
@@ -853,8 +973,7 @@ class EvolutionaryEngine:
             improved_count = 0
             logger.info("Evaluating variants...")
             for i, variant in enumerate(variants):
-                logger.debug(
-                    f"Evaluating variant {i+1}/{len(variants)}: {variant.mutation_type}")
+                logger.debug(f"Evaluating variant {i+1}/{len(variants)}: {variant.mutation_type}")
                 success, metrics, output = self._evaluate(variant, test_code)
 
                 if success:
@@ -863,8 +982,7 @@ class EvolutionaryEngine:
                     # Update archive
                     if self.archive.update(variant):
                         improved_count += 1
-                        self.statistics.record_improvement(
-                            variant.mutation_type)
+                        self.statistics.record_improvement(variant.mutation_type)
 
                         # Update best solution
                         if not self.best_solution or self._compute_fitness(
@@ -874,20 +992,16 @@ class EvolutionaryEngine:
                             self.stagnation_counter = 0
 
                             # Calculate improvements
-                            baseline_energy = baseline_metrics.get(
-                                "energy_joules", 1e-6)
-                            baseline_time = baseline_metrics.get(
-                                "duration_seconds", 1e-6)
+                            baseline_energy = baseline_metrics.get("energy_joules", 1e-6)
+                            baseline_time = baseline_metrics.get("duration_seconds", 1e-6)
 
-                            current_energy = variant.metrics.get(
-                                "energy_joules", 0)
-                            current_time = variant.metrics.get(
-                                "duration_seconds", 0)
+                            current_energy = variant.metrics.get("energy_joules", 0)
+                            current_time = variant.metrics.get("duration_seconds", 0)
 
                             energy_imp = (
-                                (baseline_energy - current_energy) / baseline_energy) * 100
-                            time_imp = (
-                                (baseline_time - current_time) / baseline_time) * 100
+                                (baseline_energy - current_energy) / baseline_energy
+                            ) * 100
+                            time_imp = ((baseline_time - current_time) / baseline_time) * 100
 
                             self._emit_event(
                                 EventType.NEW_BEST_SOLUTION,
@@ -899,8 +1013,8 @@ class EvolutionaryEngine:
                                     "code": self.codegen.generate(variant.ir),
                                     "improvement": {
                                         "energy_percent": energy_imp,
-                                        "time_percent": time_imp
-                                    }
+                                        "time_percent": time_imp,
+                                    },
                                 },
                             )
 
@@ -913,8 +1027,8 @@ class EvolutionaryEngine:
                         {
                             "mutation": variant.mutation_type,
                             "error": output if output else "Evaluation failed",
-                            "generation": generation
-                        }
+                            "generation": generation,
+                        },
                     )
 
             # Update stagnation counter
@@ -939,17 +1053,14 @@ class EvolutionaryEngine:
                 {
                     "energy": s.metrics.get("energy_joules", 0),
                     "time": s.metrics.get("duration_seconds", 0),
-                    "id": s.variant_id[:8],
-                    "mutation": s.mutation_type
+                    "variant_id": s.variant_id,
+                    "mutation": s.mutation_type,
+                    "code": self.codegen.generate(s.ir),
                 }
                 for s in self.archive.solutions
             ]
             self._emit_event(
-                EventType.PARETO_UPDATE,
-                {
-                    "generation": generation,
-                    "solutions": pareto_points
-                }
+                EventType.PARETO_UPDATE, {"generation": generation, "solutions": pareto_points}
             )
 
             # Early stopping
@@ -979,8 +1090,7 @@ class EvolutionaryEngine:
                 "total_solutions": len(self.archive.solutions),
                 "best_metrics": self.best_solution.metrics if self.best_solution else {},
                 "best_code": (
-                    self.codegen.generate(
-                        self.best_solution.ir) if self.best_solution else ""
+                    self.codegen.generate(self.best_solution.ir) if self.best_solution else ""
                 ),
                 "duration": total_time,
             },

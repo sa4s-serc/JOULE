@@ -127,7 +127,8 @@ def timed(func: Callable[..., T]) -> Callable[..., T]:
             return result
         finally:
             elapsed = time.perf_counter() - start
-            logger.debug(f"{func.__name__} took {elapsed:.3f}s")
+            if elapsed > 1.0:  # Only log slow operations
+                logger.info(f"{func.__name__} took {elapsed:.3f}s")
 
     return wrapper
 
@@ -156,8 +157,8 @@ class Timer:
 
     def __exit__(self, *args) -> None:
         self.elapsed = time.perf_counter() - self.start
-        if self.log:
-            logger.debug(f"{self.name} took {self.elapsed:.3f}s")
+        if self.log and self.elapsed > 1.0:  # Only log slow operations
+            logger.info(f"{self.name} took {self.elapsed:.3f}s")
 
 
 def chunk_list(lst: List[T], chunk_size: int) -> List[List[T]]:

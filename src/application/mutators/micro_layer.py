@@ -14,12 +14,11 @@ import operator
 from typing import Any, List, Optional, Set
 
 from src.application.mutators.base import (LayeredMutator, MutationLayer,
-                                           MutationResult,
-                                           create_mutation_result,
-                                           safe_deepcopy_ir)
+                                           MutationResult, safe_deepcopy_ir)
 from src.domain.ir import schema
 from src.domain.ir.context import MutationContext
 from src.domain.ir.utils import NodeTransformer
+from src.utils.mutation_factory import create_mutation_result
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +55,7 @@ class ConstantOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Constant_Folding",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=1.0,
                         description="Evaluated constant expressions at compile time",
                     )
@@ -70,6 +70,7 @@ class ConstantOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Constant_Propagation",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.95,
                         description="Propagated constant values through variable assignments",
                     )
@@ -84,6 +85,7 @@ class ConstantOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Constant_BooleanSimplification",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=1.0,
                         description="Simplified boolean expressions with constant values",
                     )
@@ -98,6 +100,7 @@ class ConstantOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Constant_ArithmeticSimplification",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=1.0,
                         description="Simplified arithmetic expressions with constant operands",
                     )
@@ -165,6 +168,7 @@ class DeadCodeEliminator(LayeredMutator):
                         ir=variant,
                         strategy_name="DeadCode_UnreachableElimination",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=1.0,
                         description="Eliminated unreachable code after returns and breaks",
                     )
@@ -179,6 +183,7 @@ class DeadCodeEliminator(LayeredMutator):
                         ir=variant,
                         strategy_name="DeadCode_UnusedVariableElimination",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.9,
                         description="Eliminated assignments to unused variables",
                     )
@@ -193,6 +198,7 @@ class DeadCodeEliminator(LayeredMutator):
                         ir=variant,
                         strategy_name="DeadCode_PureExpressionElimination",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.95,
                         description="Eliminated pure expressions with no side effects",
                     )
@@ -207,6 +213,7 @@ class DeadCodeEliminator(LayeredMutator):
                         ir=variant,
                         strategy_name="DeadCode_EmptyBlockElimination",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=1.0,
                         description="Eliminated empty code blocks and unnecessary structures",
                     )
@@ -277,6 +284,7 @@ class LoopMicroOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Loop_SmallUnrolling",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.8,
                         description="Unrolled small loops for better performance",
                     )
@@ -291,6 +299,7 @@ class LoopMicroOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Loop_StrengthReduction",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.9,
                         description="Applied strength reduction to loop operations",
                     )
@@ -305,6 +314,7 @@ class LoopMicroOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Loop_InvariantMotion",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.85,
                         description="Moved loop-invariant code outside loops",
                     )
@@ -319,6 +329,7 @@ class LoopMicroOptimizer(LayeredMutator):
                         ir=variant,
                         strategy_name="Loop_BoundsOptimization",
                         layer=MutationLayer.MICRO,
+                        mutator_name=self.__class__.__name__,
                         confidence=0.75,
                         description="Optimized loop bounds and iteration patterns",
                     )
