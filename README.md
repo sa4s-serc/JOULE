@@ -1,6 +1,6 @@
 # HEDGE
 
-**Hierarchical Evolutionary Darwin-Green Engine**
+**Hierarchical Evolutionary Domain-Guided Engine**
 
 HEDGE is an advanced code optimization framework designed to improve Python code efficiency through evolutionary strategies and hierarchical mutation layers. By operating on a strictly typed Intermediate Representation (IR), HEDGE explores a broad spectrum of optimizations, from compiler-style micro-optimizations to LLM-guided algorithmic refactoring.
 

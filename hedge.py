@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HEDGE - Hierarchical Evolutionary Darwin-Green Engine
+HEDGE - Hierarchical Evolutionary Domain-Guided Engine
 ======================================================
 
 """

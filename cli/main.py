@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HEDGE - Hierarchical Evolutionary Darwin-Green Engine
+HEDGE - Hierarchical Evolutionary Domain-Guided Engine
 ======================================================
 
 Modern CLI interface with improved usability and organization.
@@ -43,7 +43,7 @@ console = Console()
 @click.pass_context
 def cli(ctx, features):
     """
-    HEDGE - Hierarchical Evolutionary Darwin-Green Engine
+    HEDGE - Hierarchical Evolutionary Domain-Guided Engine
 
     A code optimization system using evolutionary strategies for Python code improvement.
     """

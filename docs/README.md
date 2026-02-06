@@ -1,6 +1,6 @@
 # HEDGE Documentation
 
-Welcome to the official documentation for HEDGE (Hierarchical Evolutionary Darwin-Green Engine). This technical guide covers the architecture, configuration, and operation of the HEDGE optimization framework.
+Welcome to the official documentation for HEDGE (Hierarchical Evolutionary Domain-Guided Engine). This technical guide covers the architecture, configuration, and operation of the HEDGE optimization framework.
 
 ---
 

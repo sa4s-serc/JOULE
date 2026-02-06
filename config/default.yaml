@@ -1,6 +1,6 @@
 # HEDGE Default Configuration
 # ===========================
-# This file defines the default settings for the Hierarchical Evolutionary Darwin-Green Engine.
+# This file defines the default settings for the Hierarchical Evolutionary Domain-Guided Engine.
 # These can be overridden by ~/.hedge/config.yaml or a local hedge.yaml file.
 
 # Optimization Core Settings

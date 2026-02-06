@@ -68,7 +68,11 @@ def sanitize_for_json(obj: Any, depth: int = 0, max_depth: int = 10) -> Any:
             try:
                 # Use model_dump with mode='json' for JSON-compatible output
                 # This handles nested models and converts them properly
-                dumped = obj.model_dump(mode='json', exclude_none=True)
+                try:
+                    dumped = obj.model_dump(mode='json', exclude_none=True)
+                except TypeError:
+                    # Fallback for Pydantic v1 or models without mode support
+                    dumped = obj.model_dump(exclude_none=True)
                 # Recursively sanitize the dumped data (in case of nested non-standard types)
                 return sanitize_for_json(dumped, depth + 1, max_depth)
             except Exception as e:

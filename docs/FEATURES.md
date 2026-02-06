@@ -1,6 +1,6 @@
 # HEDGE Feature Capabilities
 
-HEDGE (**Hierarchical Evolutionary Darwin-Green Engine**) provides a robust environment for automated Python code optimization. The system is designed for both research and production-level code refinement.
+HEDGE (**Hierarchical Evolutionary Domain-Guided Engine**) provides a robust environment for automated Python code optimization. The system is designed for both research and production-level code refinement.
 
 ## Core Optimization Framework
 

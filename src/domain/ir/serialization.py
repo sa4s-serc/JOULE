@@ -9,6 +9,24 @@ from typing import Any, Dict
 from src.domain.ir.schema import IRNode, Module
 
 
+class IRJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle IR nodes and other non-serializable types."""
+    
+    def default(self, obj: Any) -> Any:
+        """Handle special types that json.dumps doesn't know about."""
+        # Handle IRNode and Pydantic models
+        if hasattr(obj, 'model_dump'):
+            try:
+                return obj.model_dump()
+            except Exception:
+                pass
+        # Handle objects with __dict__
+        if hasattr(obj, '__dict__'):
+            return {k: v for k, v in obj.__dict__.items() if not k.startswith('_')}
+        # Fallback to string representation
+        return str(obj)
+
+
 class IRSerializer:
     """
     Serializes IR to JSON for storage and debugging.
@@ -49,7 +67,8 @@ class IRSerializer:
     def serialize(module: Module) -> str:
         """Convert IR Module to JSON string with type information."""
         data = IRSerializer._add_type_info(module)
-        return json.dumps(data, indent=2)
+        # Use custom encoder as fallback to handle any non-serializable types
+        return json.dumps(data, indent=2, cls=IRJSONEncoder)
 
     @staticmethod
     def deserialize(json_str: str) -> Module:

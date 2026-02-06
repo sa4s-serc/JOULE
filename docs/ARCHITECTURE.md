@@ -1,6 +1,6 @@
 # HEDGE Architecture
 
-HEDGE (**Hierarchical Evolutionary Darwin-Green Engine**) is a high-performance code optimization system built on a formal Intermediate Representation (IR). The system follows a modular, layered design that separates domain logic from application workflows and infrastructure concerns.
+HEDGE (**Hierarchical Evolutionary Domain-Guided Engine**) is a high-performance code optimization system built on a formal Intermediate Representation (IR). The system follows a modular, layered design that separates domain logic from application workflows and infrastructure concerns.
 
 ## Core Design Principles
 

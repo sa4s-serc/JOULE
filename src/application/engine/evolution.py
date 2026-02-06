@@ -137,7 +137,13 @@ class ParetoArchive:
 
         def _clean_node(node):
             if hasattr(node, "model_dump"):
-                d = node.model_dump()
+                # Use mode='json' to ensure all nested Pydantic models are converted to JSON-compatible dicts
+                try:
+                    d = node.model_dump(mode='json', exclude_none=True)
+                except TypeError:
+                    # Fallback for Pydantic models that don't support mode parameter
+                    d = node.model_dump()
+                
                 # Crucial: include node type for disambiguation
                 res = {"_type": node.__class__.__name__}
                 for k, v in d.items():
@@ -148,7 +154,7 @@ class ParetoArchive:
                         "end_lineno",
                         "end_col_offset",
                     }:
-                        res[k] = _clean_node(getattr(node, k))
+                        res[k] = _clean_node(v)  # Clean the already-dumped value, not the attribute
                 return res
             elif isinstance(node, dict):
                 return {k: _clean_node(v) for k, v in node.items()}

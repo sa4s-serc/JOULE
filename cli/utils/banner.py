@@ -31,7 +31,7 @@ def print_banner():
     ╚═╝  ╚═╝╚══════╝╚═════╝  ╚═════╝ ╚══════╝
     """
 
-    subtitle = Text("Hierarchical Evolutionary Darwin-Green Engine", style="italic cyan")
+    subtitle = Text("Hierarchical Evolutionary Domain-Guided Engine", style="italic cyan")
 
     # Create the main banner panel
     banner_panel = Panel(

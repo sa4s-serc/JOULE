@@ -5,7 +5,7 @@
 
 # Default target
 help:
-	@echo "HEDGE - Hierarchical Evolutionary Darwin-Green Engine"
+	@echo "HEDGE - Hierarchical Evolutionary Domain-Guided Engine"
 	@echo "====================================================="
 	@echo ""
 	@echo "Available targets:"
