@@ -232,31 +232,51 @@ class CodePatternOptimizer(LayeredMutator, LLMMutatorBase):
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Optimize loop patterns for better performance."""
-        prompt = f"""You are an expert in Python loop optimization and iteration patterns.
+        prompt = f"""You are an expert in Python loop optimization, performance engineering, and iteration patterns.
 
-Optimize the loop patterns in this code for better performance and readability:
+Optimize the loop patterns in this code for maximum performance, memory efficiency, and readability:
 
-LOOP OPTIMIZATIONS:
-- Convert manual index loops to enumerate() where appropriate
-- Use zip() for parallel iteration instead of manual indexing
-- Replace range(len()) patterns with direct iteration
-- Convert nested loops to itertools.product where beneficial
-- Use any()/all() instead of manual boolean accumulation
-- Apply list comprehensions for simple transformations
-- Use generator expressions for memory efficiency
+LOOP PATTERN ANALYSIS:
+1. IDENTIFY inefficient iteration patterns and manual indexing
+2. RECOGNIZE opportunities for Pythonic constructs
+3. ANALYZE memory usage patterns and potential optimizations
+4. EVALUATE loop body complexity and optimization opportunities
+5. CONSIDER data access patterns and cache locality
 
-PERFORMANCE PATTERNS:
-- Minimize repeated attribute lookups in loops
-- Use local variable caching for frequently accessed items
-- Apply early termination with break/continue where possible
-- Optimize loop invariant code motion
+PERFORMANCE OPTIMIZATIONS:
+- ENUMERATE REPLACEMENT: Convert manual index loops to enumerate() for clarity and performance
+- PARALLEL ITERATION: Use zip() instead of manual indexing for multiple sequences
+- DIRECT ITERATION: Replace range(len()) patterns with direct iteration over collections
+- COMPREHENSIONS: Convert explicit loops to list/set/dict comprehensions for speed
+- GENERATOR EXPRESSIONS: Use generators for memory efficiency in large datasets
+- BUILT-IN FUNCTIONS: Leverage any()/all()/sum() instead of manual accumulation
+- ITERTOOLS UTILITIES: Use product(), combinations(), permutations() for complex iterations
+
+ADVANCED LOOP TECHNIQUES:
+- LOOP INVARIANT CODE MOTION: Move computations out of loops where possible
+- EARLY TERMINATION: Apply break/continue strategically to avoid unnecessary iterations
+- LOCAL VARIABLE CACHING: Cache attribute lookups and method calls in hot loops
+- CHUNKING: Process data in batches for better memory usage patterns
+- LAZY EVALUATION: Use generators to defer computation until needed
+
+MEMORY AND CACHE OPTIMIZATIONS:
+- Minimize memory allocations in loops
+- Optimize data access patterns for CPU cache efficiency
+- Reduce object creation in hot loops
+- Use appropriate data structures for iteration patterns
 
 Available imports: {allowed_imports}
 
-Code:
+Code to optimize:
 {code}
 
-Return ONLY the loop-optimized code.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Loop optimizations must provide measurable performance improvement
+- Preserve all existing functionality and edge case handling
+- Maintain identical output format and behavior
+- Do not change the public interface or external behavior
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -264,31 +284,54 @@ Return ONLY the loop-optimized code.
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Simplify conditional logic and boolean expressions."""
-        prompt = f"""You are an expert in boolean logic simplification and conditional optimization.
+        prompt = f"""You are an expert in boolean logic optimization, conditional analysis, and performance engineering.
 
-Simplify the conditional logic in this code:
+Simplify the conditional logic in this code for maximum performance, readability, and maintainability:
 
-CONDITIONAL OPTIMIZATIONS:
-- Apply De Morgan's laws to simplify boolean expressions
-- Use truthiness testing instead of explicit comparisons (if x: vs if x != None:)
-- Combine multiple conditions using logical operators
-- Use conditional expressions (ternary operator) for simple cases
-- Apply early returns to reduce nesting depth
-- Eliminate redundant conditions and impossible branches
+CONDITIONAL ANALYSIS FRAMEWORK:
+1. IDENTIFY redundant conditions and impossible branches
+2. BOOLEAN ALGEBRA OPTIMIZATION: Apply logical equivalences for simplification
+3. TRUTHINESS OPTIMIZATION: Leverage Python's truthiness for cleaner code
+4. SHORT-CIRCUIT OPTIMIZATION: Order conditions for maximum efficiency
+5. NESTING REDUCTION: Minimize conditional depth and complexity
 
-BOOLEAN SIMPLIFICATIONS:
-- not (a and b) -> (not a) or (not b)
-- not (a or b) -> (not a) and (not b)
-- if x == True: -> if x:
-- if x == False: -> if not x:
-- if len(x) > 0: -> if x:
+BOOLEAN LOGIC OPTIMIZATIONS:
+- DE MORGAN'S LAWS: Transform complex negations for better performance
+  - not (a and b) → (not a) or (not b)
+  - not (a or b) → (not a) and (not b)
+- CONDITION MERGING: Combine related conditions to reduce evaluation overhead
+- REDUNDANT ELIMINATION: Remove impossible conditions and tautologies
+- TRUTHINESS SIMPLIFICATION:
+  - if x == True: → if x:
+  - if x == False: → if not x:
+  - if len(x) > 0: → if x:
+  - if x is not None: → if x: (when appropriate)
+
+PERFORMANCE OPTIMIZATIONS:
+- CONDITION REORDERING: Place most likely/least expensive conditions first
+- EARLY RETURN PATTERNS: Use early returns to reduce nesting
+- TERNARY OPERATORS: Use conditional expressions for simple assignments
+- MEMOIZATION: Cache expensive boolean computations
+- BRANCH PREDICTION: Structure conditions for CPU optimization
+
+CODE STRUCTURE IMPROVEMENTS:
+- Reduce cyclomatic complexity for better maintainability
+- Improve readability through clearer conditional structure
+- Maintain consistent error handling patterns
+- Preserve debugging and testing capabilities
 
 Available imports: {allowed_imports}
 
-Code:
+Code to simplify:
 {code}
 
-Return ONLY the conditionally simplified code.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Conditional simplification must provide measurable performance or readability improvement
+- Preserve all existing functionality, edge cases, and error handling
+- Maintain identical logical behavior for all possible inputs
+- Do not change the public interface or external behavior
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -296,30 +339,56 @@ Return ONLY the conditionally simplified code.
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Optimize function composition and call patterns."""
-        prompt = f"""You are an expert in function composition and call optimization.
+        prompt = f"""You are an expert in function optimization, call pattern analysis, and performance engineering.
 
-Optimize function composition and calling patterns in this code:
+Optimize function composition and calling patterns in this code for maximum performance and efficiency:
 
-FUNCTION OPTIMIZATIONS:
-- Combine multiple function calls where possible
-- Use functools.partial for partial application
-- Apply function composition to reduce intermediate variables
-- Optimize recursive calls with tail recursion where applicable
-- Use lambda functions for simple transformations
-- Apply map(), filter(), reduce() for functional patterns
+FUNCTION CALL ANALYSIS:
+1. IDENTIFY redundant function calls and unnecessary intermediate steps
+2. CALL PATTERN OPTIMIZATION: Analyze call frequency and overhead
+3. COMPOSITION OPPORTUNITIES: Combine related function operations
+4. RECURSION ANALYSIS: Optimize recursive patterns where beneficial
+5. CACHING STRATEGIES: Identify memoization opportunities
+
+FUNCTION OPTIMIZATION TECHNIQUES:
+- FUNCTION COMPOSITION: Chain operations to reduce intermediate variables
+- PARTIAL APPLICATION: Use functools.partial for specialized function variants
+- LAMBDA OPTIMIZATION: Replace small functions with lambda expressions where appropriate
+- CLOSURE OPTIMIZATION: Minimize closure variable capture overhead
+- TAIL RECURSION: Convert recursive calls to iterative where beneficial
+- INLINE OPTIMIZATION: Consider inlining small, hot functions
 
 CALL PATTERN OPTIMIZATIONS:
-- Minimize function call overhead in hot paths
-- Use method chaining where appropriate
-- Optimize argument passing and unpacking
-- Apply decorator patterns for cross-cutting concerns
+- METHOD CHAINING: Combine multiple method calls for efficiency
+- ARGUMENT OPTIMIZATION: Optimize parameter passing and unpacking
+- DECORATOR PATTERNS: Apply cross-cutting concerns efficiently
+- BATCHING: Group multiple operations into single calls
+- LAZY EVALUATION: Defer function calls until actually needed
+
+FUNCTIONAL PROGRAMMING OPTIMIZATIONS:
+- MAP/FILTER/REDUCE: Use built-in functional primitives for performance
+- GENERATOR FUNCTIONS: Use generators for memory-efficient processing
+- ITERATOR PROTOCOLS: Optimize custom iterator implementations
+- HIGHER-ORDER FUNCTIONS: Optimize functions that accept/return functions
+
+PERFORMANCE CONSIDERATIONS:
+- Minimize function call overhead in hot paths and critical sections
+- Optimize for CPU cache locality in function call patterns
+- Consider stack usage and recursion depth
+- Balance between readability and performance optimizations
 
 Available imports: {allowed_imports}
 
-Code:
+Code to optimize:
 {code}
 
-Return ONLY the function-optimized code.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Function optimizations must provide measurable performance improvement
+- Preserve all existing functionality and error handling
+- Maintain identical input/output behavior and side effects
+- Do not change the public interface or external behavior
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -327,30 +396,58 @@ Return ONLY the function-optimized code.
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Optimize error handling patterns."""
-        prompt = f"""You are an expert in Python error handling and exception management.
+        prompt = f"""You are an expert in Python error handling optimization, exception management, and performance engineering.
 
-Optimize error handling patterns in this code:
+Optimize error handling patterns in this code for maximum performance, reliability, and maintainability:
 
-ERROR HANDLING OPTIMIZATIONS:
-- Use EAFP (Easier to Ask for Forgiveness than Permission) patterns
-- Replace explicit checks with try/except where appropriate
-- Use specific exception types instead of broad catches
-- Apply context managers for resource cleanup
-- Optimize exception handling performance
-- Use else clauses in try/except blocks effectively
+ERROR HANDLING ANALYSIS:
+1. IDENTIFY inefficient error handling patterns and excessive checking
+2. EAFP vs LBYL ANALYSIS: Choose the optimal pattern for each situation
+3. EXCEPTION PERFORMANCE: Analyze the cost of exception handling vs prevention
+4. RESOURCE MANAGEMENT: Optimize cleanup and resource release patterns
+5. ERROR RECOVERY: Improve error handling robustness and recovery strategies
 
-PATTERN IMPROVEMENTS:
-- if key in dict: dict[key] -> try: dict[key] except KeyError:
-- if hasattr(obj, 'attr'): obj.attr -> try: obj.attr except AttributeError:
-- Proper exception chaining and context preservation
-- Use finally blocks for cleanup when needed
+PERFORMANCE OPTIMIZATIONS:
+- EAFP PATTERNS: Replace explicit checks with try/except where more efficient
+  - if key in dict: value = dict[key] → try: value = dict[key] except KeyError:
+  - if hasattr(obj, 'attr'): value = obj.attr → try: value = obj.attr except AttributeError:
+- SPECIFIC EXCEPTIONS: Use precise exception types instead of broad catches
+- EXCEPTION CHAINING: Properly chain exceptions for better debugging
+- CONTEXT MANAGERS: Use with statements for automatic resource cleanup
+- ELSE CLAUSES: Use try/except/else for no-exception success paths
+
+ERROR HANDLING PATTERNS:
+- GRACEFUL DEGRADATION: Handle errors without breaking program flow
+- FAIL-FAST PRINCIPLE: Detect and report errors early and clearly
+- DEFENSIVE PROGRAMMING: Validate inputs and handle edge cases
+- RECOVERY STRATEGIES: Implement appropriate error recovery mechanisms
+- LOGGING INTEGRATION: Optimize error reporting and logging patterns
+
+ADVANCED TECHNIQUES:
+- EXCEPTION CACHING: Cache exception objects for reuse in hot paths
+- CUSTOM EXCEPTIONS: Create specific exception types for better error handling
+- ERROR AGGREGATION: Collect multiple errors before reporting
+- ASYNCHRONOUS ERROR HANDLING: Optimize error handling in async contexts
+- PERFORMANCE MONITORING: Track error handling performance impact
+
+CODE QUALITY IMPROVEMENTS:
+- Maintain clear error messages and debugging information
+- Ensure consistent error handling patterns across the codebase
+- Preserve stack traces and exception context
+- Balance between performance optimization and error handling robustness
 
 Available imports: {allowed_imports}
 
-Code:
+Code to optimize:
 {code}
 
-Return ONLY the error-handling optimized code.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Error handling optimizations must provide measurable performance improvement
+- Preserve all existing functionality and error handling behavior
+- Maintain identical exception types and error messages
+- Do not compromise error handling robustness for performance
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 

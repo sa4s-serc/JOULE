@@ -37,7 +37,7 @@ def process_queue():
         # Should have found a mutation
         assert len(variants) > 0, "No mutation produced"
 
-        mutated_ir, _ = variants[0]
+        mutated_ir = variants[0].ir
         generated_code = self.codegen.generate(mutated_ir)
 
         # created code should convert list init to deque init
@@ -71,7 +71,7 @@ def search(sorted_data, target):
 
         assert len(variants) > 0, "No mutation produced"
 
-        mutated_ir, _ = variants[0]
+        mutated_ir = variants[0].ir
         generated_code = self.codegen.generate(mutated_ir)
 
         assert "bisect.bisect_left" in generated_code

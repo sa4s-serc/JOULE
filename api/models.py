@@ -23,6 +23,22 @@ class EngineSettings(BaseModel):
     elite_size: int = Field(default=2, ge=1, description="Number of elite solutions to preserve")
     mutation_rate: float = Field(default=0.1, ge=0.0, le=1.0, description="Mutation rate")
     timeout: int = Field(default=30, ge=1, description="Execution timeout in seconds")
+    test_iterations: int = Field(
+        default=3,
+        ge=1,
+        le=50,
+        description="Number of measured iterations per candidate for metrics aggregation",
+    )
+    test_warmup_iterations: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+        description="Number of warmup iterations before each measured run",
+    )
+    test_seed: Optional[int] = Field(
+        default=None,
+        description="Base seed for deterministic test execution across iterations",
+    )
 
 
 class OptimizationRequest(BaseModel):

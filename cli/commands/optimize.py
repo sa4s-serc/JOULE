@@ -102,6 +102,24 @@ console = Console()
 @click.option(
     "--dry-run", is_flag=True, help="Show what would be done without running optimization"
 )
+@click.option(
+    "--test-iterations",
+    type=int,
+    default=None,
+    help="Number of measured iterations per candidate for metrics aggregation (1-50)",
+)
+@click.option(
+    "--test-warmup-iterations",
+    type=int,
+    default=None,
+    help="Number of warmup iterations before each measured run (0-100)",
+)
+@click.option(
+    "--test-seed",
+    type=int,
+    default=None,
+    help="Base seed for deterministic test execution across iterations",
+)
 def optimize_cmd(
     target,
     tests,
@@ -134,6 +152,9 @@ def optimize_cmd(
     config=None,
     show_mutators=False,
     dry_run=False,
+    test_iterations=None,
+    test_warmup_iterations=None,
+    test_seed=None,
 ):
     """
     Optimize Python code using hierarchical evolutionary strategies.
@@ -221,6 +242,22 @@ def optimize_cmd(
         max_workers = perf_cfg.get("max_workers", max_workers)
     if max_memory_mb == 2048:
         max_memory_mb = perf_cfg.get("max_memory_mb", max_memory_mb)
+
+    # Test execution configuration (CLI overrides config)
+    if test_iterations is None:
+        test_iterations = opt_cfg.get("test_iterations", 3)
+    if test_warmup_iterations is None:
+        test_warmup_iterations = opt_cfg.get("test_warmup_iterations", 0)
+    if test_seed is None:
+        test_seed = opt_cfg.get("test_seed")
+
+    # Validate test execution parameters for safety
+    if test_iterations <= 0 or test_iterations > 50:
+        print_error("--test-iterations must be between 1 and 50")
+        return
+    if test_warmup_iterations < 0 or test_warmup_iterations > 100:
+        print_error("--test-warmup-iterations must be between 0 and 100")
+        return
 
     # Output overrides
     if not visualize:
@@ -358,6 +395,11 @@ def optimize_cmd(
                 "max_workers": max_workers,
                 "max_memory_mb": max_memory_mb,
             },
+            "test_execution": {
+                "test_iterations": test_iterations,
+                "test_warmup_iterations": test_warmup_iterations,
+                "test_seed": test_seed,
+            },
             "timestamp": datetime.now().isoformat(),
             "engine_type": "standard",
         }
@@ -380,7 +422,12 @@ def optimize_cmd(
             task = progress.add_task("Setting up components...", total=None)
 
             # Create runner
-            runner = GreenGymRunner(timeout_seconds=timeout, samples=3)
+            runner = GreenGymRunner(
+                timeout_seconds=timeout,
+                samples=test_iterations,
+                warmup_iterations=test_warmup_iterations,
+                base_seed=test_seed,
+            )
             progress.update(task, description="✓ Green Gym runner initialized")
 
             # Setup mutators

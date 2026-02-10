@@ -103,7 +103,7 @@ def setup_environment_file():
 
 # Optional: Custom model names
 # OPENAI_MODEL=gpt-4
-# GEMINI_MODEL=gemini-pro
+# GEMINI_MODEL=gemini-2.5-flash
 """)
         print("✅ Created basic .env file")
         print("⚠️  Please edit .env file and add your API keys")

@@ -15,7 +15,7 @@ class TestLLMMutators:
 
         # Mock LLM returning list compr
         mock_llm = MagicMock()
-        mock_llm.model_name = "gemini-flash"
+        mock_llm.model_name = "gemini-2.5-flash"
         code_resp = "x = [i for i in range(10)]"
         mock_llm.complete.return_value = f"```python\n{code_resp}\n```"
 
@@ -96,7 +96,7 @@ class TestLLMMutators:
     def test_stdlib_mutation_rejects_numpy(self):
         ir = schema.Module(body=schema.Block(statements=[schema.Pass()]))
         mock_llm = MagicMock()
-        mock_llm.model_name = "gemini-flash"
+        mock_llm.model_name = "gemini-2.5-flash"
         mock_llm.complete.return_value = "import numpy as np"
 
         mutator = AlgorithmicIntentMutator(llm_client=mock_llm)

@@ -33,5 +33,4 @@ cd ../..
 python main.py --target evoeval_benchmark/EvoEval_difficult_4/target.py \
                --tests evoeval_benchmark/EvoEval_difficult_4/test_target.py \
                --generations 5 \
-               --layers L1 L2
 ```

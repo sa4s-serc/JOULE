@@ -39,6 +39,29 @@ python hedge.py optimize examples/target_fib.py examples/test_target_fib.py
 python hedge.py optimize target.py tests.py --level advanced
 ```
 
+### Reducing Measurement Noise
+
+To reduce measurement noise when evaluating energy and time, you can run multiple measured iterations per candidate and optionally perform warmup runs:
+
+```bash
+# Run 5 measured iterations per candidate to compute a baseline
+python hedge.py optimize target.py tests.py --test-iterations 5
+
+# Add warmup runs before each measured run (helps with cache/JIT effects)
+python hedge.py optimize target.py tests.py \
+  --test-iterations 5 --test-warmup-iterations 10
+
+# Make runs reproducible across iterations (seeds Python and NumPy)
+python hedge.py optimize target.py tests.py \
+  --test-iterations 5 --test-warmup-iterations 10 --test-seed 42
+```
+
+- `--test-iterations N` (1–50): Number of measured iterations per candidate; metrics are aggregated via sum (total energy and time across all iterations).
+- `--test-warmup-iterations N` (0–100): Unmeasured warmup runs before each measured run.
+- `--test-seed N`: Base seed; per-iteration seed is `base_seed + iteration_index`. Used to seed `random` and (when available) `numpy.random` inside the test harness.
+
+These options are also available via the API under `engine.test_iterations`, `engine.test_warmup_iterations`, and `engine.test_seed`.
+
 ### Interactive Web Interface
 
 HEDGE features a modern, interactive web interface for visualizing optimization results, managing experiments, and configuring the engine.

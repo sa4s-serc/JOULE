@@ -46,6 +46,19 @@ class MutationResult:
     confidence: float = 1.0  # Confidence in the mutation (0.0 to 1.0)
     description: str = ""  # Human-readable description of the change
 
+    def __iter__(self):
+        """Make MutationResult iterable as (ir, strategy_name) for backward compatibility."""
+        return iter((self.ir, self.strategy_name))
+
+    def __getitem__(self, index):
+        """Make MutationResult subscriptable for backward compatibility."""
+        if index == 0:
+            return self.ir
+        elif index == 1:
+            return self.strategy_name
+        else:
+            raise IndexError("MutationResult only supports indices 0 (ir) and 1 (strategy_name)")
+
 
 class LayeredMutator(Mutator):
     """

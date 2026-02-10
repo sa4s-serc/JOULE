@@ -1,5 +1,4 @@
 
-import pytest
 import sys
 import os
 
@@ -7,16 +6,11 @@ import os
 sys.path.append(os.getcwd())
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from target_fib import run_fib
+from target_fib import fib
 
 def test_fib_small():
-    assert run_fib(0) == 0
-    assert run_fib(1) == 1
-    assert run_fib(5) == 5
-    assert run_fib(10) == 55
-
-def test_fib_timing():
-    # This is just to ensure it works, HEDGE will measure the speedup
-    # fib(30) is approx 832040, takes ~0.3s
-    # fib(32) is approx 2178309, takes ~1s
-    assert run_fib(32) == 2178309
+    assert fib(0) == 0
+    assert fib(1) == 1
+    assert fib(5) == 5
+    assert fib(10) == 55
+    assert fib(32) == 2178309

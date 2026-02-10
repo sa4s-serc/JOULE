@@ -352,10 +352,21 @@ class OptimizationTaskManager:
         )
 
         timeout = 30
+        samples = 3
+        warmup_iterations = 0
+        base_seed = None
         if request.engine:
             timeout = request.engine.timeout
+            samples = request.engine.test_iterations
+            warmup_iterations = request.engine.test_warmup_iterations
+            base_seed = request.engine.test_seed
 
-        runner = GreenGymRunner(timeout_seconds=timeout)
+        runner = GreenGymRunner(
+            timeout_seconds=timeout,
+            samples=samples,
+            warmup_iterations=warmup_iterations,
+            base_seed=base_seed,
+        )
 
         # Configure EngineConfig
         engine_config = EngineConfig(

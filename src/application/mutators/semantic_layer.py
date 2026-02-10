@@ -102,29 +102,48 @@ class AlgorithmicIntentMutator(IROnlyMutator, LLMMutatorBase):
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Focus on reducing Big-O complexity through algorithm selection."""
-        prompt = f"""You are an expert algorithm designer and complexity analyst.
+        prompt = f"""You are an expert algorithm designer and complexity analyst specializing in performance optimization.
 
-Analyze the following code and optimize its algorithmic complexity:
+Analyze the following code and optimize its algorithmic complexity for measurable performance improvements:
 
-1. IDENTIFY the current algorithm and its time/space complexity
-2. DETERMINE if there's a more efficient algorithm for the same problem
-3. IMPLEMENT the optimized algorithm while preserving exact functionality
-4. ENSURE the optimization provides measurable complexity improvement
+ANALYSIS REQUIREMENTS:
+1. IDENTIFY current algorithm and its exact time/space complexity (Big-O notation)
+2. BOTTLENECK ANALYSIS: Find the dominant operations causing complexity
+3. INPUT PATTERNS: Consider typical input sizes and characteristics
+4. OPTIMAL ALGORITHM SELECTION: Choose the best algorithm for this specific problem
+5. IMPLEMENTATION: Rewrite with the optimized algorithm while preserving exact functionality
 
-Focus on:
-- Sorting algorithms (quicksort vs mergesort vs timsort)
-- Search algorithms (linear vs binary vs hash-based)
-- Graph algorithms (BFS vs DFS vs specialized algorithms)
-- Dynamic programming opportunities
-- Divide and conquer optimizations
+PERFORMANCE TARGETS:
+- Aim for at least one order of magnitude improvement in time complexity
+- Reduce space complexity where possible without sacrificing time gains
+- Consider real-world performance (cache locality, constant factors)
+- Ensure optimization is beneficial for expected input sizes
+
+ALGORITHM FAMILIES TO CONSIDER:
+- SORTING: Replace O(n²) with O(n log n) or specialized O(n) algorithms
+- SEARCH: Linear → Binary → Hash-based O(1) lookups
+- GRAPHS: BFS/DFS → Dijkstra/Floyd-Warshall/A* as appropriate
+- DYNAMIC PROGRAMMING: Memoization → Tabulation → Space optimization
+- DIVIDE AND CONQUER: Recursive → Iterative improvements
+- GREEDY: Local optimal → Global optimal verification
+
+OPTIMIZATION VERIFICATION:
+- Ensure all edge cases are preserved (empty inputs, duplicates, etc.)
+- Maintain identical output format and type
+- Preserve all error conditions and exception handling
+- Verify numerical stability for floating-point operations
 
 CONSTRAINT: Only use standard library imports that are already present or explicitly allowed: {allowed_imports | self.allowed_imports}
 
 Code to optimize:
 {code}
 
-CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
-INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Ensure the optimized version produces identical results for all inputs
+- The optimization must provide measurable complexity improvement
+- Do not break existing functionality or change the public interface
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -132,33 +151,51 @@ INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previou
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Recognize common algorithmic patterns and apply known optimizations."""
-        prompt = f"""You are an expert in algorithmic patterns and optimizations.
+        prompt = f"""You are an expert in algorithmic pattern recognition and performance optimization.
 
-Analyze the code for common algorithmic patterns and apply established optimizations:
+Analyze the code for recognizable algorithmic patterns and apply established, proven optimizations:
 
-PATTERNS TO RECOGNIZE:
-- Two-pointer technique opportunities
-- Sliding window problems
-- Prefix sum optimizations
-- Memoization/caching opportunities
-- Greedy algorithm applications
-- Union-find structures
-- Topological sorting needs
+PATTERN RECOGNITION CHECKLIST:
+- TWO-POINTER: Opposite-direction scanning for sorted/paired problems
+- SLIDING WINDOW: Fixed/variable window for subarray/subsequence problems
+- PREFIX SUM: Cumulative sums for range sum queries
+- MEMOIZATION: Overlapping subproblems in recursive solutions
+- GREEDY: Local optimal choices leading to global optimum
+- UNION-FIND: Connected components and dynamic connectivity
+- TOPOLOGICAL SORT: Dependency resolution in directed acyclic graphs
+- BINARY SEARCH: Monotonic properties in sorted/search spaces
 
-OPTIMIZATION STRATEGIES:
-- Replace nested loops with mathematical formulas where possible
-- Use appropriate data structures (heaps, sets, deques)
-- Apply mathematical optimizations (GCD, prime factorization, etc.)
-- Implement early termination conditions
-- Use bit manipulation where appropriate
+OPTIMIZATION STRATEGIES WITH PERFORMANCE IMPACT:
+- NESTED LOOP ELIMINATION: O(n²) → O(n) using mathematical insights
+- DATA STRUCTURE SELECTION: Lists → Sets/Dicts for O(1) operations
+- EARLY TERMINATION: Break conditions to avoid unnecessary computation
+- BIT MANIPULATION: Use bitwise operations for speed (AND, OR, XOR, shifts)
+- MATHEMATICAL OPTIMIZATIONS: GCD, prime factorization, modular arithmetic
+- CACHE-FRIENDLY ACCESS: Improve memory locality and reduce cache misses
 
-Current imports available: {allowed_imports | self.allowed_imports}
+PERFORMANCE VERIFICATION:
+- Quantify complexity improvement (e.g., O(n²) → O(n log n))
+- Ensure optimization doesn't increase constant factors excessively
+- Verify space-time tradeoffs are beneficial
+- Test edge cases: empty inputs, single elements, maximum constraints
 
-Code:
+IMPLEMENTATION REQUIREMENTS:
+- Maintain exact functional behavior and output format
+- Preserve all error handling and edge case management
+- Use appropriate data structures from available imports
+- Ensure numerical stability and precision
+
+Available imports: {allowed_imports | self.allowed_imports}
+
+Code to optimize:
 {code}
 
-CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
-INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Applied optimization must provide measurable performance improvement
+- Preserve all existing functionality and edge case handling
+- Do not introduce new dependencies beyond allowed imports
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -166,31 +203,49 @@ INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previou
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Improve high-level program architecture and design patterns."""
-        prompt = f"""You are a software architect focused on program design and efficiency.
+        prompt = f"""You are a software architect specializing in high-performance program design and efficiency optimization.
 
-Improve the architectural design of this code:
+Improve the architectural design of this code for better performance, maintainability, and scalability:
 
-ARCHITECTURAL IMPROVEMENTS:
-- Separate concerns and improve modularity
-- Reduce coupling between components
-- Eliminate redundant computations across functions
-- Optimize data flow and minimize data copying
-- Apply appropriate design patterns (Strategy, Factory, etc.)
-- Improve error handling and edge case management
+ARCHITECTURAL ANALYSIS:
+1. RESPONSIBILITY SEPARATION: Identify mixed concerns and separate into focused modules
+2. COUPLING REDUCTION: Minimize dependencies between components
+3. COHESION IMPROVEMENT: Group related functionality together
+4. DATA FLOW OPTIMIZATION: Minimize data copying and improve data movement patterns
+5. DESIGN PATTERN APPLICATION: Apply appropriate patterns (Strategy, Factory, Observer, etc.)
 
 PERFORMANCE ARCHITECTURE:
-- Minimize function call overhead where beneficial
-- Reduce memory allocations
-- Optimize hot paths and critical sections
-- Improve cache locality in data access patterns
+- HOT PATH OPTIMIZATION: Identify and optimize critical execution paths
+- MEMORY EFFICIENCY: Reduce allocations, improve memory reuse patterns
+- CACHE LOCALITY: Structure data access for optimal CPU cache utilization
+- CONSIDERATION: Minimize function call overhead in performance-critical sections
+- LAZY EVALUATION: Defer computations until actually needed
+- BATCHING: Group operations to reduce overhead
+
+SCALABILITY CONSIDERATIONS:
+- MODULAR DESIGN: Enable independent optimization of components
+- EXTENSIBILITY: Design for future performance improvements
+- RESOURCE MANAGEMENT: Efficient handling of memory, CPU, and I/O resources
+- PARALLELISM OPPORTUNITIES: Identify sections suitable for concurrent execution
+
+CODE QUALITY IMPROVEMENTS:
+- ERROR HANDLING: Implement robust error management and recovery
+- EDGE CASE MANAGEMENT: Ensure comprehensive handling of boundary conditions
+- TYPE SAFETY: Use appropriate type hints and validation
+- DOCUMENTATION: Clear interfaces and contracts between components
 
 Available imports: {allowed_imports | self.allowed_imports}
 
-Code:
+Code to refactor:
 {code}
 
-CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
-INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Maintain identical external behavior and interface
+- Architectural changes must provide measurable performance or maintainability benefits
+- Preserve all existing functionality and error handling
+- Do not break backward compatibility
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -276,30 +331,50 @@ class ProgramIntentMutator(IROnlyMutator, LLMMutatorBase):
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Simplify complex logic while preserving functionality."""
-        prompt = f"""You are an expert in program logic simplification and clarity.
+        prompt = f"""You are an expert in program logic simplification, boolean algebra, and performance optimization.
 
-Simplify the logic in this code while maintaining exact functionality:
+Simplify the logic in this code while maintaining exact functionality and improving performance:
 
-SIMPLIFICATION TECHNIQUES:
-- Eliminate unnecessary conditional branches
-- Combine redundant checks and operations
-- Use mathematical relationships to reduce complexity
-- Apply logical equivalences (De Morgan's laws, etc.)
-- Remove intermediate variables that don't add clarity
-- Simplify boolean expressions and conditions
+LOGIC SIMPLIFICATION ANALYSIS:
+1. IDENTIFY redundant conditional branches and unnecessary complexity
+2. BOOLEAN ALGEBRA: Apply logical equivalences to reduce expression complexity
+3. MATHEMATICAL RELATIONSHIPS: Use mathematical properties to simplify computations
+4. CONTROL FLOW: Eliminate unnecessary nesting and branching
+5. EXPRESSION OPTIMIZATION: Reduce computational complexity of boolean expressions
 
-MAINTAIN:
-- Exact same input/output behavior
-- All edge case handling
-- Error conditions and exceptions
+SIMPLIFICATION TECHNIQUES WITH PERFORMANCE IMPACT:
+- CONDITION MERGING: Combine related conditions to reduce evaluation overhead
+- DE MORGAN'S LAWS: not (a and b) → (not a) or (not b) for optimization
+- SHORT-CIRCUIT OPTIMIZATION: Order conditions by likelihood and cost
+- MATHEMATICAL REDUCTION: Replace complex expressions with simpler equivalents
+- VARIABLE ELIMINATION: Remove intermediate variables that don't add value
+- TRUTHINESS OPTIMIZATION: Use Python's truthiness for cleaner, faster code
+
+PERFORMANCE CONSIDERATIONS:
+- Reduce the number of boolean operations and comparisons
+- Minimize function calls in conditional expressions
+- Optimize for common case execution paths
+- Consider branch prediction implications
+- Reduce cyclomatic complexity for better maintainability
+
+CORRECTNESS PRESERVATION:
+- Maintain exact same input/output behavior for all possible inputs
+- Preserve all edge case handling (None values, empty collections, etc.)
+- Keep all error conditions and exception handling intact
+- Ensure numerical precision is maintained for floating-point operations
+- Verify timing-sensitive behavior is preserved
 
 Available imports: {allowed_imports | self.allowed_imports}
 
-Code:
+Code to simplify:
 {code}
 
-CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
-INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Simplification must provide measurable performance or readability improvement
+- Preserve all existing functionality, edge cases, and error handling
+- Do not change the public interface or external behavior
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -307,31 +382,50 @@ INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previou
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Optimize control flow for better performance and clarity."""
-        prompt = f"""You are an expert in control flow optimization and program efficiency.
+        prompt = f"""You are an expert in control flow optimization, compiler theory, and performance engineering.
 
-Optimize the control flow in this code:
+Optimize the control flow in this code for maximum performance and execution efficiency:
 
-CONTROL FLOW OPTIMIZATIONS:
-- Minimize branching and conditional complexity
-- Use early returns to reduce nesting
-- Optimize loop structures and iteration patterns
-- Eliminate redundant function calls
-- Reduce the number of execution paths
-- Apply short-circuit evaluation effectively
+CONTROL FLOW ANALYSIS:
+1. BRANCHING OPTIMIZATION: Minimize conditional complexity and branching overhead
+2. LOOP STRUCTURE ANALYSIS: Optimize iteration patterns and loop constructs
+3. EXECUTION PATH ANALYSIS: Identify and optimize hot paths and common cases
+4. FUNCTION CALL OPTIMIZATION: Reduce call overhead in critical sections
+5. STATE MANAGEMENT: Minimize state changes and side effects
 
-PERFORMANCE IMPROVEMENTS:
-- Move expensive operations out of loops where possible
-- Optimize the order of conditional checks (most likely first)
-- Reduce function call overhead in hot paths
-- Minimize state changes and side effects
+PERFORMANCE OPTIMIZATION STRATEGIES:
+- EARLY RETURN PATTERNS: Reduce nesting and improve exit efficiency
+- CONDITION REORDERING: Place most likely/least expensive conditions first
+- LOOP OPTIMIZATION: Convert recursive patterns to iterative where beneficial
+- TAIL RECURSION: Optimize recursive calls for better stack usage
+- SHORT-CIRCUIT EVALUATION: Leverage boolean logic for performance
+- BRANCH PREDICTION: Structure conditions for CPU branch prediction
+
+ADVANCED OPTIMIZATIONS:
+- LOOP INVARIANT CODE MOTION: Move computations out of loops
+- FUNCTION INLINING: Reduce call overhead for small, hot functions
+- LAZY EVALUATION: Defer computations until actually needed
+- MEMOIZATION: Cache results of expensive computations
+- BATCHING: Group operations to reduce overhead
+
+CODE QUALITY IMPROVEMENTS:
+- Reduce cyclomatic complexity for better maintainability
+- Improve readability through clearer control structures
+- Maintain consistent error handling patterns
+- Preserve debugging and profiling capabilities
 
 Available imports: {allowed_imports | self.allowed_imports}
 
-Code:
+Code to optimize:
 {code}
 
-CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
-INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Control flow changes must provide measurable performance improvement
+- Preserve all existing functionality, error handling, and edge cases
+- Maintain the same external interface and behavior
+- Do not introduce new dependencies beyond allowed imports
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)
 
@@ -339,30 +433,56 @@ INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previou
         self, code: str, allowed_imports: Set[str]
     ) -> Optional[schema.Module]:
         """Align the implementation more closely with its intended purpose."""
-        prompt = f"""You are an expert in program design and implementation alignment.
+        prompt = f"""You are an expert in program optimization, algorithmic analysis, and performance engineering.
 
-Analyze this code's purpose and align the implementation for maximum efficiency:
+Analyze this code's core purpose and realign the implementation for maximum efficiency and performance:
 
-ALIGNMENT STRATEGIES:
-- Identify the core purpose and optimize for that specific use case
-- Remove general-purpose overhead if not needed
-- Specialize data structures for the specific problem domain
-- Optimize for the expected input characteristics
-- Align memory usage patterns with the problem requirements
-- Choose algorithms that match the expected data distribution
+PURPOSE ANALYSIS FRAMEWORK:
+1. CORE FUNCTIONALITY IDENTIFICATION: Determine the fundamental problem being solved
+2. INPUT CHARACTERISTICS: Analyze expected input patterns, sizes, and distributions
+3. PERFORMANCE REQUIREMENTS: Identify bottlenecks and critical performance factors
+4. USAGE PATTERNS: Consider how the code is typically used in practice
+5. OPTIMIZATION TARGETS: Focus on the most impactful improvements
 
-SPECIALIZATION OPPORTUNITIES:
-- If sorting small arrays, use insertion sort instead of quicksort
-- If searching in sorted data, use binary search
-- If working with unique elements, use sets instead of lists
-- If counting occurrences, use Counter or defaultdict
+SPECIALIZATION STRATEGIES:
+- ALGORITHM SPECIALIZATION: Choose algorithms optimized for specific input characteristics
+- DATA STRUCTURE SPECIALIZATION: Select structures based on access patterns and constraints
+- SIZE-BASED OPTIMIZATION: Tailor algorithms for expected input sizes
+- DISTRIBUTION-AWARE DESIGN: Optimize for known input distributions (sorted, random, etc.)
+- FREQUENCY-BASED OPTIMIZATION: Prioritize optimizations for frequently used code paths
+
+PERFORMANCE OPTIMIZATION TECHNIQUES:
+- MICRO-OPTIMIZATIONS: Bit manipulation, mathematical shortcuts, memory layout
+- ALGORITHMIC IMPROVEMENTS: Better complexity, cache-friendly access patterns
+- LAZY EVALUATION: Defer work until actually needed
+- BATCHING: Group operations to reduce overhead
+- PREDICTION: Use heuristics to make better decisions
+
+SPECIALIZATION EXAMPLES:
+- SMALL ARRAYS: Use insertion sort instead of quicksort for n < 50
+- SORTED DATA: Use binary search instead of linear search
+- UNIQUE ELEMENTS: Use sets for O(1) operations instead of lists
+- COUNTING OPERATIONS: Use Counter or defaultdict for frequency analysis
+- NUMERICAL COMPUTATIONS: Use numpy or specialized math functions
+
+IMPLEMENTATION REQUIREMENTS:
+- Maintain exact functional behavior and output format
+- Preserve all error handling and edge case management
+- Ensure numerical stability and precision
+- Consider maintainability and readability
+- Optimize for real-world usage patterns
 
 Available imports: {allowed_imports}
 
-Code:
+Code to specialize:
 {code}
 
-CRITICAL: Return ONLY valid Python code with NO markdown, NO explanations, NO comments.
-INDENTATION: Use EXACTLY 4 spaces per level. Every unindent must match a previous level.
+CRITICAL REQUIREMENTS:
+- Return ONLY valid Python code with NO markdown, NO explanations, NO comments
+- Use EXACTLY 4 spaces per indentation level
+- Specialization must provide measurable performance improvement
+- Preserve all existing functionality and edge case handling
+- Maintain the same external interface and behavior
+- Do not introduce unnecessary complexity or reduce maintainability
 """
         return self._mutate_with_prompt(code, prompt, allowed_imports)

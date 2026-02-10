@@ -67,6 +67,11 @@ class MutationOrchestrator:
         self.layer_history: Dict[MutationLayer, List[float]] = {
             layer: [] for layer in MutationLayer
         }
+        # Additional attributes for test compatibility
+        self._registered_mutators: List[LayeredMutator] = []
+        self.mutators_by_layer: Dict[MutationLayer, List[LayeredMutator]] = {
+            layer: [] for layer in MutationLayer
+        }
 
     def orchestrate_mutations(
         self,
@@ -90,19 +95,37 @@ class MutationOrchestrator:
 
         logger.info(f"Starting orchestration with {len(enabled_layers)} layers")
 
-        # Initialize orchestration state
-        orchestration_state = self._initialize_orchestration(ir)
-        layer_order = self._get_layer_order(enabled_layers)
+        # Check if we have registered mutators, if so use them directly
+        has_registered_mutators = any(len(mutators) > 0 for mutators in self.mutators_by_layer.values())
+        
+        if has_registered_mutators:
+            return self.apply_layered_mutations(ir, enabled_layers, llm_client)
 
-        # Process each layer
-        for layer in layer_order:
-            layer_result = self._process_single_layer(layer, orchestration_state, llm_client)
+        # Try to use registry-based orchestration
+        try:
+            # Initialize orchestration state
+            orchestration_state = self._initialize_orchestration(ir)
+            layer_order = self._get_layer_order(enabled_layers)
 
-            if layer_result:
-                self._update_orchestration_state(orchestration_state, layer_result)
+            # Process each layer
+            for layer in layer_order:
+                layer_result = self._process_single_layer(layer, orchestration_state, llm_client)
 
-        # Finalize and return results
-        return self._finalize_orchestration(orchestration_state)
+                if layer_result:
+                    self._update_orchestration_state(orchestration_state, layer_result)
+
+            # Finalize and return results
+            results = self._finalize_orchestration(orchestration_state)
+            
+            # If no results were generated, return the original
+            if not results:
+                return [self._create_original_result(ir)]
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Registry-based orchestration failed: {e}")
+            # Fallback to original result
+            return [self._create_original_result(ir)]
 
     def _initialize_orchestration(self, ir: schema.Module) -> Dict[str, Any]:
         """Initialize orchestration state with original IR."""
@@ -376,3 +399,84 @@ class MutationOrchestrator:
         }
 
         return stats
+
+    def register_mutator(self, mutator: LayeredMutator) -> None:
+        """
+        Register a mutator with the orchestrator.
+        
+        Args:
+            mutator: The mutator to register
+        """
+        self._registered_mutators.append(mutator)
+        self.mutators_by_layer[mutator.layer].append(mutator)
+        
+        # Also register with the main registry (pass the class, not instance)
+        self.registry.register_mutator(mutator.__class__.__name__, mutator.__class__)
+
+    @property
+    def layer_order(self) -> List[MutationLayer]:
+        """
+        Get the standard layer order for processing.
+        
+        Returns:
+            List of layers in semantic -> algorithmic -> syntactic -> micro order
+        """
+        return [
+            MutationLayer.SEMANTIC,
+            MutationLayer.ALGORITHMIC,
+            MutationLayer.SYNTACTIC,
+            MutationLayer.MICRO,
+        ]
+
+    def apply_layered_mutations(self, ir: schema.Module, enabled_layers: Optional[Set[MutationLayer]] = None, llm_client=None) -> List[MutationResult]:
+        """
+        Apply mutations using registered mutators (alias for orchestrate_mutations).
+        
+        Args:
+            ir: Input IR module
+            enabled_layers: Set of enabled layers (None = all)
+            llm_client: LLM client for semantic mutations
+            
+        Returns:
+            List of mutation results
+        """
+        # If we have registered mutators, use them instead of the registry
+        if enabled_layers is None:
+            enabled_layers = set(MutationLayer)
+            
+        results = []
+        
+        # Process layers in order
+        for layer in self.layer_order:
+            if layer not in enabled_layers:
+                continue
+                
+            layer_mutators = self.mutators_by_layer.get(layer, [])
+            if not layer_mutators:
+                continue
+                
+            for mutator in layer_mutators:
+                try:
+                    # Inject LLM client if needed
+                    if hasattr(mutator, 'llm_client') and llm_client:
+                        mutator.llm_client = llm_client
+                        
+                    mutations = mutator.mutate(ir)
+                    results.extend(mutations)
+                    
+                except Exception as e:
+                    logger.error(f"Error in mutator {mutator.__class__.__name__}: {e}")
+                    
+        return results if results else [self._create_original_result(ir)]
+    
+    def _create_original_result(self, ir: schema.Module) -> MutationResult:
+        """Create a result containing the original IR."""
+        from src.utils.mutation_factory import create_mutation_result
+        return create_mutation_result(
+            ir=ir,
+            strategy_name="original",
+            layer=MutationLayer.SEMANTIC,
+            mutator_name="Orchestrator",
+            confidence=1.0,
+            description="Original code",
+        )

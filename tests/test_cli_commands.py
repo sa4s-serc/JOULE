@@ -20,6 +20,7 @@ class TestCLI:
         result = self.runner.invoke(cli, ["optimize", "--help"])
         assert result.exit_code == 0
         assert "Optimize Python code" in result.output
+        assert "--test-iterations" in result.output
 
     def test_config_help(self):
         """Test that the config command shows help."""

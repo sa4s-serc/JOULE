@@ -54,3 +54,5 @@ docs/.doctrees/
 ablation_complex/
 .hedge_cache/
 .mypy_cache/
+
+evoeval_results_*

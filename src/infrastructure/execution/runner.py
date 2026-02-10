@@ -22,6 +22,9 @@ from src.domain.interfaces import CodeRunner as ICodeRunner
 
 logger = logging.getLogger(__name__)
 
+MAX_SAMPLES = 50
+MAX_WARMUP_ITERATIONS = 100
+
 
 @dataclass
 class EvaluationResult:
@@ -44,7 +47,14 @@ class GreenGymRunner(ICodeRunner):
     - Parallel batch evaluation
     """
 
-    def __init__(self, timeout_seconds: int = 10, samples: int = 1, max_workers: int = 1):
+    def __init__(
+        self,
+        timeout_seconds: int = 10,
+        samples: int = 1,
+        max_workers: int = 1,
+        warmup_iterations: int = 0,
+        base_seed: Optional[int] = None,
+    ):
         """
         Args:
             timeout_seconds: Maximum execution time per sample
@@ -52,8 +62,10 @@ class GreenGymRunner(ICodeRunner):
             max_workers: Number of parallel workers for batch evaluation
         """
         self.timeout_seconds = timeout_seconds
-        self.samples = samples
+        self.samples = max(1, min(samples, MAX_SAMPLES))
         self.max_workers = max_workers
+        self.warmup_iterations = max(0, min(warmup_iterations, MAX_WARMUP_ITERATIONS))
+        self.base_seed = base_seed
 
     def run(
         self, code_str: str, test_code_str: str, allowed_imports: Optional[List[str]] = None
@@ -88,8 +100,16 @@ class GreenGymRunner(ICodeRunner):
             last_output = ""
             success_count = 0
 
-            for _ in range(self.samples):
-                success, metrics, output = self._run_single_sample(harness_path, tmpdir)
+            for i in range(self.samples):
+                iteration_seed: Optional[int] = None
+                if self.base_seed is not None:
+                    iteration_seed = self.base_seed + i
+                success, metrics, output = self._run_single_sample(
+                    harness_path,
+                    tmpdir,
+                    iteration_index=i,
+                    iteration_seed=iteration_seed,
+                )
                 last_output = output
 
                 if success:
@@ -107,8 +127,8 @@ class GreenGymRunner(ICodeRunner):
             if not overall_success:
                 return False, {}, last_output
 
-            # Aggregate using median
-            aggregated = {k: self._median(v) for k, v in all_metrics.items()}
+            # Aggregate using sum instead of median
+            aggregated = {k: sum(v) for k, v in all_metrics.items()}
             return True, aggregated, last_output
 
     def run_batch(
@@ -165,23 +185,22 @@ class GreenGymRunner(ICodeRunner):
         """Run evaluation in isolation (for parallel execution)."""
         return self.run(code_str, test_code_str, allowed_imports=allowed_imports)
 
-    def _median(self, values: List[float]) -> float:
-        """Calculate median of a list of values."""
-        if not values:
-            return 0.0
-        sorted_v = sorted(values)
-        n = len(sorted_v)
-        mid = n // 2
-        if n % 2 == 1:
-            return sorted_v[mid]
-        return (sorted_v[mid - 1] + sorted_v[mid]) / 2.0
-
-    def _run_single_sample(self, harness_path: str, cwd: str) -> Tuple[bool, Dict[str, float], str]:
+    def _run_single_sample(
+        self,
+        harness_path: str,
+        cwd: str,
+        iteration_index: int = 0,
+        iteration_seed: Optional[int] = None,
+    ) -> Tuple[bool, Dict[str, float], str]:
         """Execute a single sample run."""
         cmd = [sys.executable, harness_path]
         try:
             env = os.environ.copy()
             env["PYTHONPATH"] = os.getcwd() + os.pathsep + env.get("PYTHONPATH", "")
+            env["HEDGE_TEST_ITERATION"] = str(iteration_index)
+            env["HEDGE_TEST_WARMUP_ITERATIONS"] = str(self.warmup_iterations)
+            if iteration_seed is not None:
+                env["HEDGE_TEST_SEED"] = str(iteration_seed)
 
             process = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=self.timeout_seconds, env=env, cwd=cwd
@@ -226,6 +245,13 @@ import os
 import json
 import traceback
 import time
+import random
+
+try:
+    import numpy as _np
+    _HAS_NUMPY = True
+except Exception:
+    _HAS_NUMPY = False
 
 # Setup paths
 sys.path.insert(0, '{tmpdir}')
@@ -238,6 +264,16 @@ except ImportError:
     class EnergyMonitor:
         def start(self): pass
         def stop(self): return {{"duration_seconds": 0, "energy_joules": 0}}
+
+seed_env = os.environ.get("HEDGE_TEST_SEED")
+if seed_env is not None:
+    try:
+        _seed_value = int(seed_env)
+        random.seed(_seed_value)
+        if _HAS_NUMPY:
+            _np.random.seed(_seed_value)
+    except Exception:
+        pass
 
 # Import candidate
 import candidate
@@ -259,15 +295,48 @@ for alias in ['complex_target', 'target_complex', 'target', 'target_opt',
 
 if __name__ == "__main__":
     monitor = EnergyMonitor()
+    warmup_env = os.environ.get("HEDGE_TEST_WARMUP_ITERATIONS", "0")
+    try:
+        warmup_iters = int(warmup_env)
+    except Exception:
+        warmup_iters = 0
+    if warmup_iters < 0:
+        warmup_iters = 0
+    for _ in range(warmup_iters):
+        try:
+            if 'test' in dir() and callable(test):
+                test()
+            else:
+                test_funcs = [
+                    (name, obj) for name, obj in list(globals().items())
+                    if name.startswith('test_') and callable(obj)
+                ]
+                if test_funcs:
+                    for name, func in test_funcs:
+                        func()
+        except Exception:
+            traceback.print_exc()
     monitor.start()
     
     success = False
     error_msg = ""
     
     try:
+        # Get test iteration for passing to test functions
+        test_iteration = int(os.environ.get("HEDGE_TEST_ITERATION", "0"))
+        
         # Try different test function patterns
         if 'test' in dir() and callable(test):
-            test()
+            # Check if test function accepts test_iteration parameter
+            try:
+                import inspect
+                sig = inspect.signature(test)
+                if 'test_iteration' in sig.parameters:
+                    test(test_iteration=test_iteration)
+                else:
+                    test()
+            except Exception:
+                test()
             success = True
         else:
             # Look for test_* functions
@@ -278,7 +347,16 @@ if __name__ == "__main__":
             
             if test_funcs:
                 for name, func in test_funcs:
-                    func()
+                    # Check if test function accepts test_iteration parameter
+                    try:
+                        import inspect
+                        sig = inspect.signature(func)
+                        if 'test_iteration' in sig.parameters:
+                            func(test_iteration=test_iteration)
+                        else:
+                            func()
+                    except Exception:
+                        func()
                 success = True
             else:
                 # Assume script body is the test
