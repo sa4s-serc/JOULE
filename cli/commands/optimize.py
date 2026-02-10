@@ -126,24 +126,7 @@ console = Console()
     default="standard",
     help="Execution mode for optimization runtime",
 )
-@click.option(
-    "--test-iterations",
-    type=int,
-    default=None,
-    help="Number of measured iterations per candidate for metrics aggregation (1-50)",
-)
-@click.option(
-    "--test-warmup-iterations",
-    type=int,
-    default=None,
-    help="Number of warmup iterations before each measured run (0-100)",
-)
-@click.option(
-    "--test-seed",
-    type=int,
-    default=None,
-    help="Base seed for deterministic test execution across iterations",
-)
+
 def optimize_cmd(
     target,
     tests,
@@ -180,9 +163,6 @@ def optimize_cmd(
     test_warmup_iterations=None,
     test_seed=None,
     mode="standard",
-    test_iterations=None,
-    test_warmup_iterations=None,
-    test_seed=None,
 ):
     """
     Optimize Python code using hierarchical evolutionary strategies.

@@ -56,6 +56,16 @@ class StageEventPayload(BaseModel):
     timestamp: float = Field(..., description="Unix timestamp")
 
 
+class StageEventPayload(BaseModel):
+    """Structured stage event for API/WebSocket visibility."""
+
+    action: str = Field(..., description="Lifecycle action (stage_started/stage_completed)")
+    stage: str = Field(..., description="Current stage name")
+    role: str = Field(..., description="Agent role handling the stage")
+    payload: Dict[str, Any] = Field(default_factory=dict, description="Stage output payload")
+    timestamp: float = Field(..., description="Unix timestamp")
+
+
 class OptimizationRequest(BaseModel):
     """Request model for starting an optimization."""
 
