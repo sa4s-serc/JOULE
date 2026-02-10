@@ -103,6 +103,12 @@ console = Console()
     "--dry-run", is_flag=True, help="Show what would be done without running optimization"
 )
 @click.option(
+    "--mode",
+    type=click.Choice(["standard", "agentic"]),
+    default="standard",
+    help="Execution mode for optimization runtime",
+)
+@click.option(
     "--test-iterations",
     type=int,
     default=None,
@@ -152,6 +158,7 @@ def optimize_cmd(
     config=None,
     show_mutators=False,
     dry_run=False,
+    mode="standard",
     test_iterations=None,
     test_warmup_iterations=None,
     test_seed=None,
@@ -401,7 +408,7 @@ def optimize_cmd(
                 "test_seed": test_seed,
             },
             "timestamp": datetime.now().isoformat(),
-            "engine_type": "standard",
+            "engine_type": mode,
         }
 
         with open(exp_dir / "config.json", "w") as f:
@@ -616,9 +623,10 @@ def optimize_cmd(
                     test_code,
                     enabled_layers=enabled_layers,
                     progress_callback=update_progress,
+                    mode=mode,
                 )
         else:
-            solutions = engine.optimize(initial_code, test_code, enabled_layers=enabled_layers)
+            solutions = engine.optimize(initial_code, test_code, enabled_layers=enabled_layers, mode=mode)
 
         optimization_time = time.time() - start_time
 

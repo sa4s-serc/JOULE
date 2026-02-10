@@ -471,7 +471,7 @@ class PythonCodeGenerator:
                     parts.append(val)
                 else:
                     parts.append(self._generate_expr(v))
-            return f'f"{''.join(parts)}"'
+            return f'f"{"".join(parts)}"'
 
         elif isinstance(expr, schema.FormattedValue):
             val = self._generate_expr(expr.value)

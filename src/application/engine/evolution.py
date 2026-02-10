@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from src.application.engine.crossover import CrossoverManager
+from src.application.agents import AgentError, AgentRuntime, create_default_registry
 from src.application.mutators.base import MutationLayer
 from src.application.mutators.intelligent_selector import \
     get_intelligent_selector
@@ -40,7 +41,6 @@ from src.domain.ir.schema import Module
 from src.domain.ir.serialization import IRSerializer
 from src.domain.ir.validators import IRValidator
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
-from src.infrastructure.llm.batch_client import create_batch_llm_client
 from src.infrastructure.parsing.python_parser import PythonParser
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class EventType(str, Enum):
     EVALUATION_START = "evaluation_start"
     EVALUATION_RESULT = "evaluation_result"
     EVALUATION_FAILURE = "evaluation_failure"
+    STAGE_EVENT = "stage_event"
 
 
 @dataclass
@@ -349,6 +350,8 @@ class EvolutionaryEngine:
             self.intelligent_selector = None
 
         if self.config.enable_batch_llm and llm_client:
+            from src.infrastructure.llm.batch_client import create_batch_llm_client
+
             provider = "openai" if "OpenAI" in llm_client.__class__.__name__ else "gemini"
             model_name = getattr(
                 llm_client, "model_name", "gpt-4" if provider == "openai" else "gemini-2.5-flash"
@@ -873,6 +876,7 @@ class EvolutionaryEngine:
         test_code: str,
         enabled_layers: Optional[Set[MutationLayer]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        mode: str = "standard",
     ) -> List[Solution]:
         """
         Main optimization loop with advanced features.
@@ -887,6 +891,12 @@ class EvolutionaryEngine:
             List of optimized solutions from Pareto archive
         """
         start_time = time.time()
+
+        if mode == "agentic":
+            try:
+                self._run_agentic_stages(initial_code, test_code)
+            except AgentError as e:
+                logger.warning(f"Agentic preflight failed, falling back to standard mode: {e}")
 
         # Parse initial code
         try:
@@ -1107,6 +1117,15 @@ class EvolutionaryEngine:
             self._save_performance_history()
 
         return self.archive.solutions
+
+    def _run_agentic_stages(self, initial_code: str, test_code: str) -> Dict[str, Any]:
+        """Run optional agentic stage graph before core evolution."""
+
+        runtime = AgentRuntime(
+            registry=create_default_registry(),
+            event_emitter=lambda event_type, payload: self._emit_event(EventType(event_type), payload),
+        )
+        return runtime.execute(initial_code=initial_code, test_code=test_code)
 
     def _generate_crossovers(self, parents: List[Solution]) -> List[Solution]:
         """Generate crossover variants."""

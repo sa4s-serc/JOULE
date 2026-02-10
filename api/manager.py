@@ -12,7 +12,7 @@ from src.application.engine.evolution import EvolutionaryEngine, OptimizationEve
 from src.infrastructure.execution.runner import GreenGymRunner
 from cli.utils.mutator_factory import create_mutators
 from src.application.mutators.base import MutationLayer
-from api.models import TaskStatus, OptimizationRequest, SolutionResponse
+from api.models import TaskStatus, OptimizationRequest, SolutionResponse, StageEventPayload
 from api.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
@@ -236,6 +236,8 @@ class OptimizationTaskManager:
                                 )
                     elif event.type == "optimization_complete":
                         self.tasks[task_id].best_code = event.data.get("best_code")
+                    elif event.type == "stage_event":
+                        StageEventPayload(**event.data)
                     
                     # Log mutation events with detailed info
                     if event.type in ["mutation_attempt", "mutation_result"]:
@@ -396,8 +398,12 @@ class OptimizationTaskManager:
         logger.info(f"Number of mutators: {len(mutators)}")
         
         try:
-            engine.optimize(request.target_code, request.test_code,
-                            enabled_layers=enabled_layers_set)
+            engine.optimize(
+                request.target_code,
+                request.test_code,
+                enabled_layers=enabled_layers_set,
+                mode=request.mode,
+            )
             logger.info(f"Optimization completed successfully for task {task_id}")
         except Exception as e:
             logger.error(f"Optimization failed for task {task_id}: {e}")
