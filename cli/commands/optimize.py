@@ -103,6 +103,24 @@ console = Console()
     "--dry-run", is_flag=True, help="Show what would be done without running optimization"
 )
 @click.option(
+    "--test-iterations",
+    type=int,
+    default=None,
+    help="Number of measured iterations per candidate for metrics aggregation (1-50)",
+)
+@click.option(
+    "--test-warmup-iterations",
+    type=int,
+    default=None,
+    help="Number of warmup iterations before each measured run (0-100)",
+)
+@click.option(
+    "--test-seed",
+    type=int,
+    default=None,
+    help="Base seed for deterministic test execution across iterations",
+)
+@click.option(
     "--mode",
     type=click.Choice(["standard", "agentic"]),
     default="standard",
@@ -158,6 +176,9 @@ def optimize_cmd(
     config=None,
     show_mutators=False,
     dry_run=False,
+    test_iterations=None,
+    test_warmup_iterations=None,
+    test_seed=None,
     mode="standard",
     test_iterations=None,
     test_warmup_iterations=None,
