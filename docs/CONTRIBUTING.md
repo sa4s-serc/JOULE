@@ -27,6 +27,13 @@ python -m pytest tests/ -v
 python -m pytest tests/ --cov=src --cov-report=term-missing
 ```
 
+### 3. CI and Git Workflow
+All pushes and pull requests are validated by GitHub Actions workflow `.github/workflows/tests.yml`, which currently runs:
+- `python -m py_compile` checks for critical application/API/agentic modules.
+- Focused agentic tests: `tests/test_agentic_mode.py` and `tests/test_agents_runtime.py`.
+
+Before opening a PR, run these locally when possible to reduce CI churn.
+
 ## Engineering Standards
 
 ### Architecture Compliance

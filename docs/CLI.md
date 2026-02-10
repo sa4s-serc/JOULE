@@ -26,6 +26,7 @@ python hedge.py optimize <target_file> <test_file> [options]
 - `--llm <provider>`: Specify LLM provider (`gemini` or `openai:gpt-4`).
 - `--visualize`: Generate HTML reports and charts after completion.
 - `--out-dir <dir>`: Specify output directory for experiment results.
+- `--mode <mode>`: Execution mode (`standard` or `agentic`). `agentic` runs a staged preflight with Architect/Strategist/Engineer/Sentinel before evolutionary optimization.
 
 ### `analyze`
 

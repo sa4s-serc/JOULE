@@ -28,6 +28,7 @@ Orchestrates the optimization process and implements transformation logic.
     - **Syntactic Layer**: Pythonic idioms and pattern-based improvements.
     - **Micro Layer**: Localized optimizations like constant folding and dead code elimination.
 - **Registry & Selection**: Intelligent mutator discovery and performance-based adaptive selection.
+- **Optional Agentic Runtime**: A staged coordinator (`src/application/agents/`) can run pre-evolution planning with canonical roles (Architect, Strategist, Engineer, Sentinel), schema validation, and stage invariant checks.
 
 ### 3. Infrastructure Layer (`src/infrastructure/`)
 Handles interactions with external systems and the physical environment.
@@ -69,3 +70,15 @@ HEDGE evaluates solutions based on:
 
 ---
 *For more details on specific layers, see [MUTATORS.md](MUTATORS.md).*
+
+
+## Agentic Preflight (Optional)
+
+When optimization runs in `agentic` mode, HEDGE executes a role-ordered stage graph before the standard evolutionary loop:
+
+1. `architecture` / `semantic_contract` (Architect)
+2. `strategy_generation` (Strategist)
+3. `implementation` (Engineer)
+4. `safety_review` (Sentinel)
+
+Each stage validates input/output schemas and enforces invariants (for example, semantic contract must exist before strategy generation). Stage lifecycle updates are emitted as structured `stage_event` events so API/WebSocket consumers can render stage progress in real time.

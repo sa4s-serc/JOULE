@@ -83,6 +83,15 @@ The most common causes:
 ### REST Endpoints
 
 - `POST /api/v1/optimize` - Start optimization task
+  - Supports `mode` in request payload: `"standard"` (default) or `"agentic"`.
+  - Example:
+    ```json
+    {
+      "target_code": "def f(x): return x",
+      "test_code": "def test_f(): assert f(1) == 1",
+      "mode": "agentic"
+    }
+    ```
 - `GET /api/v1/tasks/{task_id}` - Get task status
 - `DELETE /api/v1/tasks/{task_id}` - Stop task
 - `GET /api/v1/tasks/{task_id}/solutions/{variant_id}` - Get specific solution
@@ -92,6 +101,7 @@ The most common causes:
 ### WebSocket
 
 - `WS /api/v1/ws/{task_id}` - Real-time optimization updates
+  - Includes structured `stage_event` messages in `agentic` mode with: `action`, `stage`, `role`, `payload`, and `timestamp`.
 
 ## Development
 
