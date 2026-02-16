@@ -1,0 +1,11 @@
+[
+  {
+    "metrics": {
+      "duration_seconds": 2.5092290690008667,
+      "energy_joules": 65.27046710073347,
+      "emissions_kg": 1.2935174255226218e-05
+    },
+    "mutation": "Pattern_LoopOptimization",
+    "generation": 2
+  }
+]

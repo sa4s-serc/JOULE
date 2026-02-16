@@ -1,0 +1,236 @@
+{
+  "configuration": {
+    "level": "aggressive",
+    "generations": 5,
+    "population_size": 15,
+    "llm_provider": "gemini",
+    "test_iterations": 5,
+    "test_warmup_iterations": 5,
+    "test_seed": 42,
+    "timestamp": "2026-02-11T21:54:48.048192"
+  },
+  "summary": {
+    "total_problems": 9,
+    "successful": 8,
+    "failed": 1,
+    "total_time": 10142.26994895935,
+    "improvements": []
+  },
+  "results": {
+    "EvoEval_difficult_4": {
+      "execution_time": 931.5531573295593,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.5057241199983764,
+            "energy_joules": 65.16447314952416,
+            "emissions_kg": 1.2914168580074906e-05
+          },
+          "mutation": "Merged_ConditionalSimplification",
+          "generation": 1
+        }
+      ],
+      "pareto_count": 1,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 1,
+        "success_rate": "0.0%",
+        "improvement_rate": "100.0%",
+        "cache_hits": 23
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_16": {
+      "execution_time": 1302.1408886909485,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.730348710000726,
+            "energy_joules": 71.01098542512558,
+            "emissions_kg": 1.4072819014635283e-05
+          },
+          "mutation": "Merged_PatternRecognition",
+          "generation": 1
+        },
+        {
+          "metrics": {
+            "duration_seconds": 2.728606673000286,
+            "energy_joules": 71.51406266390295,
+            "emissions_kg": 1.417251788361044e-05
+          },
+          "mutation": "Merged_ErrorHandling",
+          "generation": 2
+        }
+      ],
+      "pareto_count": 2,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 2,
+        "success_rate": "0.0%",
+        "improvement_rate": "200.0%",
+        "cache_hits": 20
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_52": {
+      "execution_time": 1047.9328813552856,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.506764946000658,
+            "energy_joules": 65.25009326243043,
+            "emissions_kg": 1.2931136607567118e-05
+          },
+          "mutation": "Merged_ConditionalSimplification_LoopOptimization",
+          "generation": 2
+        },
+        {
+          "metrics": {
+            "duration_seconds": 2.507087424999554,
+            "energy_joules": 65.21682949519911,
+            "emissions_kg": 1.2924544458856762e-05
+          },
+          "mutation": "Merged_FlowOptimization_ComplexityReduction",
+          "generation": 2
+        }
+      ],
+      "pareto_count": 2,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 2,
+        "success_rate": "0.0%",
+        "improvement_rate": "200.0%",
+        "cache_hits": 20
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_53": {
+      "execution_time": 780.800525188446,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.506170615000883,
+            "energy_joules": 65.18973727285291,
+            "emissions_kg": 1.2919175374911514e-05
+          },
+          "mutation": "Pattern_ErrorHandling",
+          "generation": 1
+        }
+      ],
+      "pareto_count": 1,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 1,
+        "success_rate": "0.0%",
+        "improvement_rate": "100.0%",
+        "cache_hits": 14
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_61": {
+      "status": "timeout",
+      "error": "Execution exceeded 45 minutes"
+    },
+    "EvoEval_difficult_63": {
+      "execution_time": 835.971120595932,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.5080797579994396,
+            "energy_joules": 65.2314578101528,
+            "emissions_kg": 1.292744346987034e-05
+          },
+          "mutation": "Merged_ArchitecturalImprovement",
+          "generation": 1
+        }
+      ],
+      "pareto_count": 1,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 1,
+        "success_rate": "0.0%",
+        "improvement_rate": "100.0%",
+        "cache_hits": 17
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_66": {
+      "execution_time": 654.2276666164398,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.537544249003986,
+            "energy_joules": 65.9918147186622,
+            "emissions_kg": 1.3078129523526965e-05
+          },
+          "mutation": "Complexity_DuplicateWorkElimination",
+          "generation": 1
+        }
+      ],
+      "pareto_count": 1,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 1,
+        "success_rate": "0.0%",
+        "improvement_rate": "100.0%",
+        "cache_hits": 12
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_79": {
+      "execution_time": 808.0287408828735,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.5070239870001387,
+            "energy_joules": 65.20484512173415,
+            "emissions_kg": 1.2922169419026425e-05
+          },
+          "mutation": "DeadCode_PureExpressionElimination",
+          "generation": 1
+        },
+        {
+          "metrics": {
+            "duration_seconds": 2.5070239870001387,
+            "energy_joules": 65.20484512173415,
+            "emissions_kg": 1.2922169419026425e-05
+          },
+          "mutation": "Pattern_ConditionalSimplification",
+          "generation": 2
+        }
+      ],
+      "pareto_count": 2,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 2,
+        "success_rate": "0.0%",
+        "improvement_rate": "200.0%",
+        "cache_hits": 12
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_90": {
+      "execution_time": 1081.5103526115417,
+      "pareto_solutions": [
+        {
+          "metrics": {
+            "duration_seconds": 2.5092290690008667,
+            "energy_joules": 65.27046710073347,
+            "emissions_kg": 1.2935174255226218e-05
+          },
+          "mutation": "Pattern_LoopOptimization",
+          "generation": 2
+        }
+      ],
+      "pareto_count": 1,
+      "statistics": {
+        "total_mutations": 0,
+        "successful_mutations": 1,
+        "success_rate": "0.0%",
+        "improvement_rate": "100.0%",
+        "cache_hits": 20
+      },
+      "status": "success"
+    }
+  }
+}

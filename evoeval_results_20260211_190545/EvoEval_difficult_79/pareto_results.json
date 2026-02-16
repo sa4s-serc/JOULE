@@ -1,0 +1,20 @@
+[
+  {
+    "metrics": {
+      "duration_seconds": 2.5070239870001387,
+      "energy_joules": 65.20484512173415,
+      "emissions_kg": 1.2922169419026425e-05
+    },
+    "mutation": "DeadCode_PureExpressionElimination",
+    "generation": 1
+  },
+  {
+    "metrics": {
+      "duration_seconds": 2.5070239870001387,
+      "energy_joules": 65.20484512173415,
+      "emissions_kg": 1.2922169419026425e-05
+    },
+    "mutation": "Pattern_ConditionalSimplification",
+    "generation": 2
+  }
+]
