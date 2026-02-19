@@ -14,9 +14,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from cli.utils.banner import (create_progress_table, print_error,
-                              print_optimization_summary, print_step,
-                              print_success, print_warning)
+from cli.utils.banner import print_error, print_step, print_success, print_warning
 from cli.utils.mutator_factory import create_mutators
 from src.application.engine.evolution import EngineConfig, EvolutionaryEngine
 from src.application.mutators import initialize_mutator_system
@@ -126,30 +124,6 @@ console = Console()
     default="standard",
     help="Execution mode for optimization runtime",
 )
-@click.option(
-    "--test-iterations",
-    type=int,
-    default=None,
-    help="Number of measured iterations per candidate for metrics aggregation (1-50)",
-)
-@click.option(
-    "--test-warmup-iterations",
-    type=int,
-    default=None,
-    help="Number of warmup iterations before each measured run (0-100)",
-)
-@click.option(
-    "--test-seed",
-    type=int,
-    default=None,
-    help="Base seed for deterministic test execution across iterations",
-)
-@click.option(
-    "--mode",
-    type=click.Choice(["standard", "agentic"]),
-    default="standard",
-    help="Execution mode for optimization runtime",
-)
 
 def optimize_cmd(
     target,
@@ -183,10 +157,6 @@ def optimize_cmd(
     config=None,
     show_mutators=False,
     dry_run=False,
-    test_iterations=None,
-    test_warmup_iterations=None,
-    test_seed=None,
-    mode="standard",
     test_iterations=None,
     test_warmup_iterations=None,
     test_seed=None,
@@ -279,6 +249,12 @@ def optimize_cmd(
     if max_memory_mb == 2048:
         max_memory_mb = perf_cfg.get("max_memory_mb", max_memory_mb)
 
+    allowed_imports_set = (
+        {item.strip() for item in allowed_imports.split(",") if item.strip()}
+        if allowed_imports
+        else set()
+    )
+
     # Test execution configuration (CLI overrides config)
     if test_iterations is None:
         test_iterations = opt_cfg.get("test_iterations", 3)
@@ -320,18 +296,18 @@ def optimize_cmd(
 
     # Create mutators and show transparency information
     try:
-        mutators, enabled_layers_set, llm_client = create_mutators(
+        mutators, enabled_layers, llm_client = create_mutators(
             level=level,
             layers=layers,
             llm_provider=llm_provider,
             llm_model=llm_model,
             exclude_mutators=exclude_mutators,
-            allowed_imports=set(allowed_imports.split(",")) if allowed_imports else set(),
+            allowed_imports=allowed_imports_set,
         )
 
         # Show mutator information if requested or in verbose mode
         if show_mutators or verbose or dry_run:
-            _display_mutator_information(mutators, enabled_layers_set, level, llm_client)
+            _display_mutator_information(mutators, enabled_layers, level, llm_client)
 
         # If dry run, show what would be done and exit
         if dry_run:
@@ -342,7 +318,7 @@ def optimize_cmd(
                 generations,
                 population_size,
                 timeout,
-                enabled_layers_set,
+                enabled_layers,
                 mutators,
                 llm_client,
             )
@@ -465,24 +441,7 @@ def optimize_cmd(
                 base_seed=test_seed,
             )
             progress.update(task, description="✓ Green Gym runner initialized")
-
-            # Setup mutators
-            # Parse allowed imports
-            allowed_imports_set = set()
-            if allowed_imports:
-                allowed_imports_set = {i.strip() for i in allowed_imports.split(",")}
-
-            # Create mutators
-            mutators, enabled_layers, llm_client = create_mutators(
-                level=level,
-                layers=layers,
-                llm_provider=llm_provider,
-                llm_model=llm_model,
-                exclude_mutators=exclude_mutators,
-                allowed_imports=allowed_imports_set,
-                progress=progress,
-                task=task,
-            )
+            progress.update(task, description="✓ Mutators initialized")
 
             # Use the LLM client from mutator factory for batch processing if available
             if batch_llm and llm_client is None and (level in ["advanced", "aggressive"]):
@@ -567,7 +526,6 @@ def optimize_cmd(
 
         start_time = time.time()
 
-        # Create live progress display
         # Create live progress display
         progress_table = create_progress_table()
         status_text = Text("Ready to start...", style="italic cyan")
