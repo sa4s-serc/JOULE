@@ -123,6 +123,8 @@ def make_executable():
             except Exception as e:
                 print(f"⚠️  Could not make {script} executable: {e}")
 
+    return True
+
 
 def run_tests():
     """Run basic tests to verify installation."""
