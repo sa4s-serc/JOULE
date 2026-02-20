@@ -1,0 +1,245 @@
+{
+  "configuration": {
+    "test_iterations": 10,
+    "test_warmup_iterations": 3,
+    "test_seed": 42,
+    "timeout": 60,
+    "timestamp": "2026-02-20T17:40:01.674497"
+  },
+  "results": {
+    "EvoEval_difficult_16": {
+      "problem": "EvoEval_difficult_16",
+      "original": {
+        "duration_seconds": 11.476224654936232,
+        "energy_joules": 771.5684417389305,
+        "emissions_kg": 0.0001529079335118512,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 11.29472134495154,
+        "energy_joules": 755.3176069445403,
+        "emissions_kg": 0.00014968737467114436,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": 1.5815594016506291,
+        "time_speedup": 1.0160697466047552,
+        "time_saved_seconds": 0.18150330998469144,
+        "energy_improvement_percent": 2.106207811942728,
+        "energy_ratio": 1.0215152336513498,
+        "energy_saved_joules": 16.25083479439013,
+        "emissions_improvement_percent": 2.1062078119427596,
+        "emissions_saved_kg": 3.2205588407068506e-06
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_4": {
+      "problem": "EvoEval_difficult_4",
+      "original": {
+        "duration_seconds": 5.055221157032065,
+        "energy_joules": 156.39961469638888,
+        "emissions_kg": 3.099497153016844e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.049999107024632,
+        "energy_joules": 155.69980299051124,
+        "emissions_kg": 3.085628420704259e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": 0.1033001296128967,
+        "time_speedup": 1.0010340694912536,
+        "time_saved_seconds": 0.005222050007432699,
+        "energy_improvement_percent": 0.4474510421500379,
+        "energy_ratio": 1.0044946216529271,
+        "energy_saved_joules": 0.6998117058776359,
+        "emissions_improvement_percent": 0.44745104215006487,
+        "emissions_saved_kg": 1.386873231258546e-07
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_52": {
+      "problem": "EvoEval_difficult_52",
+      "original": {
+        "duration_seconds": 5.072953212889843,
+        "energy_joules": 155.89139585217492,
+        "emissions_kg": 3.089425370782543e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.063053702819161,
+        "energy_joules": 156.98773696739588,
+        "emissions_kg": 3.111152445826553e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": 0.19514294051693507,
+        "time_speedup": 1.0019552449276155,
+        "time_saved_seconds": 0.009899510070681572,
+        "energy_improvement_percent": -0.7032723706320293,
+        "energy_ratio": 0.993016390092631,
+        "energy_saved_joules": -1.0963411152209517,
+        "emissions_improvement_percent": -0.7032723706320213,
+        "emissions_saved_kg": -2.1727075044009503e-07
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_53": {
+      "problem": "EvoEval_difficult_53",
+      "original": {
+        "duration_seconds": 5.0467674060491845,
+        "energy_joules": 155.86531987056242,
+        "emissions_kg": 3.088908602049275e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.049609496840276,
+        "energy_joules": 156.62330682032976,
+        "emissions_kg": 3.1039302400334136e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": -0.05631507383686279,
+        "time_speedup": 0.999437166221889,
+        "time_saved_seconds": -0.002842090791091323,
+        "energy_improvement_percent": -0.4863089174659311,
+        "energy_ratio": 0.9951604460079695,
+        "energy_saved_joules": -0.7579869497673428,
+        "emissions_improvement_percent": -0.48630891746594374,
+        "emissions_saved_kg": -1.5021637984138247e-07
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_61": {
+      "problem": "EvoEval_difficult_61",
+      "original": {
+        "duration_seconds": 5.061648181988858,
+        "energy_joules": 159.49284160850718,
+        "emissions_kg": 3.160798122500415e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.0493670320138335,
+        "energy_joules": 155.60223652825084,
+        "emissions_kg": 3.0836948675264384e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": 0.24263144204144527,
+        "time_speedup": 1.0024322157405392,
+        "time_saved_seconds": 0.012281149975024164,
+        "energy_improvement_percent": 2.4393603129890034,
+        "energy_ratio": 1.0250035293004929,
+        "energy_saved_joules": 3.8906050802563357,
+        "emissions_improvement_percent": 2.439360312989011,
+        "emissions_saved_kg": 7.710325497397691e-07
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_63": {
+      "problem": "EvoEval_difficult_63",
+      "original": {
+        "duration_seconds": 5.052533682901412,
+        "energy_joules": 155.66148698733753,
+        "emissions_kg": 3.084869081603696e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.051533979130909,
+        "energy_joules": 155.6232910427802,
+        "emissions_kg": 3.0841121218014486e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": 0.019786187153715776,
+        "time_speedup": 1.000197901028605,
+        "time_saved_seconds": 0.0009997037705034018,
+        "energy_improvement_percent": 0.024537825827414195,
+        "energy_ratio": 1.0002454384835417,
+        "energy_saved_joules": 0.0381959445573159,
+        "emissions_improvement_percent": 0.024537825827416825,
+        "emissions_saved_kg": 7.56959802247748e-09
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_66": {
+      "problem": "EvoEval_difficult_66",
+      "original": {
+        "duration_seconds": 5.212489928002469,
+        "energy_joules": 160.86504498570434,
+        "emissions_kg": 3.187992182212386e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.232196614029817,
+        "energy_joules": 161.6569337932469,
+        "emissions_kg": 3.203685680621885e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": -0.37806664951964786,
+        "time_speedup": 0.9962335731087578,
+        "time_saved_seconds": -0.01970668602734804,
+        "energy_improvement_percent": -0.4922690368270719,
+        "energy_ratio": 0.9951014238055798,
+        "energy_saved_joules": -0.7918888075425627,
+        "emissions_improvement_percent": -0.4922690368270705,
+        "emissions_saved_kg": -1.569349840949922e-07
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_79": {
+      "problem": "EvoEval_difficult_79",
+      "original": {
+        "duration_seconds": 5.051999691291712,
+        "energy_joules": 155.8919576381629,
+        "emissions_kg": 3.089436504148016e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.051066261949018,
+        "energy_joules": 155.59673169738448,
+        "emissions_kg": 3.083585773858713e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": 0.018476433090515852,
+        "time_speedup": 1.0001847984750718,
+        "time_saved_seconds": 0.0009334293426945806,
+        "energy_improvement_percent": 0.1893785575928492,
+        "energy_ratio": 1.0018973788045407,
+        "energy_saved_joules": 0.29522594077840836,
+        "emissions_improvement_percent": 0.1893785575928482,
+        "emissions_saved_kg": 5.850730289302426e-08
+      },
+      "status": "success"
+    },
+    "EvoEval_difficult_90": {
+      "problem": "EvoEval_difficult_90",
+      "original": {
+        "duration_seconds": 5.049473235965706,
+        "energy_joules": 155.73658167367944,
+        "emissions_kg": 3.086357293495875e-05,
+        "success": true
+      },
+      "optimized": {
+        "duration_seconds": 5.057689590146765,
+        "energy_joules": 156.38209252733802,
+        "emissions_kg": 3.0991499020776824e-05,
+        "success": true
+      },
+      "comparison": {
+        "time_improvement_percent": -0.1627170557621014,
+        "time_speedup": 0.9983754728251679,
+        "time_saved_seconds": -0.008216354181058705,
+        "energy_improvement_percent": -0.4144889060241099,
+        "energy_ratio": 0.9958722201293877,
+        "energy_saved_joules": -0.6455108536585783,
+        "emissions_improvement_percent": -0.41448890602413574,
+        "emissions_saved_kg": -1.2792608581807177e-07
+      },
+      "status": "success"
+    }
+  }
+}

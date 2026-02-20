@@ -182,7 +182,7 @@ class EvoEvalBenchmarkRunner:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=2700  # 45 minute timeout per problem
+                timeout=36000  # 45 minute timeout per problem
             )
             
             execution_time = time.time() - start_time
@@ -509,7 +509,7 @@ def main():
     parser.add_argument(
         "--level",
         choices=["micro", "basic", "standard", "advanced", "aggressive"],
-        default="standard",
+        default="aggressive",
         help="Optimization level (default: standard)"
     )
     parser.add_argument(
@@ -548,13 +548,13 @@ def main():
     parser.add_argument(
         "--test-iterations",
         type=int,
-        default=3,
+        default=10,
         help="Number of test iterations per candidate (default: 3)"
     )
     parser.add_argument(
         "--test-warmup-iterations",
         type=int,
-        default=5,
+        default=3,
         help="Number of warmup iterations before each test (default: 5)"
     )
     parser.add_argument(

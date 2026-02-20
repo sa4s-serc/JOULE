@@ -46,7 +46,7 @@ console = Console()
 )
 @click.option("--generations", type=int, default=10, help="Number of evolutionary generations")
 @click.option("--population-size", type=int, default=8, help="Population size for evolution")
-@click.option("--timeout", type=int, default=30, help="Execution timeout in seconds")
+@click.option("--timeout", type=int, default=600, help="Execution timeout in seconds")
 @click.option("--llm", type=str, help="LLM specification (e.g., gemini or openai:gpt-4)")
 @click.option(
     "--output", "-o", type=click.Path(path_type=Path), help="Output file for optimized code"

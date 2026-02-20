@@ -49,7 +49,7 @@ class GreenGymRunner(ICodeRunner):
 
     def __init__(
         self,
-        timeout_seconds: int = 10,
+        timeout_seconds: int = 600,
         samples: int = 1,
         max_workers: int = 1,
         warmup_iterations: int = 0,
