@@ -30,21 +30,21 @@ import numpy as np
 
 VARIANT_ORDER = [
     "benchmark",
-    "optimized:evoeval_results_20260219_225745",
+    "optimized:evoeval_results_20260211_190545",
     "single_prompt:gemini",
     "single_prompt:gemini_code_exe",
 ]
 
 VARIANT_SHORT = {
     "benchmark":                                    "Baseline",
-    "optimized:evoeval_results_20260219_225745":    "Hedge\n(Optimized)",
+    "optimized:evoeval_results_20260211_190545":    "Hedge\n(Optimized)",
     "single_prompt:gemini":                         "Gemini\nSingle-Prompt",
     "single_prompt:gemini_code_exe":                "Gemini\nCode-Exe",
 }
 
 VARIANT_COLOR = {
     "benchmark":                                    "#6c757d",
-    "optimized:evoeval_results_20260219_225745":    "#0d6efd",
+    "optimized:evoeval_results_20260211_190545":    "#0d6efd",
     "single_prompt:gemini":                         "#198754",
     "single_prompt:gemini_code_exe":                "#fd7e14",
 }
