@@ -1,0 +1,282 @@
+{
+  "generated_at": "2026-02-20T22:57:29.276891",
+  "repo_root": "/home/shailender/Documents/Hedge/hedge",
+  "config": {
+    "sources": [
+      "benchmark",
+      "llm",
+      "optimized",
+      "single_prompt"
+    ],
+    "baseline_only": false,
+    "results_glob": "evoeval_results*",
+    "problems": [],
+    "runs": 3,
+    "samples": 8,
+    "warmup_iterations": 3,
+    "timeout_seconds": 30,
+    "base_seed": 42,
+    "seed_stride": 8,
+    "energy_mode": "strict",
+    "assumed_power_watts": 65.0,
+    "plots_enabled": true,
+    "plot_format": "png",
+    "max_variants": null,
+    "fail_fast": false,
+    "dry_run": false
+  },
+  "discovered_variants": [
+    {
+      "problem_id": 4,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_4/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_4/test_target.py"
+    },
+    {
+      "problem_id": 4,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_4/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_4/test_target.py"
+    },
+    {
+      "problem_id": 4,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_4.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_4/test_target.py"
+    },
+    {
+      "problem_id": 4,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_4.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_4/test_target.py"
+    },
+    {
+      "problem_id": 16,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_16/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_16/test_target.py"
+    },
+    {
+      "problem_id": 16,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_16/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_16/test_target.py"
+    },
+    {
+      "problem_id": 16,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_16.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_16/test_target.py"
+    },
+    {
+      "problem_id": 16,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_16.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_16/test_target.py"
+    },
+    {
+      "problem_id": 52,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_52/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_52/test_target.py"
+    },
+    {
+      "problem_id": 52,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_52/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_52/test_target.py"
+    },
+    {
+      "problem_id": 52,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_52.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_52/test_target.py"
+    },
+    {
+      "problem_id": 52,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_52.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_52/test_target.py"
+    },
+    {
+      "problem_id": 53,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_53/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_53/test_target.py"
+    },
+    {
+      "problem_id": 53,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_53/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_53/test_target.py"
+    },
+    {
+      "problem_id": 53,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_53.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_53/test_target.py"
+    },
+    {
+      "problem_id": 53,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_53.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_53/test_target.py"
+    },
+    {
+      "problem_id": 61,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_61/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_61/test_target.py"
+    },
+    {
+      "problem_id": 61,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_61/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_61/test_target.py"
+    },
+    {
+      "problem_id": 61,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_61.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_61/test_target.py"
+    },
+    {
+      "problem_id": 61,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_61.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_61/test_target.py"
+    },
+    {
+      "problem_id": 63,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_63/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_63/test_target.py"
+    },
+    {
+      "problem_id": 63,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_63/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_63/test_target.py"
+    },
+    {
+      "problem_id": 63,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_63.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_63/test_target.py"
+    },
+    {
+      "problem_id": 63,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_63.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_63/test_target.py"
+    },
+    {
+      "problem_id": 66,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_66/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_66/test_target.py"
+    },
+    {
+      "problem_id": 66,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_66/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_66/test_target.py"
+    },
+    {
+      "problem_id": 66,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_66.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_66/test_target.py"
+    },
+    {
+      "problem_id": 66,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_66.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_66/test_target.py"
+    },
+    {
+      "problem_id": 79,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_79/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_79/test_target.py"
+    },
+    {
+      "problem_id": 79,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_79/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_79/test_target.py"
+    },
+    {
+      "problem_id": 79,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_79.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_79/test_target.py"
+    },
+    {
+      "problem_id": 79,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_79.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_79/test_target.py"
+    },
+    {
+      "problem_id": 90,
+      "source_kind": "benchmark",
+      "source_name": "benchmark",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_90/target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_90/test_target.py"
+    },
+    {
+      "problem_id": 90,
+      "source_kind": "optimized",
+      "source_name": "evoeval_results_20260211_190545",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/evoeval_results_20260211_190545/EvoEval_difficult_90/optimized_target.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_90/test_target.py"
+    },
+    {
+      "problem_id": 90,
+      "source_kind": "single_prompt",
+      "source_name": "gemini",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini/evo_eval_90.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_90/test_target.py"
+    },
+    {
+      "problem_id": 90,
+      "source_kind": "single_prompt",
+      "source_name": "gemini_code_exe",
+      "code_path": "/home/shailender/Documents/Hedge/hedge/single_prompt/gemini_code_exe/evo_eval_90.py",
+      "test_path": "/home/shailender/Documents/Hedge/hedge/evoeval_benchmark/EvoEval_difficult_90/test_target.py"
+    }
+  ]
+}

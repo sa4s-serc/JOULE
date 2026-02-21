@@ -138,7 +138,7 @@ def parse_args() -> argparse.Namespace:
         "--runs",
         "-r",
         type=int,
-        default=5,
+        default=3,
         help="Repeated full evaluations per variant for denoising (default: 5).",
     )
     parser.add_argument(
@@ -152,7 +152,7 @@ def parse_args() -> argparse.Namespace:
         "--warmup-iterations",
         "-w",
         type=int,
-        default=5,
+        default=3,
         help="Warmup iterations before each measured sample (default: 5).",
     )
     parser.add_argument(
