@@ -56,9 +56,10 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_SOURCES = {"benchmark", "llm", "optimized", "single_prompt"}
+SUPPORTED_SOURCES = {"benchmark", "llm", "optimized", "single_prompt", "expert"}
 PROBLEM_DIR_PATTERN = re.compile(r"EvoEval_difficult_(\d+)$")
 SINGLE_PROMPT_PATTERN = re.compile(r"evo_eval_(\d+)\.py$")
+EXPERT_FILE_PATTERN = re.compile(r"expert_(\d+)\.py$")
 PROBLEM_RANGE_PATTERN = re.compile(r"(\d+)\s*-\s*(\d+)$")
 
 
@@ -98,7 +99,8 @@ def parse_args() -> argparse.Namespace:
         default="benchmark,llm,optimized,single_prompt",
         help=(
             "Comma-separated source groups to discover variants from. "
-            f"Supported: {','.join(sorted(SUPPORTED_SOURCES))}"
+            f"Supported: {','.join(sorted(SUPPORTED_SOURCES))}. "
+            "Use 'expert' to include hand-crafted expert solutions from the expert/ directory."
         ),
     )
     parser.add_argument(
@@ -301,6 +303,11 @@ def parse_problem_id_from_path(path: Path) -> Optional[int]:
     match = SINGLE_PROMPT_PATTERN.match(path.name)
     if match:
         return int(match.group(1))
+
+    match = EXPERT_FILE_PATTERN.match(path.name)
+    if match:
+        return int(match.group(1))
+
     return None
 
 
@@ -371,6 +378,12 @@ def discover_variants(
     if "single_prompt" in sources:
         for code_path in sorted((repo_root / "single_prompt").glob("*/evo_eval_*.py")):
             variant = build_variant(repo_root, code_path, "single_prompt", code_path.parent.name)
+            if variant:
+                variants.append(variant)
+
+    if "expert" in sources:
+        for code_path in sorted((repo_root / "expert").glob("expert_*.py")):
+            variant = build_variant(repo_root, code_path, "expert", "expert")
             if variant:
                 variants.append(variant)
 

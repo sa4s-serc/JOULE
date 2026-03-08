@@ -33,6 +33,7 @@ VARIANT_ORDER = [
     "optimized:evoeval_results_20260211_190545",
     "single_prompt:gemini",
     "single_prompt:gemini_code_exe",
+    "expert",
 ]
 
 VARIANT_SHORT = {
@@ -40,6 +41,7 @@ VARIANT_SHORT = {
     "optimized:evoeval_results_20260211_190545":    "Hedge\n(Optimized)",
     "single_prompt:gemini":                         "Gemini\nSingle-Prompt",
     "single_prompt:gemini_code_exe":                "Gemini\nCode-Exe",
+    "expert":                                       "Expert\n(Hand-Crafted)",
 }
 
 VARIANT_COLOR = {
@@ -47,6 +49,7 @@ VARIANT_COLOR = {
     "optimized:evoeval_results_20260211_190545":    "#0d6efd",
     "single_prompt:gemini":                         "#198754",
     "single_prompt:gemini_code_exe":                "#fd7e14",
+    "expert":                                       "#9467bd",
 }
 
 METRICS = {

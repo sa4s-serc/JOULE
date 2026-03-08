@@ -42,6 +42,7 @@ from src.domain.ir.serialization import IRSerializer
 from src.domain.ir.validators import IRValidator
 from src.infrastructure.codegen.python_codegen import PythonCodeGenerator
 from src.infrastructure.parsing.python_parser import PythonParser
+from src.application.proxy_filter import EnergyProxyFilter, FilterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,10 @@ class EngineConfig:
     adaptive_population_size: bool = True
     adaptive_mutation_rate: bool = True
     early_stopping_patience: int = 5
+
+    # Energy proxy filter
+    enable_proxy_filter: bool = True
+    proxy_filter_config: Optional[FilterConfig] = None
 
 
 class ParetoArchive:
@@ -375,6 +380,15 @@ class EvolutionaryEngine:
         self.generation = 0
         self.best_solution: Optional[Solution] = None
         self.stagnation_counter = 0
+        self._baseline_code: Optional[str] = None  # set in optimize()
+
+        # Proxy filter (EnCoDe-grounded static metric pre-screening)
+        if self.config.enable_proxy_filter:
+            self.proxy_filter: Optional[EnergyProxyFilter] = EnergyProxyFilter(
+                config=self.config.proxy_filter_config
+            )
+        else:
+            self.proxy_filter = None
 
         # Performance tracking
         self.performance_history: List[Dict[str, float]] = []
@@ -523,6 +537,20 @@ class EvolutionaryEngine:
                 },
             )
             return True, self.cache[code_hash], "Cached"
+
+        # Proxy filter: skip execution if static metrics clearly indicate regression
+        if (
+            self.proxy_filter is not None
+            and solution.variant_id not in ("baseline", "initial")
+            and self._baseline_code is not None
+        ):
+            if self.proxy_filter.should_discard(self._baseline_code, code):
+                self.statistics.proxy_filtered += 1
+                logger.debug(
+                    f"[ProxyFilter] Skipped evaluation of {solution.variant_id[:8]} "
+                    f"({solution.mutation_type}) — static metrics indicate energy regression"
+                )
+                return False, {}, "Proxy filtered: static metrics indicate energy regression"
 
         # Run evaluation
         success, metrics, output = self.runner.run(
@@ -908,6 +936,11 @@ class EvolutionaryEngine:
             logger.error(f"Failed to parse initial code: {e}")
             return []
 
+        # Store baseline code for proxy filter comparisons
+        self._baseline_code = initial_code
+        if self.proxy_filter is not None:
+            logger.info("[ProxyFilter] Energy proxy filter enabled (EnCoDe-grounded static metrics)")
+
         self._emit_event(
             EventType.OPTIMIZATION_START,
             {
@@ -1115,6 +1148,14 @@ class EvolutionaryEngine:
         # Save performance history
         if self.experiment_dir:
             self._save_performance_history()
+
+        # Log proxy filter summary
+        if self.proxy_filter is not None:
+            pf = self.proxy_filter.stats
+            logger.info(
+                f"[ProxyFilter] Summary: {pf['proxy_filtered']} mutations skipped "
+                f"({pf['filter_rate']:.1%} of {pf['total_screened']} screened)"
+            )
 
         return self.archive.solutions
 

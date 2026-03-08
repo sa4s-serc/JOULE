@@ -113,6 +113,7 @@ class MutationStatistics:
     failed_executions: int = 0
     pareto_improvements: int = 0
     cache_hits: int = 0
+    proxy_filtered: int = 0  # mutations skipped by EnergyProxyFilter
 
     # Per-mutator statistics: strategy_name -> {total, valid, improved}
     mutator_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
@@ -158,6 +159,7 @@ class MutationStatistics:
             "failed_executions": self.failed_executions,
             "pareto_improvements": self.pareto_improvements,
             "cache_hits": self.cache_hits,
+            "proxy_filtered": self.proxy_filtered,
             "success_rate": f"{self.success_rate:.2f}%",
             "improvement_rate": f"{self.improvement_rate:.2f}%",
         }
