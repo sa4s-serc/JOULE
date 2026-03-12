@@ -81,6 +81,7 @@ from __future__ import annotations
 import argparse
 import ast
 import collections
+import pickle
 import concurrent.futures
 import copy
 import csv
@@ -525,9 +526,43 @@ class EnergyMeter:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1b. Process-Isolated Measurement Worker
+# 1. Process-Isolated Measurement Worker
 #     Must be at module level so multiprocessing can pickle the target fn.
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _isolated_verify_worker(queue: multiprocessing.Queue, source: str, func_name: str, test_cases: list, epsilon: float):
+    """Runs correctness verification in a totally isolated, killable process."""
+    import copy, math
+    def _eq(a, b):
+        if isinstance(a, set): return a == b
+        if isinstance(a, float):
+            if math.isnan(a) and isinstance(b, float) and math.isnan(b): return True
+            return isinstance(b, float) and math.isclose(a, b, rel_tol=epsilon, abs_tol=epsilon)
+        if isinstance(a, (list, tuple)):
+            if not isinstance(b, type(a)): return False
+            return len(a) == len(b) and all(_eq(x, y) for x, y in zip(a, b))
+        if isinstance(a, dict):
+            if not isinstance(b, dict): return False
+            return a.keys() == b.keys() and all(_eq(a[k], b[k]) for k in a)
+        return a == b
+
+    try:
+        ns = {}
+        exec(compile(source, "<spectra_verify>", "exec"), ns)
+        cand = ns.get(func_name)
+        if cand is None:
+            queue.put((False, "Function not found in compiled source"))
+            return
+
+        for args, exp in test_cases:
+            actual = cand(*copy.deepcopy(args))
+            if not _eq(exp, actual):
+                queue.put((False, f"Test case mismatch: args={args}"))
+                return
+        
+        queue.put((True, "OK"))
+    except Exception as e:
+        queue.put((False, f"Exception: {str(e)}"))
 
 def _isolated_measure_worker(queue: multiprocessing.Queue,
                               source: str, func_name: str,
@@ -586,12 +621,11 @@ def _isolated_measure_worker(queue: multiprocessing.Queue,
 
         # Adaptive inner-loop multiplier (RAPL resolution guard)
         inner_mult = 1
-        if backend_name == "rapl":
-            t_probe = time.perf_counter()
-            for args in test_inputs_serialized:
-                fn(*copy.deepcopy(args))
-            elapsed = time.perf_counter() - t_probe
-            if elapsed < 0.05 and elapsed > 0:
+        t_probe = time.perf_counter()
+        for args in test_inputs_serialized:
+            fn(*copy.deepcopy(args))
+        elapsed = time.perf_counter() - t_probe
+        if elapsed < 0.05 and elapsed > 0:
                 inner_mult = max(1, int(0.05 / elapsed))
 
         readings = []
@@ -603,7 +637,6 @@ def _isolated_measure_worker(queue: multiprocessing.Queue,
         queue.put((readings, inner_mult, None))
     except Exception as exc:
         queue.put((None, 1, str(exc)))
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2.  Core Data Structures
@@ -691,47 +724,101 @@ class ProgramVariant:
 # ══════════════════════════════════════════════════════════════════════════════
 # 3.  Gemini LLM Client  (with self-correction retry)
 # ══════════════════════════════════════════════════════════════════════════════
-
 class GeminiClient:
     """
     Calls Gemini via the REST API (no google-generativeai package needed).
     Model: gemini-2.5-flash
-    Includes one self-correction retry on SyntaxError.
+    Includes robust error handling: Key Rotation, Exponential Backoff, and Jitter.
     """
     BASE_URL = ("https://generativelanguage.googleapis.com/v1beta/models"
                 "/gemini-2.5-flash:generateContent")
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
-        self.available = bool(self.api_key)
+        # Support single key or comma-separated multiple keys for rotation
+        raw_keys = api_key or os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY", "")
+        self.api_keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
+        
+        self.available = bool(self.api_keys)
         self.provider = "gemini-2.5-flash"
+        
+        # Tracking states
+        self._key_idx = 0
         self._call_count = 0
-        self._retry_count = 0          # NEW: track self-correction attempts
+        self._retry_count = 0          # tracks self-correction attempts
         self._total_tokens_est = 0
+        self._lock = threading.Lock()
 
-    def complete(self, prompt: str, system: str = "", max_tokens: int = 1024
-                 ) -> Optional[str]:
+    def _get_current_key(self) -> str:
+        with self._lock:
+            return self.api_keys[self._key_idx]
+
+    def _rotate_key(self):
+        """Thread-safe key rotation. Moves to the next API key."""
+        with self._lock:
+            self._key_idx = (self._key_idx + 1) % len(self.api_keys)
+
+    def complete(self, prompt: str, system: str = "", max_tokens: int = 8096) -> Optional[str]:
         if not self.available: return None
+        
         payload = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "systemInstruction": {"parts": [{"text": system}]} if system else None,
             "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.1},
         }).encode()
-        url = f"{self.BASE_URL}?key={self.api_key}"
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read())
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-            self._call_count += 1
-            self._total_tokens_est += len(text.split())
-            return text
-        except Exception as exc:
-            print(f"[Gemini] API error: {exc}", file=sys.stderr)
-            return None
+
+        max_attempts = 5
+        base_delay = 20.0
+
+        for attempt in range(max_attempts):
+            current_key = self._get_current_key()
+            url = f"{self.BASE_URL}?key={current_key}"
+            req = urllib.request.Request(
+                url, data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST")
+                
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    data = json.loads(resp.read())
+                    
+                # Handle potential safety/content filtering responses gracefully
+                if "candidates" not in data or not data["candidates"]:
+                    print("[Gemini] Warning: Response blocked by safety filters.", file=sys.stderr)
+                    return None
+                    
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                
+                with self._lock:
+                    self._call_count += 1
+                    self._total_tokens_est += len(text.split())
+                return text
+
+            except urllib.error.HTTPError as exc:
+                # 429 = Rate Limit/Quota Exceeded. 5xx = Google Server Errors
+                if exc.code == 429:
+                    if len(self.api_keys) > 1:
+                        # If we have multiple keys, rotate immediately and jitter slightly
+                        self._rotate_key()
+                        time.sleep(random.uniform(0.1, 0.5))
+                        continue  # Try again on the new key without increasing backoff heavily
+                elif exc.code not in (429, 500, 502, 503, 504):
+                    # 400 Bad Request, 403 Unauthorized, 404 Not Found -> Fatal, don't retry
+                    print(f"[Gemini] Fatal API error {exc.code}: {exc.reason}", file=sys.stderr)
+                    return None
+                
+                # Exponential backoff + Jitter
+                delay = (base_delay * (2 ** attempt)) + random.uniform(0.1, 1.0)
+                print(f"[Gemini] Error {exc.code}. Retrying in {delay:.1f}s (Attempt {attempt+1}/{max_attempts})", file=sys.stderr)
+                time.sleep(delay)
+
+            except (urllib.error.URLError, Exception) as exc:
+                # Network timeouts, DNS errors, connection resets
+                delay = (base_delay * (2 ** attempt)) + random.uniform(0.1, 1.0)
+                print(f"[Gemini] Network error: {exc}. Retrying in {delay:.1f}s...", file=sys.stderr)
+                time.sleep(delay)
+                
+        print("[Gemini] Max retries exceeded.", file=sys.stderr)
+        return None
 
     def _clean_raw(self, raw: str) -> str:
         """Strip markdown fences."""
@@ -752,17 +839,19 @@ class GeminiClient:
                   f"3. Preserve exact function signature and return semantics.\n"
                   f"4. If not applicable, return exactly: INAPPLICABLE\n\n"
                   f"Source:\n{source}")
+                  
         raw = self.complete(prompt, system=system)
         if raw is None: return None
         raw = self._clean_raw(raw)
         if raw.upper().startswith("INAPPLICABLE"): return None
 
-        # --- Self-correction retry (NEW) ---
+        # --- Self-correction retry ---
         try:
             ast.parse(raw)
             return raw
         except SyntaxError as err:
-            self._retry_count += 1
+            with self._lock:
+                self._retry_count += 1
             retry_prompt = (
                 f"{prompt}\n\n"
                 f"The generated code failed to parse with: {err}\n"
@@ -775,7 +864,6 @@ class GeminiClient:
                 return raw2
             except SyntaxError:
                 return None
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 4.  Transformation Operators
@@ -853,54 +941,69 @@ class ForLoopToComprehension(TransformationOperator):
         except Exception: pass
         return None
 
-
 class ListToSetMembership(TransformationOperator):
     tier, name = Tier.H, "DataStructureSubstitution[list→set]"
 
     def precondition(self, tree, source):
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef): continue
-            assigned, tested = set(), set()
+            
+            # Get all function arguments
+            arg_names = {arg.arg for arg in fn.args.args}
+            
+            # Find all variables tested with 'in'
             for s in ast.walk(fn):
-                if (isinstance(s, ast.Assign) and len(s.targets) == 1
-                        and isinstance(s.targets[0], ast.Name)
-                        and isinstance(s.value, ast.List)):
-                    assigned.add(s.targets[0].id)
                 if isinstance(s, ast.Compare):
                     for op, comp in zip(s.ops, s.comparators):
                         if isinstance(op, ast.In) and isinstance(comp, ast.Name):
-                            tested.add(comp.id)
-            if assigned & tested: return True
+                            # If we test membership against an argument, we should optimize it
+                            if comp.id in arg_names: 
+                                return True
         return False
 
     def apply(self, source, llm=None):
         class _T(ast.NodeTransformer):
-            def __init__(self): self.changed = False; self._vars: set = set()
+            def __init__(self): 
+                self.changed = False
+            
             def visit_FunctionDef(self, node):
-                assigned, tested = set(), set()
+                self.generic_visit(node)
+                arg_names = {arg.arg for arg in node.args.args}
+                tested_args = set()
+                
+                # Find arguments used in membership tests
                 for s in ast.walk(node):
-                    if (isinstance(s, ast.Assign) and len(s.targets) == 1
-                            and isinstance(s.targets[0], ast.Name)
-                            and isinstance(s.value, ast.List)):
-                        assigned.add(s.targets[0].id)
                     if isinstance(s, ast.Compare):
                         for op, comp in zip(s.ops, s.comparators):
                             if isinstance(op, ast.In) and isinstance(comp, ast.Name):
-                                tested.add(comp.id)
-                self._vars = assigned & tested
-                self.generic_visit(node); return node
-            def visit_Assign(self, node):
-                if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
-                        and node.targets[0].id in self._vars
-                        and isinstance(node.value, ast.List)):
-                    node.value = ast.Set(elts=node.value.elts); self.changed = True
+                                if comp.id in arg_names:
+                                    tested_args.add(comp.id)
+                
+                # Inject set conversions at the top of the function
+                if tested_args:
+                    set_assigns = []
+                    for arg in sorted(tested_args):
+                        set_assigns.append(ast.Assign(
+                            targets=[ast.Name(id=arg, ctx=ast.Store())],
+                            value=ast.Call(
+                                func=ast.Name(id="set", ctx=ast.Load()),
+                                args=[ast.Name(id=arg, ctx=ast.Load())],
+                                keywords=[]),
+                            lineno=node.lineno, col_offset=node.col_offset
+                        ))
+                    node.body = set_assigns + node.body
+                    self.changed = True
                 return node
+
         try:
-            t = ast.parse(source); tr = _T(); nt = tr.visit(t)
-            if tr.changed: ast.fix_missing_locations(nt); return ast.unparse(nt)
+            t = ast.parse(source)
+            tr = _T()
+            nt = tr.visit(t)
+            if tr.changed: 
+                ast.fix_missing_locations(nt)
+                return ast.unparse(nt)
         except Exception: pass
         return None
-
 
 class MemoizationAddition(TransformationOperator):
     tier, name = Tier.H, "MemoizationAddition"
@@ -1128,19 +1231,7 @@ class LocalImportHoisting(TransformationOperator):
                             if isinstance(s, (ast.Import, ast.ImportFrom))}
                 to_add = [s for s in hoisted if ast.unparse(s) not in existing]
                 if to_add:
-                    # Wrap each import in try/except ImportError
-                    wrapped = []
-                    for imp in to_add:
-                        try_node = ast.Try(
-                            body=[imp],
-                            handlers=[ast.ExceptHandler(
-                                type=ast.Name(id="ImportError", ctx=ast.Load()),
-                                name=None,
-                                body=[ast.Pass()])],
-                            orelse=[],
-                            finalbody=[])
-                        wrapped.append(try_node)
-                    new_tree.body = wrapped + new_tree.body
+                    new_tree.body = to_add + new_tree.body
                     ast.fix_missing_locations(new_tree)
                     return ast.unparse(new_tree)
         except Exception: pass
@@ -2085,10 +2176,15 @@ class ReturnBoolSimplification(TransformationOperator):
                     result = ReturnBoolSimplification._match(stmt, nxt)
                     if result is not None:
                         cond, negate = result
-                        ret_val = (
-                            ast.UnaryOp(op=ast.Not(), operand=cond)
-                            if negate else cond
-                        )
+                        if negate:
+                            ret_val = (
+                                ast.UnaryOp(op=ast.Not(), operand=cond)
+                            )
+                        else:
+                            ret_val = ast.Call(
+                                func=ast.Name(id="bool", ctx=ast.Load()),
+                                args=[cond], keywords=[])
+                            
                         new_ret = ast.Return(value=ret_val)
                         ast.copy_location(new_ret, stmt)
                         new_body.append(new_ret)
@@ -2376,16 +2472,14 @@ class IdentityCompareNormalization(TransformationOperator):
         x == False  →  x is False
     """
     tier, name = Tier.L, "IdentityCompareNormalization"
- 
-    _SINGLETONS = (None, True, False)
- 
+  
     def precondition(self, tree, source):
         for node in ast.walk(tree):
             if (isinstance(node, ast.Compare)
                     and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.ops)):
                 for comp in node.comparators:
                     if (isinstance(comp, ast.Constant)
-                            and comp.value in self._SINGLETONS):
+                            and type(comp.value) in (type(None), bool)):
                         return True
         return False
  
@@ -3058,9 +3152,9 @@ class DefaultDictSubstitution(TransformationOperator):
             nt = tr.visit(t)
             # NodeTransformer can return None for nodes; filter those out
             for node in ast.walk(nt):
-                if hasattr(node, "body"):
+                if hasattr(node, "body") and isinstance(node.body, list):
                     node.body = [s for s in node.body if s is not None]
-                if hasattr(node, "orelse"):
+                if hasattr(node, "orelse") and isinstance(node.orelse, list):
                     node.orelse = [s for s in node.orelse if s is not None]
             if tr.changed:
                 ast.fix_missing_locations(nt)
@@ -3373,17 +3467,16 @@ class ConcurrentMapDelegateLLM(LLMOperator):
  
     def precondition(self, tree, source):
         for node in ast.walk(tree):
-            if (isinstance(node, ast.ListComp)
-                    and len(node.generators) == 1
-                    and not node.generators[0].ifs
-                    and isinstance(node.elt, ast.Call)
-                    and isinstance(node.elt.func, ast.Name)
-                    and len(node.elt.args) == 1
-                    and isinstance(node.elt.args[0], ast.Name)
-                    and node.elt.args[0].id == node.generators[0].target.id
-                    if isinstance(node.generators[0].target, ast.Name)
-                    else False):
-                return True
+            if isinstance(node, ast.ListComp):
+                if (len(node.generators) == 1
+                        and not node.generators[0].ifs
+                        and isinstance(node.generators[0].target, ast.Name)
+                        and isinstance(node.elt, ast.Call)
+                        and isinstance(node.elt.func, ast.Name)
+                        and len(node.elt.args) == 1
+                        and isinstance(node.elt.args[0], ast.Name)
+                        and node.elt.args[0].id == node.generators[0].target.id):
+                    return True
         return False
  
  
@@ -4135,13 +4228,15 @@ def _algorithmic_depth(tree: ast.AST) -> int:
         return best
     return _depth(tree)
 
-
 class EnergySurrogate:
 
     def __init__(self):
-        self._X: list = []; self._y: list = []
-        self._model = None; self._trained = False
-        self._update_count = 0  # for throttling
+        self._X: list = []
+        self._y: list = []
+        self._noise_var: list = []  
+        self._model = None
+        self._trained = False
+        self._update_count = 0  
 
     def _featurize(self, source: str, chain: list[dict], mean_n: float) -> list:
         try:
@@ -4154,21 +4249,19 @@ class EnergySurrogate:
         llm_tier = max({"H": 3, "M": 2, "L": 1}.get(t.get("tier", "L"), 1)
                        for t in chain) if chain else 0
 
-        # Original 12 features
         f0  = float(c(ast.For))
         f1  = float(c(ast.While))
         f2  = float(c(ast.ListComp))
         f3  = float(c(ast.Set)) + float(c(ast.DictComp))
         f4  = float(c(ast.Call))
-        f5  = float(len(source)) / 500.0
+        f5  = float(sum(1 for _ in ast.walk(tree))) / 50.0 
         f6  = float(c(ast.Compare))
         f7  = float(sum(1 for n in ast.walk(tree) if isinstance(n, ast.Compare)
                         and any(isinstance(op, ast.In) for op in n.ops)))
         f8  = float(llm_tier)
         f9  = float(len(chain))
         f10 = float(sum(1 for t in chain if t.get("needs_llm")))
-        f11 = math.log1p(mean_n) / 10.0
-        # NEW enriched features
+        f11 = math.log1p(max(0.0, mean_n)) / 10.0
         f12 = math.log1p(_halstead_volume(tree)) / 20.0
         f13 = float(_cyclomatic_complexity(tree)) / 20.0
         f14 = _memory_access_density(tree)
@@ -4176,44 +4269,85 @@ class EnergySurrogate:
 
         return [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15]
 
-    def update(self, source: str, chain: list[dict], energy_j: float, mean_n: float):
+    def update(self, source: str, chain: list[dict], energy_j: float, std_j: float, mean_n: float):
         self._X.append(self._featurize(source, chain, mean_n))
         self._y.append(energy_j)
+        variance = (std_j ** 2) if std_j > 0 else 1e-10
+        self._noise_var.append(variance)
         self._update_count += 1
-        # Accumulate training log for warm-start serialisation
-        if not hasattr(self, "training_log"):
-            self.training_log = []
-        self.training_log.append({
-            "source":         source,
-            "chain":          chain,
-            "trimmed_mean_j": energy_j,
-            "n":              mean_n,
-        })
+        
         n = len(self._X)
         if n < 3 or not (HAS_SKLEARN and HAS_NUMPY):
             return
+            
         # Throttle: retrain every call up to 50; every 5th call after that
         if n > 50 and self._update_count % 5 != 0:
             return
         self._retrain()
 
-    def predict(self, source: str, chain: list[dict],
-                mean_n: float) -> tuple[Optional[float], float]:
+    def predict(self, source: str, chain: list[dict], mean_n: float) -> tuple[Optional[float], float]:
         if not self._trained or not HAS_SKLEARN: return None, float("inf")
         x = np.array([self._featurize(source, chain, mean_n)])
         m, s = self._model.predict(x, return_std=True)
         return float(m[0]), float(s[0])
 
     def _retrain(self):
-        X = np.array(self._X); y = np.array(self._y)
-        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(
-            length_scale=np.ones(X.shape[1]), nu=2.5)
+        X = np.array(self._X)
+        y = np.array(self._y)
+        y_var = np.var(y) if len(y) > 1 else 1.0
+        alpha = (np.array(self._noise_var) / (y_var + 1e-9)) + 1e-5
+        
+        # WARM START OPTIMIZATION:
+        # If we loaded a previous model, reuse its optimized kernel to skip searching from scratch
+        if self._model is not None and hasattr(self._model, "kernel_"):
+            kernel = copy.deepcopy(self._model.kernel_)
+        else:
+            kernel = ConstantKernel(1.0) * Matern(length_scale=np.ones(X.shape[1]), nu=2.5)
+            
         self._model = GaussianProcessRegressor(
-            kernel=kernel, alpha=1e-6, normalize_y=True, n_restarts_optimizer=2)
-        self._model.fit(X, y); self._trained = True
+            kernel=kernel, 
+            alpha=alpha, 
+            normalize_y=True, 
+            n_restarts_optimizer=2 # We can keep this low because the warm-started kernel is already near optimal
+        )
+        self._model.fit(X, y)
+        self._trained = True
 
     @property
     def is_trained(self) -> bool: return self._trained
+
+    # --- PERSISTENCE METHODS ---
+    def save(self, filepath: Path):
+        """Pickle the model and historical data to disk."""
+        if not self._trained or not HAS_SKLEARN:
+            return
+        state = {
+            'X': self._X,
+            'y': self._y,
+            'noise_var': self._noise_var,
+            'model': self._model,
+            'update_count': self._update_count
+        }
+        with open(filepath, 'wb') as f:
+            pickle.dump(state, f)
+
+    def load(self, filepath: Path) -> bool:
+        """Load the model and historical data from disk."""
+        if not filepath.exists() or not HAS_SKLEARN:
+            return False
+        try:
+            with open(filepath, 'rb') as f:
+                state = pickle.load(f)
+            self._X = state['X']
+            self._y = state['y']
+            self._noise_var = state['noise_var']
+            self._model = state['model']
+            self._update_count = state['update_count']
+            self._trained = True
+            return True
+        except Exception as e:
+            print(f"[Surrogate] Failed to load cached model from {filepath}: {e}")
+            return False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4248,13 +4382,14 @@ class MFBOEngine:
             pred, std = self.surrogate.predict(c.source, c.chain, 100.0)
             if pred is not None:
                 ei = self.expected_improvement(pred, std)
-                if pred < self.best_energy * 1.1:  # loose screen
+                # FIX: Loosen threshold drastically to allow EI to explore uncertain areas
+                if pred < self.best_energy * 3.0:  
                     results.append((i, pred, std, ei))
             else:
                 results.append((i, float("nan"), float("nan"), 1.0))
         if not results: results = [(i, float("nan"), float("nan"), 1.0)
                                     for i in range(len(candidates))]
-        results.sort(key=lambda x: -x[3])
+        results.sort(key=lambda x: -x[3] if not math.isnan(x[3]) else float('inf'))
         return results
 
 
@@ -4263,62 +4398,40 @@ class MFBOEngine:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class CorrectnessEngine:
-
     def __init__(self, orig_source: str, func_name: str,
                  test_inputs: list[tuple], test_cases: list[tuple],
                  epsilon: float = 1e-9):
         self.func_name = func_name
         self.test_inputs = test_inputs
-        self.test_cases = test_cases
         self.epsilon = epsilon
-        self._orig = self._load(orig_source)
+        self.timeout_s = 60.0  # 1 min timeout to kill infinite loops
+        
+        # Precompute all expected outputs so the worker doesn't need the original function
+        self.full_test_cases = list(test_cases)
 
-    def _load(self, source: str) -> Optional[Callable]:
+        ns = {}
         try:
-            ns: dict = {}; exec(compile(source, "<spectra>", "exec"), ns)
-            return ns.get(self.func_name)
-        except Exception: return None
-
-    def verify(self, source: str) -> tuple[bool, str]:
-        if self._orig is None: return False, "Original failed to load"
-        cand = self._load(source)
-        if cand is None: return False, "Candidate failed to compile"
-        for args, exp in self.test_cases:
-            try:
-                # FIX v2: deepcopy to prevent mutation across runs
-                actual = cand(*copy.deepcopy(args))
-                if not self._eq(exp, actual): return False, f"Test case mismatch: args={args}"
-            except Exception as e: return False, f"Exception on test case {args}: {e}"
-        for args in self.test_inputs:
-            try:
-                exp    = self._orig(*copy.deepcopy(args))
-                actual = cand(*copy.deepcopy(args))
-                if not self._eq(exp, actual): return False, f"Regression mismatch on {args}"
-            except Exception as e: return False, f"Exception on regression input {args}: {e}"
-        for args in self._fuzz_inputs():
-            try:
-                exp    = self._orig(*copy.deepcopy(args))
-                actual = cand(*copy.deepcopy(args))
-                if not self._eq(exp, actual): return False, f"Fuzz mismatch on {args}"
-            except Exception: pass
-        return True, "OK"
-
-    def _eq(self, a, b) -> bool:
-        # FIX v2: handle set comparison
-        if isinstance(a, set):
-            return a == b
-        if isinstance(a, float):
-            # FIX v2: use math.isclose for robust float comparison
-            if math.isnan(a) and isinstance(b, float) and math.isnan(b):
-                return True
-            return isinstance(b, float) and math.isclose(
-                a, b, rel_tol=self.epsilon, abs_tol=self.epsilon)
-        if isinstance(a, (list, tuple)):
-            if not isinstance(b, type(a)): return False
-            return len(a) == len(b) and all(self._eq(x, y) for x, y in zip(a, b))
-        if isinstance(a, dict):
-            return a.keys() == b.keys() and all(self._eq(a[k], b[k]) for k in a)
-        return a == b
+            exec(compile(orig_source, "<spectra>", "exec"), ns)
+            orig = ns[func_name]
+            import copy
+            
+            # Build regression tests
+            for args in test_inputs:
+                try:
+                    exp = orig(*copy.deepcopy(args))
+                    self.full_test_cases.append((args, exp))
+                except Exception: 
+                    pass
+                    
+            # Build fuzz tests
+            for args in self._fuzz_inputs():
+                try:
+                    exp = orig(*copy.deepcopy(args))
+                    self.full_test_cases.append((args, exp))
+                except Exception: 
+                    pass
+        except Exception:
+            pass
 
     def _fuzz_inputs(self) -> list[tuple]:
         if not self.test_inputs: return []
@@ -4337,6 +4450,42 @@ class CorrectnessEngine:
                 for v in ["", "a", "abc", "A" * 50]: fuzz.append(swap(v))
         return fuzz[:35]
 
+    def verify(self, source: str) -> tuple[bool, str]:
+        """
+        Executes the candidate code in an isolated subprocess with a strict timeout.
+        If the candidate enters an infinite loop or causes a segfault/OOM, it is killed safely.
+        """
+        if not self.full_test_cases:
+            return False, "No valid test cases generated from baseline"
+
+        # Use 'spawn' context to ensure clean process state across all OSes
+        ctx = multiprocessing.get_context("spawn")
+        queue = ctx.Queue()
+        
+        p = ctx.Process(
+            target=_isolated_verify_worker,
+            args=(queue, source, self.func_name, self.full_test_cases, self.epsilon),
+            daemon=True
+        )
+        
+        p.start()
+        p.join(timeout=self.timeout_s)
+        
+        # Guard 1: Infinite Loop (Process exceeded timeout)
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            return False, f"Timeout after {self.timeout_s}s (Infinite loop detected)"
+            
+        # Guard 2: Memory/Segfault issues (Process crashed)
+        if p.exitcode != 0:
+            return False, f"Process crashed with exit code {p.exitcode} (Possible Out-Of-Memory)"
+            
+        # Guard 3: Uncaught internal queue failure
+        if queue.empty():
+            return False, "Process died unexpectedly without returning a result"
+            
+        return queue.get()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 9.  Research Plotter
@@ -4383,6 +4532,7 @@ class ResearchPlotter:
     def _save(self, fig, name: str):
         p = self.out / name
         fig.savefig(p)
+        fig.clf()
         plt.close(fig)
         return p
 
@@ -5138,7 +5288,6 @@ class ConflictFilter:
         # Generator conversion — prefer the cheaper L-tier op
         ("ReductionListCompToGenerator", "JoinListCompToGenerator"),
         ("DataStructureSubstitution[list→set]", "LoopMembershipSetCache"),
-        ("MemoizationAddition", "RecursionToDynamicProgramming"),
         ("ForLoopToComprehension", "GeneratorChainFusion")
     ]
  
@@ -5197,8 +5346,8 @@ class SPECTRAOptimizer:
         fidelity_leniency:    float = 0.10,
         adaptive_reps:        bool  = True,
         max_wall_s:           Optional[float] = None,   # [FEATURE-1]
-        warm_start_path:      Optional[Path]  = None,   # [FEATURE-2]
-        llm_workers:          int   = 5,
+        surrogate_path:      Optional[Path]  = None,   # [FEATURE-2]
+        llm_workers:          int   = 1,
     ):
         self.source       = textwrap.dedent(source).strip()
         self.func_name    = func_name
@@ -5214,7 +5363,7 @@ class SPECTRAOptimizer:
         self.co2_intensity = co2_intensity
         self.max_fallbacks = max_fallbacks
         self.max_wall_s   = max_wall_s
-        self.warm_start_path = warm_start_path
+        self.surrogate_path = surrogate_path
         self.llm_workers  = llm_workers
  
         global _CO2_INTENSITY_G_PER_KWH
@@ -5386,6 +5535,9 @@ class SPECTRAOptimizer:
                   f"   backend={_ACTIVE_BACKEND.value}"
                   f"   inner_mult={base_m.inner_loop_multiplier}")
  
+        # Seed the GP with the baseline reading so it has a starting anchor
+        self.surrogate.update(self.source, [], base_m.mean_j, base_m.std_j, self._complexity_n())
+
         self._metrics = MetricsCollector(
             func_name=self.func_name,
             source_file=self.source_file,
@@ -5537,6 +5689,7 @@ class SPECTRAOptimizer:
                 train_energy_j = getattr(m3, "trimmed_mean_j", m3.mean_j)
                 self.surrogate.update(cand_v.source, cand_v.chain,
                                       train_energy_j,
+                                      m3.std_j, # Passed std_j here!
                                       self._complexity_n())
  
                 if cand_cr.surrogate_pred_mj is not None:
@@ -5678,7 +5831,8 @@ class SPECTRAOptimizer:
         # Filter to applicable operators
         candidate_ops = [
             op for op in self.operators
-            if op.name not in already_applied          # [ARCH-2]
+            if op.name not in already_applied
+            and (not op.needs_llm or self.llm.available)
         ]
         # Resolve conflicts  [ARCH-5]
         candidate_ops = self._conflict_filter.filter(
@@ -5800,6 +5954,8 @@ class SPECTRAOptimizer:
         elif dec1.action == "abandon":
             cr.f1_abandoned = True
             self._log(f"         F1 abandoned: {dec1.reason}")
+            # Train GP on this failure! Artificially inflate std_j to show it's a noisy F1 reading.
+            self.surrogate.update(variant.source, variant.chain, m1.mean_j, m1.std_j * 2.0, self._complexity_n())
             return False
  
         # ── F2 ────────────────────────────────────────────────────────────
@@ -5836,6 +5992,8 @@ class SPECTRAOptimizer:
         elif dec2.action == "abandon":
             cr.f2_abandoned = True
             self._log(f"         F2 abandoned: {dec2.reason}")
+            # Train GP on this failure! Slightly inflate std_j.
+            self.surrogate.update(variant.source, variant.chain, m2.mean_j, m2.std_j * 1.5, self._complexity_n())
             return False
  
         # ── F3 ────────────────────────────────────────────────────────────
@@ -5968,33 +6126,20 @@ class SPECTRAOptimizer:
     # ═════════════════════════════════════════════════════════════════════════
     #  Private: warm-start  [FEATURE-2]
     # ═════════════════════════════════════════════════════════════════════════
- 
+
     def _maybe_warm_start(self):
         """
-        Load surrogate training data from a prior run's JSON output and
-        replay it into the surrogate model.
+        Load the pre-trained surrogate model and historical data from disk.
         """
-        if self.warm_start_path is None:
+        if self.surrogate_path is None:
             return
-        p = Path(self.warm_start_path)
-        if not p.exists():
-            self._log(f"[WarmStart] Path not found: {p} — skipping.")
-            return
-        try:
-            data = json.loads(p.read_text())
-            pairs = data.get("surrogate_training_pairs", [])
-            for entry in pairs:
-                src   = entry.get("source", "")
-                chain = entry.get("chain", [])
-                e_j   = entry.get("trimmed_mean_j", entry.get("mean_j"))
-                n     = entry.get("n", self._complexity_n())
-                if src and e_j is not None:
-                    self.surrogate.update(src, chain, e_j, n)
-            self._log(f"[WarmStart] Loaded {len(pairs)} training pair(s) "
-                      f"from {p.name}")
-        except Exception as exc:
-            self._log(f"[WarmStart] Failed to load: {exc}")
- 
+            
+        p = Path(self.surrogate_path)
+        if self.surrogate.load(p):
+            self._log(f"[Surrogate] Successfully loaded pre-trained model with {len(self.surrogate._X)} past samples from {p.name}")
+        else:
+            self._log(f"[Surrogate] No existing model found at {p.name} — starting fresh.")
+
     # ═════════════════════════════════════════════════════════════════════════
     #  Private: complexity feature  [RESEARCH-1]
     # ═════════════════════════════════════════════════════════════════════════
@@ -6181,18 +6326,36 @@ class SPECTRAOptimizer:
         (self.out_dir / f"{fn}_result.json").write_text(
             json.dumps(result, indent=2))
         (self.out_dir / f"{fn}_optimised.py").write_text(result["best_source"])
+
+        variants_dir = self.out_dir / "all_generated_variants"
+        variants_dir.mkdir(parents=True, exist_ok=True)
+        
+        for it in self._metrics.record.iterations:
+            for idx, c in enumerate(it.candidates):
+                # Classify as pass or fail for the filename
+                status = "PASS" if c.correctness_pass else "FAIL"
+                
+                # Make the operator name safe for the filesystem
+                safe_op = "".join(x if x.isalnum() else "_" for x in c.operator)
+                file_name = f"iter_{it.iteration:03d}_cand_{idx:03d}_{status}_{safe_op}.py"
+                
+                # Create a helpful header so you know WHY it failed
+                header =  f"# {'='*60}\n"
+                header += f"# Iteration: {it.iteration}\n"
+                header += f"# Operator:  {c.operator}\n"
+                header += f"# Status:    {status}\n"
+                if not c.correctness_pass:
+                    header += f"# Reason:    {c.correctness_reason}\n"
+                header += f"# {'='*60}\n\n"
+                
+                # Write to disk
+                (variants_dir / file_name).write_text(header + c.transformed_source, encoding="utf-8")
+        # =====================================================================
  
-        # Serialise surrogate training data for warm-start  [FEATURE-2]
-        surrogate_data = {
-            "surrogate_training_pairs": [
-                {"source": src, "chain": ch,
-                 "trimmed_mean_j": e, "n": n}
-                for src, ch, e, n in getattr(
-                    self.surrogate, "training_log", [])
-            ]
-        }
-        (self.out_dir / f"{fn}_surrogate_cache.json").write_text(
-            json.dumps(surrogate_data, indent=2))
+        # Save the optimized surrogate model state to disk for future runs
+        model_path = self.out_dir / f"{fn}_surrogate.pkl"
+        self.surrogate.save(model_path)
+        self._log(f"[Surrogate] Saved trained model state to {model_path.name}")
  
         self._log("\n[Plotter] Generating research figures…")
         plotter = ResearchPlotter(
@@ -6240,12 +6403,12 @@ def fib(n):
 
     ("D4 StringConcat→Join",
      """
-def build_csv_row(values):
-    row = ""
-    for v in values:
-        row += str(v) + ","
-    return row
-""", "build_csv_row", [(list(range(200)),)], []),
+def build_text(chunks):
+    text = ""
+    for chunk in chunks:
+        text += chunk
+    return text
+""", "build_text", [(["long_data_chunk_block_" * 10] * 10_000,)], []),
 
     ("D5 IteratorSubstitution",
      """
@@ -6261,8 +6424,8 @@ def classify(x):
     elif x == 4 or x == 6 or x == 8 or x == 9 or x == 10:
         return 'small_composite'
     return 'other'
-""", "classify", [(i,) for i in range(12)],
-     [((1,), "small_prime"), ((4,), "small_composite"), ((11,), "other")]),
+""", "classify", [(i,) for i in range(1000)],
+     [((1,), "small_prime"), ((4,), "small_composite"), ((111,), "other")]),
 ]
 
 
@@ -6417,6 +6580,9 @@ def main():
     parser.add_argument("--no-adaptive-reps", action="store_true",
                         dest="no_adaptive_reps",
                         help="Disable CV-triggered extra rep escalation at F1/F2")
+    parser.add_argument("--surrogate-path", type=str, default=None,
+                        help="Path to a .pkl file to load/save the Gaussian Process model across runs")
+    
     args = parser.parse_args()
     if args.ei_top_k < 1:
         sys.exit("--ei-top-k must be >= 1")
@@ -6487,7 +6653,9 @@ def main():
         co2_intensity=args.co2_intensity,
         max_fallbacks=args.max_fallbacks,
         fidelity_leniency=max(0.01, min(0.30, args.fidelity_leniency)),
-        adaptive_reps=not args.no_adaptive_reps)
+        adaptive_reps=not args.no_adaptive_reps,
+        surrogate_path=Path(args.surrogate_path) if args.surrogate_path else None,
+        )
     result = opt.optimize()
     fig_dir = opt.save_outputs(result, func_name)
 

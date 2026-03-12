@@ -1,0 +1,17 @@
+# Example: Running optimization on 50 different functions
+for f in ./my_library/*.py; do
+    python spectra.py --source $f --tests $f_tests.py --out-dir ./spectra_output/
+done
+
+
+python spectra_surrogate_dataset_gen.py --dir ./spectra_output --out master_dataset.csv
+
+python spectra_surrogate_trainer.py --data master_dataset.csv --out global_surrogate.pkl
+
+
+```
+> Cross-Function Transfer: Because your EnergySurrogate uses AST features (like Algorithmic Depth or Halstead Volume) rather than specific variable names, the model learns general optimization rules.
+> Example: The model will learn that LoopMembershipSetCache (the Set-lookup transformation) reduces energy in Function A and Function B. When you optimize Function C, it will already know that "Loop Membership" is a high-reward pattern.
+> Noise Filtering: By only extracting f3_mj (the most reliable fidelity level), you ensure the surrogate is trained on your "Gold Standard" ground truth, preventing the model from learning from noisy F1/F2 mistakes.
+> The "Chain" Learning: By saving the chain_json, your surrogate actually learns the order of optimizations. If it learns that applying LoopInvariantHoisting before Vectorization is better than the reverse, your future optimization runs will be much faster.
+```
