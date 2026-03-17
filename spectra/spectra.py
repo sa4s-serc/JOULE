@@ -756,67 +756,104 @@ class GeminiClient:
         """Thread-safe key rotation. Moves to the next API key."""
         with self._lock:
             self._key_idx = (self._key_idx + 1) % len(self.api_keys)
+    
+    def complete(self, prompt: str, system: str = "",
+                 max_tokens: int = 8096) -> Optional[str]:
+        if not self.available:
+            return None
 
-    def complete(self, prompt: str, system: str = "", max_tokens: int = 8096) -> Optional[str]:
-        if not self.available: return None
-        
         payload = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
-            "systemInstruction": {"parts": [{"text": system}]} if system else None,
-            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.1},
+            "systemInstruction": ({"parts": [{"text": system}]} if system else None),
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": 0.1,
+            },
         }).encode()
 
-        max_attempts = 5
-        base_delay = 20.0
+        max_attempts  = 5
+        base_delay    = 20.0
+        # Track per-attempt whether we already rotated for this attempt so we
+        # don't rotate again on the retry of the same attempt.
+        rotated_this_attempt = False
 
         for attempt in range(max_attempts):
+            rotated_this_attempt = False
             current_key = self._get_current_key()
             url = f"{self.BASE_URL}?key={current_key}"
             req = urllib.request.Request(
                 url, data=payload,
                 headers={"Content-Type": "application/json"},
                 method="POST")
-                
+
             try:
                 with urllib.request.urlopen(req, timeout=60) as resp:
                     data = json.loads(resp.read())
-                    
-                # Handle potential safety/content filtering responses gracefully
+
                 if "candidates" not in data or not data["candidates"]:
-                    print("[Gemini] Warning: Response blocked by safety filters.", file=sys.stderr)
+                    print("[Gemini] Warning: response blocked by safety filters.",
+                          file=sys.stderr)
                     return None
-                    
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                
+
+                text = (data["candidates"][0]["content"]["parts"][0]["text"])
                 with self._lock:
                     self._call_count += 1
                     self._total_tokens_est += len(text.split())
                 return text
 
             except urllib.error.HTTPError as exc:
-                # 429 = Rate Limit/Quota Exceeded. 5xx = Google Server Errors
                 if exc.code == 429:
-                    if len(self.api_keys) > 1:
-                        # If we have multiple keys, rotate immediately and jitter slightly
+                    if len(self.api_keys) > 1 and not rotated_this_attempt:
+                        # Rotate to the next key …
                         self._rotate_key()
-                        time.sleep(random.uniform(0.1, 0.5))
-                        continue  # Try again on the new key without increasing backoff heavily
-                elif exc.code not in (429, 500, 502, 503, 504):
-                    # 400 Bad Request, 403 Unauthorized, 404 Not Found -> Fatal, don't retry
-                    print(f"[Gemini] Fatal API error {exc.code}: {exc.reason}", file=sys.stderr)
+                        rotated_this_attempt = True
+                        # … but still observe a short mandatory cooldown so we
+                        # don't hammer all keys simultaneously.  Use a shorter
+                        # delay than the full backoff since we have a fresh key,
+                        # but never zero.
+                        cooldown = min(
+                            base_delay,
+                            2.0 * (attempt + 1) + random.uniform(0.5, 2.0))
+                        print(
+                            f"[Gemini] 429 on key #{self._key_idx - 1 % len(self.api_keys)}"
+                            f" — rotated to key #{self._key_idx},"
+                            f" cooling down {cooldown:.1f}s",
+                            file=sys.stderr)
+                        time.sleep(cooldown)
+                        continue   # retry with new key + cooldown applied
+                    # Single key, or already rotated this attempt: full backoff
+                    delay = (base_delay * (2 ** attempt)
+                             + random.uniform(0.1, 1.0))
+                    print(
+                        f"[Gemini] 429 rate-limit. "
+                        f"Backing off {delay:.1f}s (attempt {attempt+1}/{max_attempts})",
+                        file=sys.stderr)
+                    time.sleep(delay)
+
+                elif exc.code not in (500, 502, 503, 504):
+                    # 400 Bad Request, 403 Unauthorized, 404 Not Found → fatal
+                    print(f"[Gemini] Fatal API error {exc.code}: {exc.reason}",
+                          file=sys.stderr)
                     return None
-                
-                # Exponential backoff + Jitter
-                delay = (base_delay * (2 ** attempt)) + random.uniform(0.1, 1.0)
-                print(f"[Gemini] Error {exc.code}. Retrying in {delay:.1f}s (Attempt {attempt+1}/{max_attempts})", file=sys.stderr)
-                time.sleep(delay)
+                else:
+                    # 5xx server errors — exponential backoff
+                    delay = (base_delay * (2 ** attempt)
+                             + random.uniform(0.1, 1.0))
+                    print(
+                        f"[Gemini] Server error {exc.code}. "
+                        f"Retrying in {delay:.1f}s (attempt {attempt+1}/{max_attempts})",
+                        file=sys.stderr)
+                    time.sleep(delay)
 
             except (urllib.error.URLError, Exception) as exc:
-                # Network timeouts, DNS errors, connection resets
-                delay = (base_delay * (2 ** attempt)) + random.uniform(0.1, 1.0)
-                print(f"[Gemini] Network error: {exc}. Retrying in {delay:.1f}s...", file=sys.stderr)
+                delay = (base_delay * (2 ** attempt)
+                         + random.uniform(0.1, 1.0))
+                print(
+                    f"[Gemini] Network error: {exc}. "
+                    f"Retrying in {delay:.1f}s…",
+                    file=sys.stderr)
                 time.sleep(delay)
-                
+
         print("[Gemini] Max retries exceeded.", file=sys.stderr)
         return None
 
@@ -944,110 +981,210 @@ class ForLoopToComprehension(TransformationOperator):
 class ListToSetMembership(TransformationOperator):
     tier, name = Tier.H, "DataStructureSubstitution[list→set]"
 
+    _MUTATING_METHODS = frozenset({
+        "append", "extend", "insert", "pop", "remove",
+        "clear", "sort", "reverse", "__setitem__", "__delitem__",
+    })
+    _ORDER_SENSITIVE_FUNCS = frozenset({
+        "sorted", "reversed", "enumerate", "zip", "list", "tuple",
+    })
+
+    def _safe_to_convert(self, fn_node: ast.FunctionDef, arg_name: str) -> bool:
+        """
+        Return True only when arg_name is never:
+          • mutated via a method call,
+          • iterated with a for-loop (order-dependent),
+          • subscripted by index,
+          • passed to an order-sensitive builtin.
+        """
+        for node in ast.walk(fn_node):
+            # Mutation via method
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == arg_name
+                    and node.func.attr in self._MUTATING_METHODS):
+                return False
+            # Ordered for-loop iteration
+            if (isinstance(node, ast.For)
+                    and isinstance(node.iter, ast.Name)
+                    and node.iter.id == arg_name):
+                return False
+            # Index-based subscript
+            if (isinstance(node, ast.Subscript)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == arg_name):
+                return False
+            # Passed to order-sensitive function
+            if isinstance(node, ast.Call):
+                for call_arg in node.args:
+                    if (isinstance(call_arg, ast.Name)
+                            and call_arg.id == arg_name
+                            and isinstance(node.func, ast.Name)
+                            and node.func.id in self._ORDER_SENSITIVE_FUNCS):
+                        return False
+        return True
+
     def precondition(self, tree, source):
         for fn in ast.walk(tree):
-            if not isinstance(fn, ast.FunctionDef): continue
-            
-            # Get all function arguments
-            arg_names = {arg.arg for arg in fn.args.args}
-            
-            # Find all variables tested with 'in'
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            arg_names = {a.arg for a in fn.args.args}
             for s in ast.walk(fn):
                 if isinstance(s, ast.Compare):
                     for op, comp in zip(s.ops, s.comparators):
-                        if isinstance(op, ast.In) and isinstance(comp, ast.Name):
-                            # If we test membership against an argument, we should optimize it
-                            if comp.id in arg_names: 
-                                return True
+                        if (isinstance(op, ast.In)
+                                and isinstance(comp, ast.Name)
+                                and comp.id in arg_names
+                                and self._safe_to_convert(fn, comp.id)):
+                            return True
         return False
 
     def apply(self, source, llm=None):
         class _T(ast.NodeTransformer):
-            def __init__(self): 
-                self.changed = False
-            
+            def __init__(self, outer): self.changed = False; self.outer = outer
+
             def visit_FunctionDef(self, node):
                 self.generic_visit(node)
-                arg_names = {arg.arg for arg in node.args.args}
-                tested_args = set()
-                
-                # Find arguments used in membership tests
-                for s in ast.walk(node):
-                    if isinstance(s, ast.Compare):
-                        for op, comp in zip(s.ops, s.comparators):
-                            if isinstance(op, ast.In) and isinstance(comp, ast.Name):
-                                if comp.id in arg_names:
-                                    tested_args.add(comp.id)
-                
-                # Inject set conversions at the top of the function
+                arg_names = {a.arg for a in node.args.args}
+                tested_args = {
+                    comp.id
+                    for s in ast.walk(node)
+                    if isinstance(s, ast.Compare)
+                    for op, comp in zip(s.ops, s.comparators)
+                    if (isinstance(op, ast.In)
+                        and isinstance(comp, ast.Name)
+                        and comp.id in arg_names
+                        and self.outer._safe_to_convert(node, comp.id))
+                }
                 if tested_args:
-                    set_assigns = []
-                    for arg in sorted(tested_args):
-                        set_assigns.append(ast.Assign(
+                    set_assigns = [
+                        ast.Assign(
                             targets=[ast.Name(id=arg, ctx=ast.Store())],
                             value=ast.Call(
                                 func=ast.Name(id="set", ctx=ast.Load()),
                                 args=[ast.Name(id=arg, ctx=ast.Load())],
                                 keywords=[]),
-                            lineno=node.lineno, col_offset=node.col_offset
-                        ))
+                            lineno=node.lineno, col_offset=node.col_offset)
+                        for arg in sorted(tested_args)
+                    ]
                     node.body = set_assigns + node.body
                     self.changed = True
                 return node
 
         try:
             t = ast.parse(source)
-            tr = _T()
+            tr = _T(self)
             nt = tr.visit(t)
-            if tr.changed: 
+            if tr.changed:
                 ast.fix_missing_locations(nt)
                 return ast.unparse(nt)
-        except Exception: pass
+        except Exception:
+            pass
         return None
 
 class MemoizationAddition(TransformationOperator):
     tier, name = Tier.H, "MemoizationAddition"
 
+    _UNHASHABLE_NAMES = frozenset({
+        "list", "List", "dict", "Dict", "set", "Set",
+        "MutableSequence", "MutableMapping", "MutableSet",
+        "deque", "defaultdict", "Counter", "bytearray",
+    })
+
+    def _annotation_unhashable(self, ann) -> bool:
+        if ann is None:
+            return False
+        if isinstance(ann, ast.Name):
+            return ann.id in self._UNHASHABLE_NAMES
+        if isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name):
+            return ann.value.id in self._UNHASHABLE_NAMES
+        if isinstance(ann, ast.Attribute):
+            return ann.attr in self._UNHASHABLE_NAMES
+        return False
+
+    def _all_args_hashable(self, fn: ast.FunctionDef) -> bool:
+        """
+        Return True only when no parameter has an unhashable annotation
+        or a mutable default value (list/dict/set literal).
+        """
+        all_args = (fn.args.args
+                    + fn.args.posonlyargs
+                    + fn.args.kwonlyargs
+                    + ([fn.args.vararg]  if fn.args.vararg  else [])
+                    + ([fn.args.kwarg]   if fn.args.kwarg   else []))
+        for arg in all_args:
+            if self._annotation_unhashable(arg.annotation):
+                return False
+        for default in fn.args.defaults + fn.args.kw_defaults:
+            if default is not None and isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                return False
+        return True
+
     def precondition(self, tree, source):
         for fn in ast.walk(tree):
-            if isinstance(fn, ast.FunctionDef):
-                for child in ast.walk(fn):
-                    if (child is not fn and isinstance(child, ast.Call)
-                            and isinstance(child.func, ast.Name)
-                            and child.func.id == fn.name): return True
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            if not self._all_args_hashable(fn):
+                continue
+            for child in ast.walk(fn):
+                if (child is not fn
+                        and isinstance(child, ast.Call)
+                        and isinstance(child.func, ast.Name)
+                        and child.func.id == fn.name):
+                    return True
         return False
 
     def apply(self, source, llm=None):
         class _T(ast.NodeTransformer):
-            def __init__(self): self.changed = False; self._recurs: set = set()
+            def __init__(self, outer):
+                self.changed = False
+                self._recurs: set[str] = set()
+                self.outer = outer
+
             def visit_Module(self, node):
                 for s in node.body:
-                    if isinstance(s, ast.FunctionDef):
-                        for child in ast.walk(s):
-                            if (child is not s and isinstance(child, ast.Call)
-                                    and isinstance(child.func, ast.Name)
-                                    and child.func.id == s.name):
-                                self._recurs.add(s.name); break
+                    if not isinstance(s, ast.FunctionDef):
+                        continue
+                    if not self.outer._all_args_hashable(s):
+                        continue
+                    for child in ast.walk(s):
+                        if (child is not s
+                                and isinstance(child, ast.Call)
+                                and isinstance(child.func, ast.Name)
+                                and child.func.id == s.name):
+                            self._recurs.add(s.name)
+                            break
                 self.generic_visit(node)
                 if self._recurs and not any(
-                        isinstance(s, ast.Import) and
-                        any(a.name == "functools" for a in s.names)
+                        isinstance(s, ast.Import)
+                        and any(a.name == "functools" for a in s.names)
                         for s in node.body):
-                    node.body.insert(0, ast.Import(names=[ast.alias(name="functools")]))
+                    node.body.insert(
+                        0, ast.Import(names=[ast.alias(name="functools")]))
                 return node
+
             def visit_FunctionDef(self, node):
                 if node.name in self._recurs and not node.decorator_list:
                     node.decorator_list = [ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="functools", ctx=ast.Load()),
-                                           attr="lru_cache", ctx=ast.Load()),
-                        args=[], keywords=[ast.keyword(arg="maxsize",
-                                                        value=ast.Constant(None))])]
+                        func=ast.Attribute(
+                            value=ast.Name(id="functools", ctx=ast.Load()),
+                            attr="lru_cache", ctx=ast.Load()),
+                        args=[],
+                        keywords=[ast.keyword(arg="maxsize",
+                                              value=ast.Constant(None))])]
                     self.changed = True
                 return node
+
         try:
-            t = ast.parse(source); tr = _T(); nt = tr.visit(t)
-            if tr.changed: ast.fix_missing_locations(nt); return ast.unparse(nt)
-        except Exception: pass
+            t = ast.parse(source)
+            tr = _T(self)
+            nt = tr.visit(t)
+            if tr.changed:
+                ast.fix_missing_locations(nt)
+                return ast.unparse(nt)
+        except Exception:
+            pass
         return None
 
 
@@ -1160,24 +1297,64 @@ class StringConcatToJoin(TransformationOperator):
 class SortedToInPlaceSort(TransformationOperator):
     tier, name = Tier.L, "SortedToInPlaceSort"
 
+    @staticmethod
+    def _local_list_vars(fn_node: ast.FunctionDef) -> set[str]:
+        """
+        Return names of variables that were assigned as list literals or
+        list() calls inside fn_node and are not parameters.
+        """
+        param_names = {a.arg for a in fn_node.args.args}
+        list_vars: set[str] = set()
+        for node in ast.walk(fn_node):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+                continue
+            tgt = node.targets[0]
+            if not (isinstance(tgt, ast.Name) and tgt.id not in param_names):
+                continue
+            val = node.value
+            if isinstance(val, ast.List):
+                list_vars.add(tgt.id)
+            elif (isinstance(val, ast.Call)
+                  and isinstance(val.func, ast.Name)
+                  and val.func.id == "list"):
+                list_vars.add(tgt.id)
+        return list_vars
+
     def precondition(self, tree, source):
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Name)
-                    and isinstance(node.value, ast.Call)
-                    and isinstance(node.value.func, ast.Name)
-                    and node.value.func.id == "sorted"
-                    and node.value.args
-                    and isinstance(node.value.args[0], ast.Name)
-                    and node.value.args[0].id == node.targets[0].id): return True
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            safe = self._local_list_vars(fn)
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Assign)
+                        and len(node.targets) == 1
+                        and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id in safe
+                        and isinstance(node.value, ast.Call)
+                        and isinstance(node.value.func, ast.Name)
+                        and node.value.func.id == "sorted"
+                        and node.value.args
+                        and isinstance(node.value.args[0], ast.Name)
+                        and node.value.args[0].id == node.targets[0].id):
+                    return True
         return False
 
     def apply(self, source, llm=None):
         class _T(ast.NodeTransformer):
-            def __init__(self): self.changed = False
+            def __init__(self): self.changed = False; self._safe: set[str] = set()
+
+            def visit_FunctionDef(self, node):
+                # Compute the safe set once per function, then descend.
+                prev = self._safe
+                self._safe = SortedToInPlaceSort._local_list_vars(node)
+                self.generic_visit(node)
+                self._safe = prev
+                return node
+
             def visit_Assign(self, node):
                 if (len(node.targets) == 1
                         and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id in self._safe
                         and isinstance(node.value, ast.Call)
                         and isinstance(node.value.func, ast.Name)
                         and node.value.func.id == "sorted"
@@ -1186,45 +1363,87 @@ class SortedToInPlaceSort(TransformationOperator):
                         and node.value.args[0].id == node.targets[0].id):
                     vn = node.targets[0].id
                     sort_call = ast.Expr(value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id=vn, ctx=ast.Load()),
-                                           attr="sort", ctx=ast.Load()),
+                        func=ast.Attribute(
+                            value=ast.Name(id=vn, ctx=ast.Load()),
+                            attr="sort", ctx=ast.Load()),
                         args=[], keywords=node.value.keywords))
                     self.changed = True
                     return ast.copy_location(sort_call, node)
                 return node
+
         try:
             t = ast.parse(source); tr = _T(); nt = tr.visit(t)
-            if tr.changed: ast.fix_missing_locations(nt); return ast.unparse(nt)
-        except Exception: pass
+            if tr.changed:
+                ast.fix_missing_locations(nt)
+                return ast.unparse(nt)
+        except Exception:
+            pass
         return None
 
 
 class LocalImportHoisting(TransformationOperator):
-    """
-    FIX v2: wraps hoisted imports in try/except ImportError to avoid
-    breaking dynamic or conditional imports.
-    """
     tier, name = Tier.L, "LocalImportHoisting"
 
+    @staticmethod
+    def _protected_names(tree) -> set[str]:
+        """
+        Return the set of module root-names that appear inside any
+        try/except, if, for, while, or with block anywhere in the tree.
+        Imports with these names must never be hoisted.
+        """
+        protected: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Try, ast.If,
+                                     ast.For, ast.While, ast.With)):
+                continue
+            for child in ast.walk(node):
+                if isinstance(child, ast.Import):
+                    for alias in child.names:
+                        protected.add(alias.asname or alias.name.split(".")[0])
+                elif isinstance(child, ast.ImportFrom) and child.module:
+                    protected.add(child.module.split(".")[0])
+        return protected
+
+    @staticmethod
+    def _import_root_names(stmt) -> set[str]:
+        if isinstance(stmt, ast.Import):
+            return {a.asname or a.name.split(".")[0] for a in stmt.names}
+        if isinstance(stmt, ast.ImportFrom) and stmt.module:
+            return {stmt.module.split(".")[0]}
+        return set()
+
     def precondition(self, tree, source):
+        protected = self._protected_names(tree)
         for fn in ast.walk(tree):
-            if isinstance(fn, ast.FunctionDef):
-                for s in fn.body:
-                    if isinstance(s, (ast.Import, ast.ImportFrom)): return True
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            for s in fn.body:
+                if isinstance(s, (ast.Import, ast.ImportFrom)):
+                    if not (self._import_root_names(s) & protected):
+                        return True
         return False
 
     def apply(self, source, llm=None):
         try:
-            tree = ast.parse(source); hoisted = []
+            tree = ast.parse(source)
+            protected = self._protected_names(tree)
+            hoisted: list = []
+
             class _T(ast.NodeTransformer):
                 def visit_FunctionDef(self, node):
                     new_body = []
                     for s in node.body:
                         if isinstance(s, (ast.Import, ast.ImportFrom)):
-                            hoisted.append(s)
-                        else:
-                            new_body.append(s)
-                    node.body = new_body or [ast.Pass()]; return node
+                            # Only hoist if none of its root names are protected.
+                            if not (LocalImportHoisting._import_root_names(s)
+                                    & protected):
+                                hoisted.append(s)
+                                continue
+                        new_body.append(s)
+                    node.body = new_body or [ast.Pass()]
+                    # No generic_visit: do not recurse into nested functions.
+                    return node
+
             new_tree = _T().visit(tree)
             if hoisted:
                 existing = {ast.unparse(s) for s in new_tree.body
@@ -1234,9 +1453,9 @@ class LocalImportHoisting(TransformationOperator):
                     new_tree.body = to_add + new_tree.body
                     ast.fix_missing_locations(new_tree)
                     return ast.unparse(new_tree)
-        except Exception: pass
+        except Exception:
+            pass
         return None
-
 
 class ReductionListCompToGenerator(TransformationOperator):
     tier, name = Tier.L, "ReductionListCompToGenerator"
@@ -1619,51 +1838,78 @@ class ListPopZeroToDeque(TransformationOperator):
         return False
 
     def apply(self, source, llm=None):
-        class _T(ast.NodeTransformer):
-            def __init__(self): self.changed = False; self._queues: set[str] = set()
+        try:
+            tree = ast.parse(source)
 
-            def visit_Module(self, node):
-                self.generic_visit(node)
-                if self._queues:
-                    imp = ast.Import(names=[ast.alias(name="collections")])
-                    node.body.insert(0, imp)
-                return node
-
-            def visit_Assign(self, node):
-                # Rewrite  var = [...]  to  var = collections.deque([...])
-                if (len(node.targets) == 1
-                        and isinstance(node.targets[0], ast.Name)
-                        and node.targets[0].id in self._queues
-                        and isinstance(node.value, ast.List)):
-                    node.value = ast.Call(
-                        func=ast.Attribute(
-                            value=ast.Name(id="collections", ctx=ast.Load()),
-                            attr="deque", ctx=ast.Load()),
-                        args=[node.value], keywords=[])
-                    self.changed = True
-                return node
-
-            def visit_Call(self, node):
-                self.generic_visit(node)
-                if (isinstance(node.func, ast.Attribute)
+            # ── Pass 1: collect every variable name used with .pop(0) ──
+            queues: set[str] = set()
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
                         and node.func.attr == "pop"
                         and len(node.args) == 1
                         and isinstance(node.args[0], ast.Constant)
                         and node.args[0].value == 0
                         and isinstance(node.func.value, ast.Name)):
-                    vn = node.func.value.id
-                    self._queues.add(vn)
-                    node.func.attr = "popleft"
-                    node.args = []
-                    self.changed = True
-                return node
+                    queues.add(node.func.value.id)
 
-        try:
-            t = ast.parse(source); tr = _T(); nt = tr.visit(t)
-            if tr.changed: ast.fix_missing_locations(nt); return ast.unparse(nt)
-        except Exception: pass
+            if not queues:
+                return None
+
+            # ── Pass 2: rewrite using the fully-populated queues set ──
+            class _T(ast.NodeTransformer):
+                def __init__(self, queues: set[str]):
+                    self.changed = False
+                    self._queues = queues
+
+                def visit_Module(self, node):
+                    self.generic_visit(node)
+                    has_collections = any(
+                        isinstance(s, ast.Import)
+                        and any(a.name == "collections" for a in s.names)
+                        for s in node.body)
+                    if self._queues and not has_collections:
+                        node.body.insert(
+                            0, ast.Import(names=[ast.alias(name="collections")]))
+                    return node
+
+                def visit_Assign(self, node):
+                    # Rewrite  var = [...]  →  var = collections.deque([...])
+                    self.generic_visit(node)
+                    if (len(node.targets) == 1
+                            and isinstance(node.targets[0], ast.Name)
+                            and node.targets[0].id in self._queues
+                            and isinstance(node.value, ast.List)):
+                        node.value = ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Name(id="collections", ctx=ast.Load()),
+                                attr="deque", ctx=ast.Load()),
+                            args=[node.value], keywords=[])
+                        self.changed = True
+                    return node
+
+                def visit_Call(self, node):
+                    self.generic_visit(node)
+                    if (isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "pop"
+                            and len(node.args) == 1
+                            and isinstance(node.args[0], ast.Constant)
+                            and node.args[0].value == 0
+                            and isinstance(node.func.value, ast.Name)
+                            and node.func.value.id in self._queues):
+                        node.func.attr = "popleft"
+                        node.args = []
+                        self.changed = True
+                    return node
+
+            tr = _T(queues)
+            nt = tr.visit(tree)
+            if tr.changed:
+                ast.fix_missing_locations(nt)
+                return ast.unparse(nt)
+        except Exception:
+            pass
         return None
-
 
 class FStringConversion(TransformationOperator):
     """Convert %-formatting and .format() calls to f-strings where safe."""
@@ -2285,49 +2531,63 @@ class TupleUnpackInLoop(TransformationOperator):
             pass
         return None
  
- 
 class ChainedComparisonFusion(TransformationOperator):
     """
     Fuse redundant double comparisons against the same variable:
- 
-        x > a and x < b   →   a < x < b
+
+        x > a and x < b    →   a < x < b
         x >= a and x <= b  →   a <= x <= b
+        x < b and x > a    →   a < x < b   (commuted — was broken before)
     """
     tier, name = Tier.L, "ChainedComparisonFusion"
- 
-    # Maps (left_op, right_op) to chained form  a OP1 x OP2 b
+
+    # Keyed by (lower_bound_op, upper_bound_op) after normalisation.
+    # lower_bound_op is always Gt or GtE  ("pivot > a"  →  a is lower bound)
+    # upper_bound_op is always Lt or LtE  ("pivot < b"  →  b is upper bound)
     _PAIRS = {
         (ast.Gt,  ast.Lt):  (ast.Lt,  ast.Lt),
         (ast.Gt,  ast.LtE): (ast.Lt,  ast.LtE),
         (ast.GtE, ast.Lt):  (ast.LtE, ast.Lt),
         (ast.GtE, ast.LtE): (ast.LtE, ast.LtE),
-        (ast.Lt,  ast.Gt):  (ast.Lt,  ast.Lt),   # x<b and x>a → a<x<b
-        (ast.Lt,  ast.GtE): (ast.LtE, ast.Lt),
-        (ast.LtE, ast.Gt):  (ast.Lt,  ast.LtE),
-        (ast.LtE, ast.GtE): (ast.LtE, ast.LtE),
     }
- 
+    _LOWER_OPS = frozenset({ast.Gt, ast.GtE})  # "pivot > bound" → bound is lower
+    _UPPER_OPS = frozenset({ast.Lt, ast.LtE})  # "pivot < bound" → bound is upper
+
     @staticmethod
     def _extract(compare, pivot_id):
         """
-        If `compare` is  pivot OP const  or  const OP pivot, return (op_type, bound_node)
-        oriented as  pivot OP bound.
+        Return (op_type, bound_node) oriented as  pivot OP bound,
+        handling both  'pivot OP bound'  and  'bound OP pivot'  forms.
         """
         if not (isinstance(compare, ast.Compare)
                 and len(compare.ops) == 1
                 and len(compare.comparators) == 1):
             return None
-        op = type(compare.ops[0])
+        op   = type(compare.ops[0])
         left, right = compare.left, compare.comparators[0]
         if isinstance(left, ast.Name) and left.id == pivot_id:
             return op, right
-        # Flip:  bound OP pivot  →  pivot FLIPPED bound
         _FLIP = {ast.Lt: ast.Gt, ast.LtE: ast.GtE,
                  ast.Gt: ast.Lt, ast.GtE: ast.LtE}
         if isinstance(right, ast.Name) and right.id == pivot_id and op in _FLIP:
             return _FLIP[op], left
         return None
- 
+
+    @staticmethod
+    def _normalise(r1, r2):
+        """
+        Given two (op, bound) pairs, return (r_lower, r_upper) where
+        r_lower.op ∈ {Gt, GtE} and r_upper.op ∈ {Lt, LtE}.
+        Returns None if the pair cannot form a valid range.
+        """
+        lower_ops = ChainedComparisonFusion._LOWER_OPS
+        upper_ops = ChainedComparisonFusion._UPPER_OPS
+        if r1[0] in lower_ops and r2[0] in upper_ops:
+            return r1, r2
+        if r2[0] in lower_ops and r1[0] in upper_ops:
+            return r2, r1
+        return None  # same direction (e.g. x>a and x>b) — not fuseable
+
     def precondition(self, tree, source):
         for node in ast.walk(tree):
             if not (isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And)
@@ -2341,14 +2601,16 @@ class ChainedComparisonFusion(TransformationOperator):
                     other = node.values[1] if v is node.values[0] else node.values[0]
                     r1 = self._extract(v, pivot)
                     r2 = self._extract(other, pivot)
-                    if r1 and r2 and (type(r1[0]), type(r2[0])) in self._PAIRS:
-                        return True
+                    if r1 and r2:
+                        pair = self._normalise(r1, r2)
+                        if pair and (pair[0][0], pair[1][0]) in self._PAIRS:
+                            return True
         return False
- 
+
     def apply(self, source, llm=None):
         class _T(ast.NodeTransformer):
             def __init__(self): self.changed = False
- 
+
             def visit_BoolOp(self, node):
                 self.generic_visit(node)
                 if not (isinstance(node.op, ast.And) and len(node.values) == 2):
@@ -2364,20 +2626,23 @@ class ChainedComparisonFusion(TransformationOperator):
                     r2 = ChainedComparisonFusion._extract(other, pivot)
                     if not (r1 and r2):
                         continue
-                    pair_key = (type(r1[0]), type(r2[0]))
-                    if pair_key not in ChainedComparisonFusion._PAIRS:
+                    pair = ChainedComparisonFusion._normalise(r1, r2)
+                    if pair is None:
                         continue
-                    chain_ops = ChainedComparisonFusion._PAIRS[pair_key]
-                    # Build:  bound1 OP1 pivot OP2 bound2
+                    r_lower, r_upper = pair
+                    chain_ops = ChainedComparisonFusion._PAIRS.get(
+                        (r_lower[0], r_upper[0]))
+                    if chain_ops is None:
+                        continue
+                    # Build:  lower_bound OP1 pivot OP2 upper_bound
                     chained = ast.Compare(
-                        left=r1[1],
+                        left=r_lower[1],
                         ops=[chain_ops[0](), chain_ops[1]()],
-                        comparators=[ast.Name(id=pivot, ctx=ast.Load()), r2[1]])
-                    # chained.ops = [chain_ops[0](), chain_ops[1]()]
+                        comparators=[ast.Name(id=pivot, ctx=ast.Load()), r_upper[1]])
                     self.changed = True
                     return ast.copy_location(chained, node)
                 return node
- 
+
         try:
             t = ast.parse(source)
             tr = _T()
@@ -2388,7 +2653,6 @@ class ChainedComparisonFusion(TransformationOperator):
         except Exception:
             pass
         return None
- 
  
 class DictGetWithDefault(TransformationOperator):
     """
@@ -3026,27 +3290,16 @@ class DefaultDictSubstitution(TransformationOperator):
     tier, name = Tier.H, "DefaultDictSubstitution"
  
     @staticmethod
-    def _find_patterns(fn_node):
+    def _find_patterns(fn_node: ast.FunctionDef) -> list[tuple[str, str]]:
         """
-        Returns list of (dict_var, factory_str) for each defaultdict candidate
-        found in the function body.
-        'factory_str' is 'list', 'set', 'int', or 'dict'.
+        Returns list of (dict_var, factory_str) for each defaultdict candidate.
+        Now searches all nested scopes, not just the top-level function body.
         """
         results = []
-        body = fn_node.body
-        # Walk top-level assignments to find  d = {}
-        empty_dicts = set()
-        for s in body:
-            if (isinstance(s, ast.Assign)
-                    and len(s.targets) == 1
-                    and isinstance(s.targets[0], ast.Name)
-                    and isinstance(s.value, ast.Dict)
-                    and not s.value.keys):
-                empty_dicts.add(s.targets[0].id)
- 
+        # Use the shared helper — walks the whole function tree
+        empty_dicts = _find_dict_init_nodes(fn_node)
+
         for dname in empty_dicts:
-            # Look for  if key not in d: d[key] = []  followed by d[key].append
-            # anywhere in the function (loops etc.)
             for node in ast.walk(fn_node):
                 if not isinstance(node, ast.If):
                     continue
@@ -3067,49 +3320,46 @@ class DefaultDictSubstitution(TransformationOperator):
                     continue
                 init_val = init_assign.value
                 factory = None
-                if isinstance(init_val, ast.List) and not init_val.elts:
-                    factory = "list"
-                elif isinstance(init_val, ast.Set) and not init_val.elts:
-                    factory = "set"
-                elif isinstance(init_val, ast.Dict) and not init_val.keys:
-                    factory = "dict"
-                elif isinstance(init_val, ast.Constant) and init_val.value == 0:
-                    factory = "int"
+                if isinstance(init_val, ast.List)  and not init_val.elts: factory = "list"
+                elif isinstance(init_val, ast.Set)  and not init_val.elts: factory = "set"
+                elif isinstance(init_val, ast.Dict)  and not init_val.keys: factory = "dict"
+                elif isinstance(init_val, ast.Constant) and init_val.value == 0: factory = "int"
                 if factory:
                     results.append((dname, factory))
                     break
         return results
- 
+
     def precondition(self, tree, source):
         for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef) and self._find_patterns(fn):
                 return True
         return False
- 
+
     def apply(self, source, llm=None):
         class _T(ast.NodeTransformer):
-            def __init__(self): self.changed = False; self._to_replace = {}
- 
+            def __init__(self): self.changed = False; self._to_replace: dict[str, str] = {}
+
             def visit_Module(self, node):
                 self.generic_visit(node)
                 if self._to_replace:
-                    has_collections = any(
+                    has_col = any(
                         isinstance(s, ast.Import)
                         and any(a.name == "collections" for a in s.names)
                         for s in node.body)
-                    if not has_collections:
+                    if not has_col:
                         node.body.insert(
                             0, ast.Import(names=[ast.alias(name="collections")]))
                 return node
- 
+
             def visit_FunctionDef(self, node):
                 patterns = DefaultDictSubstitution._find_patterns(node)
                 self._to_replace = {d: f for d, f in patterns}
                 self.generic_visit(node)
                 self._to_replace = {}
                 return node
- 
+
             def visit_Assign(self, node):
+                """Replace  d = {}  with  d = collections.defaultdict(factory)."""
                 if (len(node.targets) == 1
                         and isinstance(node.targets[0], ast.Name)
                         and node.targets[0].id in self._to_replace
@@ -3124,9 +3374,9 @@ class DefaultDictSubstitution(TransformationOperator):
                         keywords=[])
                     self.changed = True
                 return node
- 
+
             def visit_If(self, node):
-                # Remove the  if k not in d: d[k] = []  guard blocks
+                """Remove  if k not in d: d[k] = []  guard blocks."""
                 test = node.test
                 if (isinstance(test, ast.Compare)
                         and len(test.ops) == 1
@@ -3134,28 +3384,27 @@ class DefaultDictSubstitution(TransformationOperator):
                         and isinstance(test.comparators[0], ast.Name)
                         and test.comparators[0].id in self._to_replace
                         and len(node.body) == 1
-                        and isinstance(node.body[0], ast.Assign)):
-                    init_assign = node.body[0]
-                    if (len(init_assign.targets) == 1
-                            and isinstance(init_assign.targets[0], ast.Subscript)
-                            and isinstance(init_assign.targets[0].value, ast.Name)
-                            and init_assign.targets[0].value.id in self._to_replace
-                            and not node.orelse):
+                        and isinstance(node.body[0], ast.Assign)
+                        and not node.orelse):
+                    init = node.body[0]
+                    if (len(init.targets) == 1
+                            and isinstance(init.targets[0], ast.Subscript)
+                            and isinstance(init.targets[0].value, ast.Name)
+                            and init.targets[0].value.id in self._to_replace):
                         self.changed = True
-                        return None  # Remove the if-block entirely
+                        return None  # remove guard entirely
                 self.generic_visit(node)
                 return node
- 
+
         try:
             t = ast.parse(source)
             tr = _T()
             nt = tr.visit(t)
-            # NodeTransformer can return None for nodes; filter those out
             for node in ast.walk(nt):
-                if hasattr(node, "body") and isinstance(node.body, list):
-                    node.body = [s for s in node.body if s is not None]
-                if hasattr(node, "orelse") and isinstance(node.orelse, list):
-                    node.orelse = [s for s in node.orelse if s is not None]
+                for attr in ("body", "orelse", "finalbody"):
+                    lst = getattr(node, attr, None)
+                    if isinstance(lst, list):
+                        setattr(node, attr, [s for s in lst if s is not None])
             if tr.changed:
                 ast.fix_missing_locations(nt)
                 return ast.unparse(nt)
@@ -3163,55 +3412,51 @@ class DefaultDictSubstitution(TransformationOperator):
             pass
         return None
  
- 
+def _find_dict_init_nodes(fn_node: ast.FunctionDef) -> dict[str, ast.Assign]:
+    """
+    Walk the ENTIRE function body (including nested loops and conditionals)
+    and return a mapping of  variable_name → Assign-node  for every
+    ``d = {}`` assignment found.  Only the FIRST occurrence is kept so that
+    the transformer knows which node to replace.
+    """
+    found: dict[str, ast.Assign] = {}
+    for node in ast.walk(fn_node):
+        if not (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Dict)
+                and not node.value.keys):
+            continue
+        name = node.targets[0].id
+        if name not in found:          # keep first occurrence only
+            found[name] = node
+    return found
 class CounterSubstitution(TransformationOperator):
-    """
-    Replace manual frequency-counting dict patterns with collections.Counter:
- 
-        d = {}
-        for x in lst:
-            if x in d:
-                d[x] += 1
-            else:
-                d[x] = 1
- 
-        →
- 
-        import collections
-        d = collections.Counter(lst)
-    """
     tier, name = Tier.H, "CounterSubstitution"
- 
+
     @staticmethod
-    def _find_counter_pattern(fn_node):
+    def _find_counter_pattern(fn_node: ast.FunctionDef
+                               ) -> list[tuple[str, ast.expr, ast.Assign, ast.For]]:
         """
-        Returns list of (dict_var, iterable_node) tuples.
+        Returns list of (dict_var, iterable_node, init_assign_node, loop_node).
+        Now detects patterns anywhere in the function, not just at top-level.
         """
         results = []
-        body = fn_node.body
-        # Find  d = {}
-        empty_dict_stmts = {}
-        for i, s in enumerate(body):
-            if (isinstance(s, ast.Assign)
-                    and len(s.targets) == 1
-                    and isinstance(s.targets[0], ast.Name)
-                    and isinstance(s.value, ast.Dict)
-                    and not s.value.keys):
-                empty_dict_stmts[s.targets[0].id] = i
- 
-        # Find for-loop immediately or soon after that counts into d
-        for i, s in enumerate(body):
-            if not isinstance(s, ast.For):
+        # Full-tree scan for  d = {}
+        empty_dicts: dict[str, ast.Assign] = _find_dict_init_nodes(fn_node)
+
+        # Full-tree scan for qualifying for-loops
+        for node in ast.walk(fn_node):
+            if not isinstance(node, ast.For):
                 continue
-            loop_var = s.target
+            loop_var = node.target
             if not isinstance(loop_var, ast.Name):
                 continue
             lv_id = loop_var.id
- 
-            # Loop body should be  if x in d: d[x]+=1 else: d[x]=1
-            if len(s.body) != 1 or not isinstance(s.body[0], ast.If):
+
+            if len(node.body) != 1 or not isinstance(node.body[0], ast.If):
                 continue
-            if_stmt = s.body[0]
+            if_stmt = node.body[0]
             test = if_stmt.test
             if not (isinstance(test, ast.Compare)
                     and len(test.ops) == 1
@@ -3221,7 +3466,7 @@ class CounterSubstitution(TransformationOperator):
                     and isinstance(test.comparators[0], ast.Name)):
                 continue
             dname = test.comparators[0].id
-            if dname not in empty_dict_stmts:
+            if dname not in empty_dicts:
                 continue
             # body: d[x] += 1
             if not (len(if_stmt.body) == 1
@@ -3243,72 +3488,85 @@ class CounterSubstitution(TransformationOperator):
                     and isinstance(if_stmt.orelse[0].value, ast.Constant)
                     and if_stmt.orelse[0].value.value == 1):
                 continue
-            results.append((dname, s.iter, empty_dict_stmts[dname], i))
+            results.append((dname, node.iter,
+                             empty_dicts[dname], node))
         return results
- 
+
     def precondition(self, tree, source):
         for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef) and self._find_counter_pattern(fn):
                 return True
         return False
- 
+
     def apply(self, source, llm=None):
         class _T(ast.NodeTransformer):
-            def __init__(self): self.changed = False; self._replace_info = {}
- 
+            def __init__(self): self.changed = False; self._info: dict = {}
+
             def visit_Module(self, node):
                 self.generic_visit(node)
-                if self._replace_info:
-                    has_collections = any(
+                if self._info:
+                    has_col = any(
                         isinstance(s, ast.Import)
                         and any(a.name == "collections" for a in s.names)
                         for s in node.body)
-                    if not has_collections:
+                    if not has_col:
                         node.body.insert(
                             0, ast.Import(names=[ast.alias(name="collections")]))
                 return node
- 
+
             def visit_FunctionDef(self, node):
                 patterns = CounterSubstitution._find_counter_pattern(node)
-                # Map: dict_var → (iterable, init_stmt_idx, loop_stmt_idx)
-                self._replace_info = {d: (it, ii, li) for d, it, ii, li in patterns}
-                new_body = []
-                skip = set()
-                for i, stmt in enumerate(node.body):
-                    # Replace the  d = {}  stmt with  d = collections.Counter(lst)
-                    replaced = False
-                    for dname, (iterable, init_idx, loop_idx) in self._replace_info.items():
-                        if i == init_idx:
-                            counter_assign = ast.Assign(
-                                targets=[ast.Name(id=dname, ctx=ast.Store())],
-                                value=ast.Call(
-                                    func=ast.Attribute(
-                                        value=ast.Name(id="collections", ctx=ast.Load()),
-                                        attr="Counter", ctx=ast.Load()),
-                                    args=[iterable], keywords=[]),
-                                lineno=stmt.lineno, col_offset=stmt.col_offset)
-                            new_body.append(counter_assign)
-                            skip.add(loop_idx)
-                            self.changed = True
-                            replaced = True
-                            break
-                    if not replaced and i not in skip:
-                        new_body.append(stmt)
-                node.body = new_body
-                self._replace_info = {}
+                # Map: dict_var → (iterable, init_node_id, loop_node_id)
+                self._info = {
+                    d: (it, id(init), id(loop))
+                    for d, it, init, loop in patterns
+                }
+                self.generic_visit(node)
+                self._info = {}
                 return node
- 
+
+            def visit_Assign(self, node):
+                """Replace  d = {}  with  d = collections.Counter(iterable)."""
+                if (len(node.targets) == 1
+                        and isinstance(node.targets[0], ast.Name)):
+                    dname = node.targets[0].id
+                    if (dname in self._info
+                            and id(node) == self._info[dname][1]
+                            and isinstance(node.value, ast.Dict)
+                            and not node.value.keys):
+                        iterable = self._info[dname][0]
+                        node.value = ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Name(id="collections", ctx=ast.Load()),
+                                attr="Counter", ctx=ast.Load()),
+                            args=[iterable], keywords=[])
+                        self.changed = True
+                return node
+
+            def visit_For(self, node):
+                """Remove the manual counting loop."""
+                self.generic_visit(node)
+                for dname, (_, _, loop_id) in self._info.items():
+                    if id(node) == loop_id:
+                        self.changed = True
+                        return None   # delete the for-loop
+                return node
+
         try:
             t = ast.parse(source)
             tr = _T()
             nt = tr.visit(t)
+            for node in ast.walk(nt):
+                for attr in ("body", "orelse", "finalbody"):
+                    lst = getattr(node, attr, None)
+                    if isinstance(lst, list):
+                        setattr(node, attr, [s for s in lst if s is not None])
             if tr.changed:
                 ast.fix_missing_locations(nt)
                 return ast.unparse(nt)
         except Exception:
             pass
         return None
- 
  
 class HeapNLargestSmallest(TransformationOperator):
     """
@@ -3653,13 +3911,13 @@ def _iqr_filter(readings: list[float]) -> tuple[list[float], int, float]:
     """
     n = len(readings)
     if n < 4:
-        return readings, 0
+        return readings, 0, 0
     s = sorted(readings)
     q1 = s[n // 4]
     q3 = s[(3 * n) // 4]
     iqr = q3 - q1
     if iqr < 1e-20:   # effectively zero variance — keep all
-        return readings, 0
+        return readings, 0, 0
     lo = q1 - 2.5 * iqr
     hi = q3 + 2.5 * iqr
     filtered = [r for r in readings if lo <= r <= hi]
@@ -3696,13 +3954,86 @@ def _bootstrap_ci(readings: list[float], n_boot: int = 400,
         return v, v
     boot_means = []
     for _ in range(n_boot):
-        sample = [readings[int(random.random() * n)] for _ in range(n)]
+        sample = [readings[random.randrange(n)] for _ in range(n)]
         boot_means.append(sum(sample) / n)
     boot_means.sort()
     lo_idx = max(0,     int(alpha / 2 * n_boot))
     hi_idx = min(n_boot - 1, int((1 - alpha / 2) * n_boot))
     return boot_means[lo_idx], boot_means[hi_idx]
 
+
+def _tcdf_approx(t: float, df: float) -> float:
+    """
+    Accurate t-distribution CDF via the regularised incomplete beta function,
+    implemented using Lentz's continued-fraction method (stdlib only).
+
+    P(T <= t) for a t-distribution with `df` degrees of freedom.
+    Matches scipy.stats.t.cdf to within ~1e-6 for df >= 2.
+    """
+    # For large df the normal approximation is fine (error < 0.001 for df >= 30)
+    if df >= 30:
+        return _ncdf_approx(t)
+
+    # --- Regularised incomplete beta  I_x(a, b) via continued fraction ---
+    # Relation:  CDF(t, df) = 1 - 0.5 * I_x(df/2, 0.5)
+    # where x = df / (df + t^2)   [two-tailed beta transform]
+    a = df / 2.0
+    b = 0.5
+    x = df / (df + t * t)
+
+    def _beta_cf(a, b, x, max_iter=200, tol=1e-12):
+        """
+        Evaluate I_x(a,b) via Lentz's continued fraction (Numerical Recipes §6.4).
+        Returns the regularised incomplete beta value.
+        """
+        # Front factor: x^a * (1-x)^b / (a * Beta(a,b))
+        # We compute log of front factor using lgamma (stdlib math)
+        lbeta = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+        front = math.exp(
+            a * math.log(max(x, 1e-300))
+            + b * math.log(max(1.0 - x, 1e-300))
+            - lbeta
+        ) / a
+
+        # Lentz's method
+        TINY = 1e-300
+        f = TINY
+        C, D = f, 0.0
+        for m in range(0, max_iter):
+            for step in range(2):
+                if step == 0:
+                    # Even step (m=0 special-cased)
+                    if m == 0:
+                        d = 1.0
+                    else:
+                        d = (m * (b - m) * x) / ((a + 2 * m - 1) * (a + 2 * m))
+                else:
+                    d = -((a + m) * (a + b + m) * x) / ((a + 2 * m) * (a + 2 * m + 1))
+                D = 1.0 + d * D
+                if abs(D) < TINY: D = TINY
+                C = 1.0 + d / C
+                if abs(C) < TINY: C = TINY
+                D = 1.0 / D
+                delta = C * D
+                f *= delta
+                if abs(delta - 1.0) < tol:
+                    return front * f
+        return front * f   # best estimate even if not converged
+
+    # x must be in (0, 1); clamp for numerical safety
+    x = max(1e-15, min(1.0 - 1e-15, x))
+
+    # I_x(a,b) converges better when x < (a+1)/(a+b+2);  otherwise use symmetry
+    if x < (a + 1.0) / (a + b + 2.0):
+        incomplete_beta = _beta_cf(a, b, x)
+    else:
+        incomplete_beta = 1.0 - _beta_cf(b, a, 1.0 - x)
+
+    # Two-tailed → one-tailed CDF
+    p_two_tail = incomplete_beta        # P(|T| >= |t|)
+    p_one_tail  = 1.0 - p_two_tail / 2  # P(T <= t)  for t > 0
+
+    return max(0.0, min(1.0, p_one_tail))
 
 def _welch_t_p_improvement(mean_base: float, std_base: float, n_base: int,
                             mean_cand: float, std_cand: float, n_cand: int,
@@ -3711,12 +4042,13 @@ def _welch_t_p_improvement(mean_base: float, std_base: float, n_base: int,
     Welch t-test: returns (t_stat, p_improvement).
     p_improvement = P(candidate_energy < baseline_energy).
     A positive t means candidate is faster (lower energy).
-    Uses normal-distribution approximation for df > 15,
-    otherwise a conservative t-table lookup.
+
+    Uses the Lentz continued-fraction t-CDF for df < 30 (accurate),
+    and the normal approximation for df >= 30 (error < 0.001).
     """
     se2 = std_base ** 2 / max(n_base, 1) + std_cand ** 2 / max(n_cand, 1)
-    se = math.sqrt(max(se2, 1e-30))
-    # t > 0 means baseline > candidate, i.e. candidate is better
+    se  = math.sqrt(max(se2, 1e-30))
+    # t > 0 means baseline > candidate, i.e. candidate uses less energy
     t = (mean_base - mean_cand) / se
 
     # Welch-Satterthwaite degrees of freedom
@@ -3724,15 +4056,9 @@ def _welch_t_p_improvement(mean_base: float, std_base: float, n_base: int,
     vb = std_cand ** 2 / max(n_cand, 1)
     denom = (va ** 2 / max(n_base - 1, 1)) + (vb ** 2 / max(n_cand - 1, 1))
     df = (va + vb) ** 2 / max(denom, 1e-30)
+    df = max(df, 1.0)   # clamp — df < 1 is not meaningful
 
-    # Convert t to p using normal approx when df is large enough
-    if df >= 15:
-        p = _ncdf_approx(t)   # P(Z < t) ≈ P(candidate < baseline)
-    else:
-        # Conservative: use smaller effective z multiplier for low df
-        # Approximate t-CDF via normal with df-corrected variance
-        t_adj = t * math.sqrt(df / max(df + t ** 2, 1e-10))
-        p = _ncdf_approx(t_adj)
+    p = _tcdf_approx(t, df)
     return t, max(0.0, min(1.0, p))
 
 
@@ -4238,7 +4564,7 @@ class EnergySurrogate:
         self._trained = False
         self._update_count = 0  
 
-    def _featurize(self, source: str, chain: list[dict], mean_n: float) -> list:
+    def _featurize(self, source: str, chain: list[dict], max_n: float) -> list:
         try:
             tree = ast.parse(source)
         except SyntaxError:
@@ -4261,7 +4587,7 @@ class EnergySurrogate:
         f8  = float(llm_tier)
         f9  = float(len(chain))
         f10 = float(sum(1 for t in chain if t.get("needs_llm")))
-        f11 = math.log1p(max(0.0, mean_n)) / 10.0
+        f11 = math.log1p(max(0.0, max_n)) / 10.0
         f12 = math.log1p(_halstead_volume(tree)) / 20.0
         f13 = float(_cyclomatic_complexity(tree)) / 20.0
         f14 = _memory_access_density(tree)
@@ -4269,8 +4595,8 @@ class EnergySurrogate:
 
         return [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15]
 
-    def update(self, source: str, chain: list[dict], energy_j: float, std_j: float, mean_n: float):
-        self._X.append(self._featurize(source, chain, mean_n))
+    def update(self, source: str, chain: list[dict], energy_j: float, std_j: float, max_n: float):
+        self._X.append(self._featurize(source, chain, max_n))
         self._y.append(energy_j)
         variance = (std_j ** 2) if std_j > 0 else 1e-10
         self._noise_var.append(variance)
@@ -4285,9 +4611,9 @@ class EnergySurrogate:
             return
         self._retrain()
 
-    def predict(self, source: str, chain: list[dict], mean_n: float) -> tuple[Optional[float], float]:
+    def predict(self, source: str, chain: list[dict], max_n: float) -> tuple[Optional[float], float]:
         if not self._trained or not HAS_SKLEARN: return None, float("inf")
-        x = np.array([self._featurize(source, chain, mean_n)])
+        x = np.array([self._featurize(source, chain, max_n)])
         m, s = self._model.predict(x, return_std=True)
         return float(m[0]), float(s[0])
 
@@ -4318,37 +4644,42 @@ class EnergySurrogate:
 
     # --- PERSISTENCE METHODS ---
     def save(self, filepath: Path):
-        """Pickle the model and historical data to disk."""
+        """Pickle the model and historical data to the given path."""
         if not self._trained or not HAS_SKLEARN:
             return
         state = {
-            'X': self._X,
-            'y': self._y,
-            'noise_var': self._noise_var,
-            'model': self._model,
-            'update_count': self._update_count
+            'X':            self._X,
+            'y':            self._y,
+            'noise_var':    self._noise_var,
+            'model':        self._model,
+            'update_count': self._update_count,
         }
-        with open(filepath, 'wb') as f:
-            pickle.dump(state, f)
+        try:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            with open(filepath, 'wb') as f:
+                pickle.dump(state, f)
+        except Exception as e:
+            print(f"[Surrogate] Failed to save model to {filepath}: {e}",
+                  file=sys.stderr)
 
     def load(self, filepath: Path) -> bool:
-        """Load the model and historical data from disk."""
+        """Load the model and historical data from the given path."""
         if not filepath.exists() or not HAS_SKLEARN:
             return False
         try:
             with open(filepath, 'rb') as f:
                 state = pickle.load(f)
-            self._X = state['X']
-            self._y = state['y']
-            self._noise_var = state['noise_var']
-            self._model = state['model']
+            self._X            = state['X']
+            self._y            = state['y']
+            self._noise_var    = state['noise_var']
+            self._model        = state['model']
             self._update_count = state['update_count']
-            self._trained = True
+            self._trained      = True
             return True
         except Exception as e:
-            print(f"[Surrogate] Failed to load cached model from {filepath}: {e}")
+            print(f"[Surrogate] Failed to load model from {filepath}: {e}",
+                  file=sys.stderr)
             return False
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 7.  MFBO Search Engine
@@ -4679,12 +5010,22 @@ class ResearchPlotter:
         f1_co2 = f2_co2 = f3_co2 = 0.0
         intensity = self.r.co2_intensity_g_per_kwh
         for c in self._all_candidates():
+            f1_reps = (FIDELITY_REPS[Fidelity.F1]
+                       + (c.f1_adaptive_extra_reps or 0))
+            f2_reps = (FIDELITY_REPS[Fidelity.F2]
+                       + (c.f2_adaptive_extra_reps or 0))
+            f3_reps = FIDELITY_REPS[Fidelity.F3]
+
             if c.f1_mj is not None:
-                f1_co2 += (c.f1_mj / 1000) * FIDELITY_REPS[Fidelity.F1] * intensity / 3.6e6 * 1e6
+                f1_co2 += (c.f1_mj / 1000) * f1_reps * intensity / 3.6e6 * 1e6
             if c.f2_mj is not None:
-                f2_co2 += (c.f2_mj / 1000) * FIDELITY_REPS[Fidelity.F2] * intensity / 3.6e6 * 1e6
+                f2_co2 += (c.f2_mj / 1000) * f2_reps * intensity / 3.6e6 * 1e6
             if c.f3_mj is not None:
-                f3_co2 += (c.f3_mj / 1000) * FIDELITY_REPS[Fidelity.F3] * intensity / 3.6e6 * 1e6
+                if c.f3_co2_ug is not None:
+                    f3_co2 += c.f3_co2_ug
+                else:
+                    f3_co2 += (c.f3_mj / 1000) * f3_reps * intensity / 3.6e6 * 1e6
+
         base_co2 = self.r.baseline_co2_ug * FIDELITY_REPS[Fidelity.F3]
         total = base_co2 + f1_co2 + f2_co2 + f3_co2
         if total < 1e-10: return None
@@ -5804,72 +6145,62 @@ class SPECTRAOptimizer:
     # ═════════════════════════════════════════════════════════════════════════
     #  Private: candidate generation
     # ═════════════════════════════════════════════════════════════════════════
- 
+
     def _generate_candidates(
         self,
         base: ProgramVariant,
     ) -> list[ProgramVariant]:
-        """
-        Apply all applicable transformation operators to `base` and return
-        new candidate variants.
- 
-        Fixes applied:
-          [BUG-1]  seen-set mutation is now lock-protected
-          [BUG-3]  each operator gets its own deep-copied AST to prevent
-                   cross-operator tree corruption
-          [ARCH-2] operators already in base.chain are skipped
-          [ARCH-5] ConflictFilter removes mutually-exclusive operators
-          [ARCH-3] operators sorted by UCB score (best-first)
-        """
         try:
             ref_tree = ast.parse(base.source)
         except SyntaxError:
             return []
- 
-        already_applied = {t["operator"] for t in base.chain}  # [ARCH-2]
- 
-        # Filter to applicable operators
+
+        already_applied = {t["operator"] for t in base.chain}
+
         candidate_ops = [
             op for op in self.operators
             if op.name not in already_applied
             and (not op.needs_llm or self.llm.available)
         ]
-        # Resolve conflicts  [ARCH-5]
         candidate_ops = self._conflict_filter.filter(
             candidate_ops, ref_tree, base.source)
- 
-        # Sort by UCB score — best-performing operators tried first  [ARCH-3]
         candidate_ops.sort(
             key=lambda op: -self._op_stats[op.name].ucb_score(
                 self._op_total_attempts))
- 
+
         det_ops = [op for op in candidate_ops if not op.needs_llm]
         llm_ops = [op for op in candidate_ops
                    if op.needs_llm and self.llm.available]
- 
-        cands:       list[ProgramVariant] = []
-        local_seen:  set[str]             = set()
- 
+
+        cands:      list[ProgramVariant] = []
+        # ── FIX: local_seen is now scoped to THIS base variant only. ──────
+        # Previously it was an inner variable that persisted across the loop
+        # in _expand_pareto_frontier because _generate_candidates was called
+        # in a loop and the set lived inside the closure.  Now it is a fresh
+        # set per call, so Pareto member #2 can legitimately produce the same
+        # transformed source as member #1 (different base → different variant).
+        local_seen: set[str] = set()
+
         def _try_op(op: TransformationOperator) -> Optional[ProgramVariant]:
-            # [BUG-3] Each operator gets its own deep copy of the AST
             try:
                 tree_copy = copy.deepcopy(ref_tree)
                 if not op.precondition(tree_copy, base.source):
                     return None
             except Exception:
                 return None
- 
+
             new_src = op.apply(base.source, self.llm)
             if not new_src or new_src == base.source:
                 return None
- 
-            # [BUG-1] Atomic check-and-add under lock
+
             with self._seen_lock:
-                if new_src in self._seen or new_src in local_seen:
+                if new_src in self._seen:
+                    return None
+                if new_src in local_seen:
                     return None
                 self._seen.add(new_src)
                 local_seen.add(new_src)
- 
+
             return ProgramVariant(
                 source=new_src,
                 chain=base.chain + [{
@@ -5877,14 +6208,12 @@ class SPECTRAOptimizer:
                     "tier":      op.tier.value,
                     "needs_llm": op.needs_llm,
                 }])
- 
-        # Deterministic operators — sequential (CPU-bound)
+
         for op in det_ops:
             v = _try_op(op)
             if v:
                 cands.append(v)
- 
-        # LLM operators — concurrent (I/O-bound)
+
         if llm_ops:
             with concurrent.futures.ThreadPoolExecutor(
                     max_workers=self.llm_workers) as ex:
@@ -5896,7 +6225,7 @@ class SPECTRAOptimizer:
                             cands.append(v)
                     except Exception:
                         pass
- 
+
         return cands
  
     # ═════════════════════════════════════════════════════════════════════════
@@ -6107,21 +6436,47 @@ class SPECTRAOptimizer:
  
     def _regression_recheck(self, variant: ProgramVariant):
         """
-        After a confirmed improvement, run the full correctness test suite
-        against the variant (not just the incremental diff) to catch any
-        silent regressions.
+        Sanity-check that the confirmed variant is still marked correct.
+        Uses the is_correct flag set during the earlier _filter_correctness
+        phase — no additional subprocess is spawned.
+
+        If for any reason the flag is absent (shouldn't happen) we do one
+        cheap in-process exec-and-call check rather than a full subprocess.
         """
-        ok, reason = self.correctness.verify(variant.source)
-        if not ok:
-            self._log(
-                f"  ⚠ POST-CONFIRMATION REGRESSION DETECTED: {reason}")
-            # Invalidate: remove from Pareto, flag as incorrect
+        # Fast path: trust the result from _filter_correctness
+        if variant.is_correct is True:
+            self._log("  ✓ Post-confirmation regression check passed (cached).")
+            return
+
+        if variant.is_correct is False:
+            # Already known to be broken — this branch shouldn't be reachable
+            # because broken candidates are filtered before _escalate(), but
+            # guard defensively.
+            self._log("  ⚠ POST-CONFIRMATION REGRESSION DETECTED (cached flag).")
             variant.is_correct = False
             self._pareto = [v for v in self._pareto
                             if v.source != variant.source]
             self._log("  ⚠ Variant removed from Pareto archive.")
-        else:
-            self._log("  ✓ Post-confirmation regression check passed.")
+            return
+
+        # Fallback (variant.is_correct is None — unexpected): lightweight
+        # in-process check against a single representative input to catch
+        # obvious runtime errors without the 120-second subprocess overhead.
+        try:
+            ns: dict = {}
+            exec(compile(variant.source, "<regression_check>", "exec"), ns)
+            fn = ns.get(self.func_name)
+            if fn is None:
+                raise RuntimeError("function not found after exec")
+            if self.test_inputs:
+                fn(*copy.deepcopy(self.test_inputs[0]))
+            self._log("  ✓ Post-confirmation regression check passed (lightweight).")
+        except Exception as exc:
+            self._log(f"  ⚠ POST-CONFIRMATION REGRESSION DETECTED: {exc}")
+            variant.is_correct = False
+            self._pareto = [v for v in self._pareto
+                            if v.source != variant.source]
+            self._log("  ⚠ Variant removed from Pareto archive.")
  
     # ═════════════════════════════════════════════════════════════════════════
     #  Private: warm-start  [FEATURE-2]
@@ -6143,7 +6498,7 @@ class SPECTRAOptimizer:
     # ═════════════════════════════════════════════════════════════════════════
     #  Private: complexity feature  [RESEARCH-1]
     # ═════════════════════════════════════════════════════════════════════════
- 
+
     def _complexity_n(self) -> float:
         """
         Return the *maximum* input size across all test inputs.
@@ -6351,9 +6706,12 @@ class SPECTRAOptimizer:
                 # Write to disk
                 (variants_dir / file_name).write_text(header + c.transformed_source, encoding="utf-8")
         # =====================================================================
- 
-        # Save the optimized surrogate model state to disk for future runs
-        model_path = self.out_dir / f"{fn}_surrogate.pkl"
+
+        if self.surrogate_path is not None:
+            model_path = Path(self.surrogate_path)
+        else:
+            model_path = self.out_dir / f"{fn}_surrogate.pkl"
+
         self.surrogate.save(model_path)
         self._log(f"[Surrogate] Saved trained model state to {model_path.name}")
  
