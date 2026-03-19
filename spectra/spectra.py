@@ -3876,7 +3876,7 @@ ALL_OPERATORS: list[TransformationOperator] = [
     ManualReductionToBuiltinsLLM(),
     LoopInvariantHoistingLLM(),
     EarlyExitOptimization(),
-    CachingWrapper(),
+    # CachingWrapper(),
     ItertoolsDelegateLLM(),
     LazyEvaluationRewriteLLM(),
     RegexPrecompilationLLM(),
@@ -6710,7 +6710,8 @@ class SPECTRAOptimizer:
         if self.surrogate_path is not None:
             model_path = Path(self.surrogate_path)
         else:
-            model_path = self.out_dir / f"{fn}_surrogate.pkl"
+            # model_path = self.out_dir / f"{fn}_surrogate.pkl"
+            model_path = Path("./surrogate_model.pkl")
 
         self.surrogate.save(model_path)
         self._log(f"[Surrogate] Saved trained model state to {model_path.name}")
@@ -6909,7 +6910,7 @@ def main():
                         help="Gemini API key (or set GEMINI_API_KEY env var)")
     parser.add_argument("--no-llm",     action="store_true",
                         help="Disable LLM operators even if key is set")
-    parser.add_argument("--budget",     type=int, default=100,
+    parser.add_argument("--budget",     type=int, default=10,
                         help="Max F3 evaluations (default 100)")
     parser.add_argument("--ei-top-k",   type=int, default=2,
                         help="Evaluate top-K EI candidates per iteration (default 2)")

@@ -1,0 +1,2 @@
+variant,runs_total,runs_ok,runs_failed,mean_improvement_pct,median_improvement_pct,sum_co2_search_ug,mean_f3_evals
+main,9,9,0,4.4432,0.0,79013.616,2.8889

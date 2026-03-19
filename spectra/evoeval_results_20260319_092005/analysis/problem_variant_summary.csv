@@ -1,0 +1,10 @@
+problem_id,variant,function_name,status,improvement_pct,best_mj,baseline_mj,co2_search_ug,duration_s,f3_evals,chain_len
+EvoEval_difficult_4,main,weighted_mean_absolute_deviation,ok,14.48,2.240982,2.620413,10713.68,438.901,9,2
+EvoEval_difficult_16,main,count_distinct_characters_substrings,ok,0.0,4409.436229,4409.436229,29992.86,133.828,1,0
+EvoEval_difficult_52,main,below_above_threshold,ok,0.0,24.3123,24.3123,6248.985,78.153,3,0
+EvoEval_difficult_53,main,add_elements,ok,6.665,2.606514,2.792647,6757.426,112.942,2,2
+EvoEval_difficult_61,main,correct_bracketing_advanced,ok,0.0,2.529545,2.529545,5350.902,129.675,2,0
+EvoEval_difficult_63,main,customFibFib,ok,0.0,3.534301,3.534301,5210.834,117.227,1,0
+EvoEval_difficult_66,main,advancedDigitSum,ok,0.0,134.915287,134.915287,2614.465,70.523,1,0
+EvoEval_difficult_79,main,decimal_to_binary,ok,9.092,1.745341,1.919903,6777.228,228.151,4,1
+EvoEval_difficult_90,main,next_smallest_and_largest,ok,9.752,10.881465,12.057297,5347.236,220.473,3,2

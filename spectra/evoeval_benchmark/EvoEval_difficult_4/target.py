@@ -1,6 +1,5 @@
 from typing import List, Tuple
 
-
 def weighted_mean_absolute_deviation(numbers: List[Tuple[float, float]]) -> float:
     """ For a given list of tuples, where each tuple consists of a data point (x) and its associated weight (w),
     calculate the Weighted Mean Absolute Deviation around the weighted mean of this dataset.

@@ -1,0 +1,58 @@
+{
+  "function": "weighted_mean_absolute_deviation",
+  "original_source": "from typing import List, Tuple\n\n\ndef weighted_mean_absolute_deviation(numbers: List[Tuple[float, float]]) -> float:\n    \"\"\" For a given list of tuples, where each tuple consists of a data point (x) and its associated weight (w),\n    calculate the Weighted Mean Absolute Deviation around the weighted mean of this dataset.\n    Weighted Mean Absolute Deviation is the average absolute difference between each element and a centre point \n    (weighted mean in this case), with each difference being scaled by the respective weight of the data point:\n    WMAD = sum(w * | x - x_weighted_mean |) / sum(w)\n\n    Ensure that the weights are positive and that they sum to 1. Return \"Weights must be positive and sum to 1\" if these conditions are not met.\n\n    >>> weighted_mean_absolute_deviation([(1.0, 0.1), (2.0, 0.2), (3.0, 0.3), (4.0, 0.4)])\n    0.8\n    \"\"\"\n    weights = [w for x, w in numbers]\n    if any(w <= 0 for w in weights) or sum(weights) != 1:\n        return \"Weights must be positive and sum to 1\"\n\n    # Calculate weighted mean\n    weighted_mean = sum(x * w for x, w in numbers)\n\n    # Calculate weighted mean absolute deviation\n    wmad = sum(w * abs(x - weighted_mean) for x, w in numbers) / sum(weights)\n\n    return wmad",
+  "best_source": "from typing import List, Tuple\n\ndef weighted_mean_absolute_deviation(numbers: List[Tuple[float, float]]) -> float:\n    total_weight, sum_x_times_w = (0.0, 0.0)\n    for x, w in numbers:\n        if w <= 0:\n            return 'Weights must be positive and sum to 1'\n        total_weight += w\n        sum_x_times_w += x * w\n    if total_weight != 1.0:\n        return 'Weights must be positive and sum to 1'\n    weighted_mean = sum_x_times_w\n    sum_w_abs_diff = 0.0\n    for x, w in numbers:\n        sum_w_abs_diff += w * abs(x - weighted_mean)\n    return sum_w_abs_diff",
+  "chain": [
+    "GenericSemanticRewriteLLM",
+    "MultipleAssignmentFusion"
+  ],
+  "improvement_pct": 14.48,
+  "baseline_mj": 2.620413,
+  "baseline_std_mj": 0.081852,
+  "best_mj": 2.240982,
+  "co2_search_ug": 10713.68,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 9,
+  "ei_top_k": 2,
+  "wall_s": 433.65,
+  "energy_backend": "psutil",
+  "fallback_escapes_used": 1,
+  "llm_retries": 0,
+  "isolation_successes": 28,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 9,
+    "n_f2_f3_pairs": 9,
+    "f1_f3_pearson": 0.9907304221647315,
+    "f2_f3_pearson": 0.9991728082084287,
+    "f1_f3_mae": 0.048755158781384846,
+    "f2_f3_mae": 0.020956935889449073,
+    "f1_f3_bias": 0.00936727583174726,
+    "f2_f3_bias": -0.008715000323841501,
+    "effective_p_abandon_f1": 0.2,
+    "effective_p_abandon_f2": 0.375
+  },
+  "operator_stats": {
+    "MultipleAssignmentFusion": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    },
+    "LoopGlobalToLocalHoisting": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    },
+    "VectorizationDelegate[loop\u2192numpy]": {
+      "attempts": 4,
+      "confirmations": 4,
+      "rate": 1.0
+    },
+    "ManualReductionToBuiltinsLLM": {
+      "attempts": 2,
+      "confirmations": 1,
+      "rate": 0.5
+    }
+  }
+}

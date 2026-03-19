@@ -1,3 +1,4 @@
+# HIDDEN ASSUMPTION: The input list 'startSequence' will always contain exactly three integers, and 'n' will be a non-negative integer. Additionally, 'p' will be a positive integer.
 def customFibFib(n: int, startSequence: list, p: int):
     """
     The CustomFibFib sequence is a sequence similar to the Fibonacci sequence with a twist: Instead of 2, we have 3 starting values 

@@ -1,0 +1,2 @@
+variant,runs_total,runs_ok,runs_failed_or_other,success_rate_pct,mean_improvement_pct,median_improvement_pct,mean_duration_s,mean_co2_search_ug,sum_co2_search_ug,mean_f3_evals,mean_candidates_generated,mean_correctness_pass,mean_confirmed_candidates,mean_correctness_rate_pct,mean_confirmed_per_f3_pct
+main,9,9,0,100.0,4.4432,0.0,169.9859,8779.2907,79013.616,2.8889,4.5556,3.6667,1.7778,73.1481,39.5062
