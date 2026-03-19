@@ -1,0 +1,38 @@
+[
+  {
+    "metrics": {
+      "duration_seconds": 0.0011142776620108633,
+      "energy_joules": 0.040831865999999994,
+      "emissions_kg": 0.0
+    },
+    "mutation": "Pattern_LoopOptimization",
+    "generation": 1
+  },
+  {
+    "metrics": {
+      "duration_seconds": 0.0011142776620108633,
+      "energy_joules": 0.040831865999999994,
+      "emissions_kg": 0.0
+    },
+    "mutation": "Merged_ConditionalSimplification_LoopOptimization",
+    "generation": 2
+  },
+  {
+    "metrics": {
+      "duration_seconds": 0.0011142776620108633,
+      "energy_joules": 0.040831865999999994,
+      "emissions_kg": 0.0
+    },
+    "mutation": "Merged_LoopOptimization_ErrorHandling_FunctionComposition",
+    "generation": 2
+  },
+  {
+    "metrics": {
+      "duration_seconds": 0.0011142776620108633,
+      "energy_joules": 0.040831865999999994,
+      "emissions_kg": 0.0
+    },
+    "mutation": "Pattern_ErrorHandling",
+    "generation": 2
+  }
+]

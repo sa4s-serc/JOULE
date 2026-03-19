@@ -1,0 +1,198 @@
+{
+  "optimization_summary": {
+    "generations_completed": 6,
+    "total_solutions": 4,
+    "best_solution_metrics": {
+      "duration_seconds": 0.0011142776620108633,
+      "energy_joules": 0.040831865999999994,
+      "emissions_kg": 0.0
+    },
+    "cache_efficiency": 10,
+    "memory_optimization": {
+      "total_accesses": 742,
+      "copy_operations": 0,
+      "shared_accesses": 742,
+      "copy_ratio": 0.0,
+      "sharing_efficiency": 1.0,
+      "memory_saved_mb": 0.0,
+      "active_wrappers": 167,
+      "sharing_cache_size": 0
+    },
+    "stagnation_counter": 5,
+    "mutation_stats": {
+      "total_logged": 94,
+      "validation_failures": 0,
+      "evaluated": 94,
+      "evaluation_successes": 94,
+      "pareto_accepted": 7,
+      "per_mutator": {
+        "baseline": {
+          "total_attempts": 1,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 1,
+          "pareto_accepted": 1
+        },
+        "CodePatternOptimizer": {
+          "total_attempts": 63,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 63,
+          "pareto_accepted": 5
+        },
+        "ComplexityReducer": {
+          "total_attempts": 8,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 8,
+          "pareto_accepted": 1
+        },
+        "DeadCodeEliminator": {
+          "total_attempts": 1,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 1,
+          "pareto_accepted": 0
+        },
+        "unknown": {
+          "total_attempts": 6,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 6,
+          "pareto_accepted": 0
+        },
+        "ConstantOptimizer": {
+          "total_attempts": 15,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 15,
+          "pareto_accepted": 0
+        }
+      }
+    },
+    "learning_stats": {
+      "total_outcomes": 0,
+      "mutator_count": 47,
+      "top_mutators": [
+        [
+          "ConstantOptimizer:Constant_Folding",
+          0.5,
+          0.0
+        ],
+        [
+          "ConstantOptimizer:Constant_Propagation",
+          0.5,
+          0.0
+        ],
+        [
+          "ConstantOptimizer:Constant_BooleanSimplification",
+          0.5,
+          0.0
+        ],
+        [
+          "ConstantOptimizer:Constant_ArithmeticSimplification",
+          0.5,
+          0.0
+        ],
+        [
+          "DeadCodeEliminator:DeadCode_UnreachableElimination",
+          0.5,
+          0.0
+        ],
+        [
+          "DeadCodeEliminator:DeadCode_UnusedVariableElimination",
+          0.5,
+          0.0
+        ],
+        [
+          "DeadCodeEliminator:DeadCode_PureExpressionElimination",
+          0.5,
+          0.0
+        ],
+        [
+          "DeadCodeEliminator:DeadCode_EmptyBlockElimination",
+          0.5,
+          0.0
+        ],
+        [
+          "LoopMicroOptimizer:Loop_SmallUnrolling",
+          0.5,
+          0.0
+        ],
+        [
+          "LoopMicroOptimizer:Loop_StrengthReduction",
+          0.5,
+          0.0
+        ]
+      ],
+      "feature_importance": {}
+    },
+    "parallel_stats": {
+      "execution_stats": {
+        "total_tasks": 9,
+        "completed_tasks": 1,
+        "failed_tasks": 0,
+        "success_rate": 0.1111111111111111,
+        "execution_time": 0.024276256561279297,
+        "throughput": 41.192512423641254,
+        "parallel_efficiency": 1.0,
+        "conflict_resolutions": 65
+      },
+      "memory_stats": {
+        "total_accesses": 742,
+        "copy_operations": 0,
+        "shared_accesses": 742,
+        "copy_ratio": 0.0,
+        "sharing_efficiency": 1.0,
+        "memory_saved_mb": 0.0,
+        "active_wrappers": 167,
+        "sharing_cache_size": 0
+      },
+      "config": {
+        "max_workers": 7,
+        "enable_process_pool": false,
+        "max_memory_usage_mb": 2048,
+        "conflict_resolution_strategy": "merge"
+      }
+    },
+    "llm_stats": {
+      "batch_stats": {
+        "total_requests": 0,
+        "successful_requests": 0,
+        "failed_requests": 0,
+        "cached_requests": 0,
+        "success_rate": 0.0,
+        "cache_hit_rate": 0.0,
+        "total_tokens_used": 0,
+        "total_cost_usd": 0.0,
+        "average_latency_ms": 0.0,
+        "batch_efficiency": 0.0
+      },
+      "cache_stats": {
+        "size": 0,
+        "max_size": 1000,
+        "hit_rate": 0.0,
+        "ttl_seconds": 3600
+      },
+      "config": {
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "max_concurrent_requests": 5,
+        "rate_limit_rpm": 60,
+        "rate_limit_tpm": 90000
+      }
+    }
+  },
+  "best_solution": {
+    "metrics": {
+      "duration_seconds": 0.0011142776620108633,
+      "energy_joules": 0.040831865999999994,
+      "emissions_kg": 0.0
+    },
+    "mutation_type": "Pattern_LoopOptimization",
+    "generation": 1
+  },
+  "total_solutions": 4,
+  "optimization_time": 191.2978572845459,
+  "output_file": "evoeval_standard_four_20260319_155248/EvoEval_difficult_90/optimized_target.py"
+}

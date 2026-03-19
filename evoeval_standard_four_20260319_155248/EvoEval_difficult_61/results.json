@@ -1,0 +1,184 @@
+{
+  "optimization_summary": {
+    "generations_completed": 8,
+    "total_solutions": 2,
+    "best_solution_metrics": {
+      "duration_seconds": 0.0006259674860048108,
+      "energy_joules": 0.022524416999999998,
+      "emissions_kg": 0.0
+    },
+    "cache_efficiency": 8,
+    "memory_optimization": {
+      "total_accesses": 873,
+      "copy_operations": 0,
+      "shared_accesses": 873,
+      "copy_ratio": 0.0,
+      "sharing_efficiency": 1.0,
+      "memory_saved_mb": 0.0,
+      "active_wrappers": 170,
+      "sharing_cache_size": 0
+    },
+    "stagnation_counter": 5,
+    "mutation_stats": {
+      "total_logged": 81,
+      "validation_failures": 0,
+      "evaluated": 81,
+      "evaluation_successes": 79,
+      "pareto_accepted": 6,
+      "per_mutator": {
+        "baseline": {
+          "total_attempts": 1,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 1,
+          "pareto_accepted": 1
+        },
+        "CodePatternOptimizer": {
+          "total_attempts": 71,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 71,
+          "pareto_accepted": 5
+        },
+        "DeadCodeEliminator": {
+          "total_attempts": 3,
+          "validation_failures": 0,
+          "evaluation_failures": 0,
+          "successes": 3,
+          "pareto_accepted": 0
+        },
+        "unknown": {
+          "total_attempts": 6,
+          "validation_failures": 0,
+          "evaluation_failures": 2,
+          "successes": 4,
+          "pareto_accepted": 0
+        }
+      }
+    },
+    "learning_stats": {
+      "total_outcomes": 0,
+      "mutator_count": 47,
+      "top_mutators": [
+        [
+          "PythonicIdiomOptimizer:Idiom_ComprehensionOptimization",
+          0.5,
+          0.0
+        ],
+        [
+          "PythonicIdiomOptimizer:Idiom_BuiltinUtilization",
+          0.5,
+          0.0
+        ],
+        [
+          "PythonicIdiomOptimizer:Idiom_IteratorOptimization",
+          0.5,
+          0.0
+        ],
+        [
+          "PythonicIdiomOptimizer:Idiom_ContextManagerUsage",
+          0.5,
+          0.0
+        ],
+        [
+          "CodePatternOptimizer:Pattern_LoopOptimization",
+          0.5,
+          0.0
+        ],
+        [
+          "CodePatternOptimizer:Pattern_ConditionalSimplification",
+          0.5,
+          0.0
+        ],
+        [
+          "CodePatternOptimizer:Pattern_FunctionComposition",
+          0.5,
+          0.0
+        ],
+        [
+          "CodePatternOptimizer:Pattern_ErrorHandling",
+          0.5,
+          0.0
+        ],
+        [
+          "DataStructureOptimizer:DataStructure_MembershipOptimization",
+          0.5,
+          0.0
+        ],
+        [
+          "DataStructureOptimizer:DataStructure_AccessPatternOptimization",
+          0.5,
+          0.0
+        ]
+      ],
+      "feature_importance": {}
+    },
+    "parallel_stats": {
+      "execution_stats": {
+        "total_tasks": 9,
+        "completed_tasks": 1,
+        "failed_tasks": 0,
+        "success_rate": 0.1111111111111111,
+        "execution_time": 0.028696298599243164,
+        "throughput": 34.84769983632572,
+        "parallel_efficiency": 1.0,
+        "conflict_resolutions": 40
+      },
+      "memory_stats": {
+        "total_accesses": 873,
+        "copy_operations": 0,
+        "shared_accesses": 873,
+        "copy_ratio": 0.0,
+        "sharing_efficiency": 1.0,
+        "memory_saved_mb": 0.0,
+        "active_wrappers": 170,
+        "sharing_cache_size": 0
+      },
+      "config": {
+        "max_workers": 7,
+        "enable_process_pool": false,
+        "max_memory_usage_mb": 2048,
+        "conflict_resolution_strategy": "merge"
+      }
+    },
+    "llm_stats": {
+      "batch_stats": {
+        "total_requests": 0,
+        "successful_requests": 0,
+        "failed_requests": 0,
+        "cached_requests": 0,
+        "success_rate": 0.0,
+        "cache_hit_rate": 0.0,
+        "total_tokens_used": 0,
+        "total_cost_usd": 0.0,
+        "average_latency_ms": 0.0,
+        "batch_efficiency": 0.0
+      },
+      "cache_stats": {
+        "size": 0,
+        "max_size": 1000,
+        "hit_rate": 0.0,
+        "ttl_seconds": 3600
+      },
+      "config": {
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "max_concurrent_requests": 5,
+        "rate_limit_rpm": 60,
+        "rate_limit_tpm": 90000
+      }
+    }
+  },
+  "best_solution": {
+    "metrics": {
+      "duration_seconds": 0.0006259674860048108,
+      "energy_joules": 0.022524416999999998,
+      "emissions_kg": 0.0
+    },
+    "mutation_type": "Merged_FunctionComposition",
+    "generation": 3
+  },
+  "total_solutions": 2,
+  "optimization_time": 309.06543731689453,
+  "output_file": "evoeval_standard_four_20260319_155248/EvoEval_difficult_61/optimized_target.py"
+}
