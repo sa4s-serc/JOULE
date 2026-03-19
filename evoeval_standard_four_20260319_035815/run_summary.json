@@ -1,0 +1,42 @@
+{
+  "config": {
+    "problems": [
+      "EvoEval_difficult_4",
+      "EvoEval_difficult_61",
+      "EvoEval_difficult_63",
+      "EvoEval_difficult_90"
+    ],
+    "level": "advanced",
+    "generations": 10,
+    "population_size": 8,
+    "llm_provider": "gemini",
+    "test_iterations": 3,
+    "test_warmup_iterations": 5,
+    "test_seed": 42,
+    "proxy_filter": false,
+    "timestamp": "20260319_035815"
+  },
+  "results": {
+    "EvoEval_difficult_4": {
+      "status": "success",
+      "elapsed_s": 21.766310691833496,
+      "output_dir": "evoeval_standard_four_20260319_035815/EvoEval_difficult_4"
+    },
+    "EvoEval_difficult_61": {
+      "status": "success",
+      "elapsed_s": 3.648282289505005,
+      "output_dir": "evoeval_standard_four_20260319_035815/EvoEval_difficult_61"
+    },
+    "EvoEval_difficult_63": {
+      "status": "success",
+      "elapsed_s": 5.2132627964019775,
+      "output_dir": "evoeval_standard_four_20260319_035815/EvoEval_difficult_63"
+    },
+    "EvoEval_difficult_90": {
+      "status": "success",
+      "elapsed_s": 6.821588516235352,
+      "output_dir": "evoeval_standard_four_20260319_035815/EvoEval_difficult_90"
+    }
+  },
+  "total_elapsed_s": 37.45015478134155
+}

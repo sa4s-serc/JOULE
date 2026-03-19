@@ -58,6 +58,7 @@ class EvoEvalBenchmarkRunner:
         test_iterations: int = 3,
         test_warmup_iterations: int = 5,
         test_seed: int = 42,
+        harness_repetitions: int = 500,
     ):
         self.level = level
         self.generations = generations
@@ -67,6 +68,7 @@ class EvoEvalBenchmarkRunner:
         self.test_iterations = test_iterations
         self.test_warmup_iterations = test_warmup_iterations
         self.test_seed = test_seed
+        self.harness_repetitions = harness_repetitions
         
         # Setup output directory
         if output_dir is None:
@@ -167,6 +169,7 @@ class EvoEvalBenchmarkRunner:
             "--test-iterations", str(self.test_iterations),
             "--test-warmup-iterations", str(self.test_warmup_iterations),
             "--test-seed", str(self.test_seed),
+            "--harness-repetitions", str(self.harness_repetitions),
         ]
         
         if self.visualize:
@@ -279,7 +282,8 @@ class EvoEvalBenchmarkRunner:
             f.write(f"- LLM Provider: {self.llm_provider}\n")
             f.write(f"- Test Iterations: {self.test_iterations}\n")
             f.write(f"- Test Warmup Iterations: {self.test_warmup_iterations}\n")
-            f.write(f"- Test Seed: {self.test_seed}\n\n")
+            f.write(f"- Test Seed: {self.test_seed}\n")
+            f.write(f"- Harness Repetitions: {self.harness_repetitions}\n\n")
             
             f.write("## Executive Summary\n\n")
             f.write(f"- **Total Problems**: {self.summary_stats['total_problems']}\n")
@@ -563,7 +567,14 @@ def main():
         default=42,
         help="Base seed for reproducible test execution (default: 42)"
     )
-    
+    parser.add_argument(
+        "--harness-repetitions",
+        type=int,
+        default=500,
+        help="Repetitions of test function inside one monitored window (default: 500, "
+             "gives ~115ms for 0.23ms functions so CodeCarbon captures at least one sample)"
+    )
+
     args = parser.parse_args()
     
     # Adjust for quick mode
@@ -581,7 +592,8 @@ def main():
         llm_provider=args.llm,
         test_iterations=args.test_iterations,
         test_warmup_iterations=args.test_warmup_iterations,
-        test_seed=args.test_seed
+        test_seed=args.test_seed,
+        harness_repetitions=args.harness_repetitions,
     )
     
     runner.run_all_benchmarks()

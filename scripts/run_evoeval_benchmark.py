@@ -58,6 +58,7 @@ class EvoEvalBenchmarkRunner:
         test_iterations: int = 3,
         test_warmup_iterations: int = 5,
         test_seed: int = 42,
+        harness_repetitions: int = 500,
     ):
         self.level = level
         self.generations = generations
@@ -67,6 +68,7 @@ class EvoEvalBenchmarkRunner:
         self.test_iterations = test_iterations
         self.test_warmup_iterations = test_warmup_iterations
         self.test_seed = test_seed
+        self.harness_repetitions = harness_repetitions
         
         # Setup output directory
         if output_dir is None:
@@ -167,6 +169,7 @@ class EvoEvalBenchmarkRunner:
             "--test-iterations", str(self.test_iterations),
             "--test-warmup-iterations", str(self.test_warmup_iterations),
             "--test-seed", str(self.test_seed),
+            "--harness-repetitions", str(self.harness_repetitions),
         ]
         
         if self.visualize:
@@ -233,19 +236,26 @@ class EvoEvalBenchmarkRunner:
                     result["pareto_solutions"] = pareto_data
                     result["pareto_count"] = len(pareto_data)
                     
-                    # Calculate improvement
-                    if len(pareto_data) >= 2 and "metrics" in pareto_data[0]:
+                    # Calculate improvement using actual HEDGE metric keys
+                    if len(pareto_data) >= 1 and "metrics" in pareto_data[0]:
                         baseline = pareto_data[0]["metrics"]
-                        best = min(pareto_data, key=lambda x: x["metrics"].get("latency_ms", float('inf')))
-                        
-                        baseline_latency = baseline.get("latency_ms", 0)
-                        best_latency = best["metrics"].get("latency_ms", 0)
-                        
-                        if baseline_latency and baseline_latency > 0:
-                            improvement = ((baseline_latency - best_latency) / baseline_latency) * 100
-                            result["improvement_percent"] = improvement
-                            result["baseline_latency_ms"] = baseline_latency
-                            result["best_latency_ms"] = best_latency
+                        best = min(pareto_data, key=lambda x: x["metrics"].get("energy_joules", float('inf')))
+
+                        baseline_energy = baseline.get("energy_joules", 0)
+                        best_energy = best["metrics"].get("energy_joules", 0)
+                        baseline_time = baseline.get("duration_seconds", 0)
+                        best_time = best["metrics"].get("duration_seconds", 0)
+
+                        if baseline_energy and baseline_energy > 0:
+                            energy_improvement = ((baseline_energy - best_energy) / baseline_energy) * 100
+                            result["improvement_percent"] = energy_improvement
+                            result["baseline_energy_joules"] = baseline_energy
+                            result["best_energy_joules"] = best_energy
+                        if baseline_time and baseline_time > 0:
+                            time_improvement = ((baseline_time - best_time) / baseline_time) * 100
+                            result["time_improvement_percent"] = time_improvement
+                            result["baseline_duration_s"] = baseline_time
+                            result["best_duration_s"] = best_time
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 result["pareto_error"] = f"Failed to parse Pareto results: {e}"
         
@@ -258,10 +268,11 @@ class EvoEvalBenchmarkRunner:
             except (json.JSONDecodeError, IOError) as e:
                 result["statistics_error"] = f"Failed to parse statistics: {e}"
         
-        # Check for optimized code
-        optimized_file = problem_output / "optimized.py"
-        if optimized_file.exists():
+        # Check for optimized code (HEDGE saves as optimized_{target_name}.py)
+        optimized_files = list(problem_output.glob("optimized_*.py"))
+        if optimized_files:
             result["optimized_code_available"] = True
+            result["optimized_code_path"] = str(optimized_files[0])
         
         return result
     
@@ -279,7 +290,8 @@ class EvoEvalBenchmarkRunner:
             f.write(f"- LLM Provider: {self.llm_provider}\n")
             f.write(f"- Test Iterations: {self.test_iterations}\n")
             f.write(f"- Test Warmup Iterations: {self.test_warmup_iterations}\n")
-            f.write(f"- Test Seed: {self.test_seed}\n\n")
+            f.write(f"- Test Seed: {self.test_seed}\n")
+            f.write(f"- Harness Repetitions: {self.harness_repetitions}\n\n")
             
             f.write("## Executive Summary\n\n")
             f.write(f"- **Total Problems**: {self.summary_stats['total_problems']}\n")
@@ -296,32 +308,36 @@ class EvoEvalBenchmarkRunner:
                 f.write(f"- **Worst Improvement**: {min_improvement:.2f}%\n")
             
             f.write("\n## Detailed Results\n\n")
-            f.write("| Problem | Status | Improvement | Baseline (ms) | Best (ms) | Pareto Solutions | Time (s) |\n")
-            f.write("|---------|--------|-------------|---------------|-----------|------------------|----------|\n")
-            
+            f.write("| Problem | Status | Energy Impr. | Time Impr. | Baseline Energy (J) | Best Energy (J) | Pareto Solutions | Time (s) |\n")
+            f.write("|---------|--------|--------------|------------|---------------------|-----------------|------------------|----------|\n")
+
             for problem, data in self.results.items():
                 status = data.get("status", "unknown")
-                
-                # Safely format numeric values
+
                 try:
-                    improvement = f"{float(data.get('improvement_percent', 0)):.2f}%" if "improvement_percent" in data else "N/A"
+                    energy_impr = f"{float(data['improvement_percent']):.2f}%" if "improvement_percent" in data else "N/A"
                 except (ValueError, TypeError):
-                    improvement = "N/A"
-                    
+                    energy_impr = "N/A"
+
                 try:
-                    baseline = f"{float(data.get('baseline_latency_ms', 0)):.2f}" if "baseline_latency_ms" in data else "N/A"
+                    time_impr = f"{float(data['time_improvement_percent']):.2f}%" if "time_improvement_percent" in data else "N/A"
+                except (ValueError, TypeError):
+                    time_impr = "N/A"
+
+                try:
+                    baseline = f"{float(data['baseline_energy_joules']):.4f}" if "baseline_energy_joules" in data else "N/A"
                 except (ValueError, TypeError):
                     baseline = "N/A"
-                    
+
                 try:
-                    best = f"{float(data.get('best_latency_ms', 0)):.2f}" if "best_latency_ms" in data else "N/A"
+                    best = f"{float(data['best_energy_joules']):.4f}" if "best_energy_joules" in data else "N/A"
                 except (ValueError, TypeError):
                     best = "N/A"
-                    
+
                 pareto_count = data.get("pareto_count", 0)
                 exec_time = f"{data.get('execution_time', 0):.2f}"
-                
-                f.write(f"| {problem} | {status} | {improvement} | {baseline} | {best} | {pareto_count} | {exec_time} |\n")
+
+                f.write(f"| {problem} | {status} | {energy_impr} | {time_impr} | {baseline} | {best} | {pareto_count} | {exec_time} |\n")
             
             f.write("\n## Problem-Specific Analysis\n\n")
             for problem, data in self.results.items():

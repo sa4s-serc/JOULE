@@ -124,6 +124,19 @@ console = Console()
     default="standard",
     help="Execution mode for optimization runtime",
 )
+@click.option(
+    "--proxy-filter/--no-proxy-filter",
+    default=True,
+    help="Enable/disable energy proxy filter (static metric pre-screening)",
+)
+@click.option(
+    "--harness-repetitions",
+    type=int,
+    default=1,
+    help="Number of times to repeat the test function inside one monitored harness run. "
+         "Increase (e.g. 500) for very fast functions so CodeCarbon (100ms sampling) "
+         "captures at least one sample. Metrics are normalised per-call.",
+)
 
 def optimize_cmd(
     target,
@@ -161,6 +174,8 @@ def optimize_cmd(
     test_warmup_iterations=None,
     test_seed=None,
     mode="standard",
+    proxy_filter=True,
+    harness_repetitions=1,
 ):
     """
     Optimize Python code using hierarchical evolutionary strategies.
@@ -406,11 +421,13 @@ def optimize_cmd(
                 "adaptive_parameters": adaptive,
                 "max_workers": max_workers,
                 "max_memory_mb": max_memory_mb,
+                "proxy_filter": proxy_filter,
             },
             "test_execution": {
                 "test_iterations": test_iterations,
                 "test_warmup_iterations": test_warmup_iterations,
                 "test_seed": test_seed,
+                "harness_repetitions": harness_repetitions,
             },
             "timestamp": datetime.now().isoformat(),
             "engine_type": mode,
@@ -439,6 +456,7 @@ def optimize_cmd(
                 samples=test_iterations,
                 warmup_iterations=test_warmup_iterations,
                 base_seed=test_seed,
+                harness_repetitions=harness_repetitions,
             )
             progress.update(task, description="✓ Green Gym runner initialized")
             progress.update(task, description="✓ Mutators initialized")
@@ -473,6 +491,7 @@ def optimize_cmd(
                 adaptive_mutation_rate=adaptive,
                 early_stopping_patience=opt_cfg.get("early_stopping_patience", 5),
                 allowed_imports=list(allowed_imports_set),
+                enable_proxy_filter=proxy_filter,
             )
 
             # Event callback for status updates
@@ -692,11 +711,11 @@ def optimize_cmd(
         print_warning("Optimization interrupted by user")
         return
     except Exception as e:
+        import traceback as _tb
         print_error(f"Optimization failed: {e}")
+        logger.error(f"Optimization failed: {e}\n{_tb.format_exc()}")
         if verbose:
-            import traceback
-
-            console.print(traceback.format_exc())
+            console.print(_tb.format_exc())
         return
 
 

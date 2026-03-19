@@ -205,9 +205,16 @@ def create_llm_client(
     if api_key is None:
         api_key = os.getenv(f"{provider.upper()}_API_KEY")
 
+    # Fallback: extract first key from the multi-key rotation variable
+    if not api_key and provider.lower() == "gemini":
+        multi_keys = os.getenv("GEMINI_API_KEYS", "")
+        if multi_keys:
+            api_key = multi_keys.split(",")[0].strip()
+
     if not api_key:
         raise ValueError(
-            f"API key not found for {provider}. Set {provider.upper()}_API_KEY environment variable."
+            f"API key not found for {provider}. "
+            f"Set {provider.upper()}_API_KEY (or GEMINI_API_KEYS for Gemini) environment variable."
         )
 
     provider_lower = provider.lower()

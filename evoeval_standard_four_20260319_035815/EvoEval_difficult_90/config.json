@@ -1,0 +1,29 @@
+{
+  "target": "evoeval_benchmark/EvoEval_difficult_90/target.py",
+  "tests": "evoeval_benchmark/EvoEval_difficult_90/test_target.py",
+  "level": "advanced",
+  "layers": null,
+  "allowed_imports": null,
+  "generations": 10,
+  "population_size": 8,
+  "timeout": 600,
+  "llm_provider": "gemini",
+  "llm_model": null,
+  "advanced_features": {
+    "parallel_processing": true,
+    "intelligent_selection": true,
+    "batch_llm": true,
+    "memory_optimization": true,
+    "adaptive_parameters": true,
+    "max_workers": 8,
+    "max_memory_mb": 2048,
+    "proxy_filter": false
+  },
+  "test_execution": {
+    "test_iterations": 3,
+    "test_warmup_iterations": 5,
+    "test_seed": 42
+  },
+  "timestamp": "2026-03-19T03:58:46.541530",
+  "engine_type": "standard"
+}

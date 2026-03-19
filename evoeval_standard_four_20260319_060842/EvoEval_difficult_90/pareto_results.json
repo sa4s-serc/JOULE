@@ -1,0 +1,11 @@
+[
+  {
+    "metrics": {
+      "duration_seconds": 0.0011736963519360872,
+      "energy_joules": 0.0,
+      "emissions_kg": 0.0
+    },
+    "mutation": "Constant_Propagation",
+    "generation": 1
+  }
+]

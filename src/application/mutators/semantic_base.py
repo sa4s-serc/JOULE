@@ -12,8 +12,10 @@ Import validation has been moved to src.utils.import_validator for centralizatio
 """
 
 import hashlib
+import inspect
 import logging
-from typing import Dict, Optional, Set
+import time
+from typing import Any, Dict, List, Optional, Set
 
 from src.domain.interfaces import Mutator
 from src.domain.ir import schema
@@ -23,6 +25,19 @@ from src.utils.comment_sanitizer import sanitize_code_for_llm
 from src.utils.import_validator import ImportValidator
 
 logger = logging.getLogger(__name__)
+
+# Module-level log of every LLM API call made during optimization
+_llm_call_log: List[Dict[str, Any]] = []
+
+
+def get_llm_call_log() -> List[Dict[str, Any]]:
+    """Return the accumulated LLM call log."""
+    return _llm_call_log
+
+
+def clear_llm_call_log() -> None:
+    """Reset the LLM call log (call before each optimization run)."""
+    _llm_call_log.clear()
 
 
 class LLMResponseCache:
@@ -368,14 +383,73 @@ Return ONLY the fixed code:"""
         Get LLM completion with caching support.
 
         Checks cache first, falls back to API call if not cached.
+        Logs every call (hit or miss) to the module-level _llm_call_log.
         """
+        # Determine caller strategy (2 frames up: _mutate_with_prompt -> strategy method)
+        caller_strategy = ""
+        try:
+            stack = inspect.stack()
+            for frame_info in stack[2:6]:
+                fname = frame_info.function
+                if fname not in ("_complete_with_cache", "_mutate_with_prompt", "<module>"):
+                    caller_strategy = fname
+                    break
+        except Exception:
+            pass
+
+        model_name = getattr(self.llm, "model_name", getattr(self.llm, "model", "unknown"))
+        mutator_class = self.__class__.__name__
+
+        cache_hit = False
         if self.use_cache:
             cached = self._cache.get(prompt)
             if cached is not None:
                 logger.debug("LLM cache hit")
+                _llm_call_log.append({
+                    "timestamp": time.time(),
+                    "mutator_name": mutator_class,
+                    "strategy_name": caller_strategy,
+                    "model": model_name,
+                    "prompt_length": len(prompt),
+                    "response_length": len(cached),
+                    "latency_ms": 0.0,
+                    "cache_hit": True,
+                    "success": True,
+                })
                 return cached
 
-        response = self.llm.complete(prompt).strip()
+        t0 = time.time()
+        try:
+            response = self.llm.complete(prompt).strip()
+            latency_ms = (time.time() - t0) * 1000
+            success = True
+        except Exception as exc:
+            latency_ms = (time.time() - t0) * 1000
+            _llm_call_log.append({
+                "timestamp": t0,
+                "mutator_name": mutator_class,
+                "strategy_name": caller_strategy,
+                "model": model_name,
+                "prompt_length": len(prompt),
+                "response_length": 0,
+                "latency_ms": latency_ms,
+                "cache_hit": False,
+                "success": False,
+                "error": str(exc),
+            })
+            raise
+
+        _llm_call_log.append({
+            "timestamp": t0,
+            "mutator_name": mutator_class,
+            "strategy_name": caller_strategy,
+            "model": model_name,
+            "prompt_length": len(prompt),
+            "response_length": len(response),
+            "latency_ms": latency_ms,
+            "cache_hit": False,
+            "success": True,
+        })
 
         if self.use_cache and response:
             self._cache.set(prompt, response)

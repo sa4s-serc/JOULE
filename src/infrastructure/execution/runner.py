@@ -54,18 +54,24 @@ class GreenGymRunner(ICodeRunner):
         max_workers: int = 1,
         warmup_iterations: int = 0,
         base_seed: Optional[int] = None,
+        harness_repetitions: int = 1,
     ):
         """
         Args:
             timeout_seconds: Maximum execution time per sample
             samples: Number of samples to run for metrics aggregation
             max_workers: Number of parallel workers for batch evaluation
+            harness_repetitions: Number of times to repeat the test function inside one
+                monitored harness run. Increase for very fast functions so the energy
+                monitor (CodeCarbon, 100ms sampling) has time to record at least one
+                sample. Reported metrics are normalised per-call (divided by this value).
         """
         self.timeout_seconds = timeout_seconds
         self.samples = max(1, min(samples, MAX_SAMPLES))
         self.max_workers = max_workers
         self.warmup_iterations = max(0, min(warmup_iterations, MAX_WARMUP_ITERATIONS))
         self.base_seed = base_seed
+        self.harness_repetitions = max(1, harness_repetitions)
 
     def run(
         self, code_str: str, test_code_str: str, allowed_imports: Optional[List[str]] = None
@@ -199,6 +205,7 @@ class GreenGymRunner(ICodeRunner):
             env["PYTHONPATH"] = os.getcwd() + os.pathsep + env.get("PYTHONPATH", "")
             env["HEDGE_TEST_ITERATION"] = str(iteration_index)
             env["HEDGE_TEST_WARMUP_ITERATIONS"] = str(self.warmup_iterations)
+            env["HEDGE_HARNESS_REPETITIONS"] = str(self.harness_repetitions)
             if iteration_seed is not None:
                 env["HEDGE_TEST_SEED"] = str(iteration_seed)
 
@@ -302,81 +309,80 @@ if __name__ == "__main__":
         warmup_iters = 0
     if warmup_iters < 0:
         warmup_iters = 0
-    for _ in range(warmup_iters):
-        try:
-            if 'test' in dir() and callable(test):
-                test()
-            else:
-                test_funcs = [
-                    (name, obj) for name, obj in list(globals().items())
-                    if name.startswith('test_') and callable(obj)
-                ]
-                if test_funcs:
-                    for name, func in test_funcs:
-                        func()
-        except Exception:
-            traceback.print_exc()
-    monitor.start()
-    
-    success = False
-    error_msg = ""
-    
+
+    # Number of times to repeat the test inside the monitored window.
+    # Increase via --harness-repetitions for very fast functions so the
+    # energy monitor (CodeCarbon 100 ms sampling) captures at least one sample.
     try:
-        # Get test iteration for passing to test functions
-        test_iteration = int(os.environ.get("HEDGE_TEST_ITERATION", "0"))
-        
-        # Try different test function patterns
+        harness_reps = max(1, int(os.environ.get("HEDGE_HARNESS_REPETITIONS", "1")))
+    except Exception:
+        harness_reps = 1
+
+    def _run_tests_once(test_iteration=0):
         if 'test' in dir() and callable(test):
-            # Check if test function accepts test_iteration parameter
             try:
-                import inspect
-                sig = inspect.signature(test)
+                import inspect as _inspect
+                sig = _inspect.signature(test)
                 if 'test_iteration' in sig.parameters:
                     test(test_iteration=test_iteration)
                 else:
                     test()
             except Exception:
                 test()
-            success = True
         else:
-            # Look for test_* functions
             test_funcs = [
                 (name, obj) for name, obj in list(globals().items())
                 if name.startswith('test_') and callable(obj)
             ]
-            
             if test_funcs:
                 for name, func in test_funcs:
-                    # Check if test function accepts test_iteration parameter
                     try:
-                        import inspect
-                        sig = inspect.signature(func)
+                        import inspect as _inspect
+                        sig = _inspect.signature(func)
                         if 'test_iteration' in sig.parameters:
                             func(test_iteration=test_iteration)
                         else:
                             func()
                     except Exception:
                         func()
-                success = True
-            else:
-                # Assume script body is the test
-                success = True
-                
+
+    for _ in range(warmup_iters):
+        try:
+            _run_tests_once()
+        except Exception:
+            traceback.print_exc()
+
+    monitor.start()
+
+    success = False
+    error_msg = ""
+
+    try:
+        test_iteration = int(os.environ.get("HEDGE_TEST_ITERATION", "0"))
+        # First call validates correctness; subsequent calls are for energy accumulation only
+        _run_tests_once(test_iteration)
+        for _ in range(harness_reps - 1):
+            _run_tests_once(test_iteration)
+        success = True
     except AssertionError as e:
         error_msg = f"Assertion failed: {{e}}"
         traceback.print_exc()
     except Exception as e:
         error_msg = f"Error: {{e}}"
         traceback.print_exc()
-        
+
     metrics = monitor.stop()
-    
+
+    # Normalise to per-call metrics so comparisons are independent of harness_reps
+    if harness_reps > 1:
+        metrics = {{k: v / harness_reps for k, v in metrics.items()}}
+
     result = {{
         "success": success,
         "metrics": metrics,
         "error": error_msg
     }}
-    
+
     print("__HEDGE_RESULT_START__")
     print(json.dumps(result))
     print("__HEDGE_RESULT_END__")

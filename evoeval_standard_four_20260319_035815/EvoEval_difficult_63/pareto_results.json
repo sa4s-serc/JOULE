@@ -1,0 +1,11 @@
+[
+  {
+    "metrics": {
+      "duration_seconds": 0.0005228219088166952,
+      "energy_joules": 0.0,
+      "emissions_kg": 0.0
+    },
+    "mutation": "initial",
+    "generation": 0
+  }
+]
