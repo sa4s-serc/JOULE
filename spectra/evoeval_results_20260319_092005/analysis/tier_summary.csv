@@ -1,4 +1,0 @@
-variant,tier,generated,correct_pass,correctness_rate_pct,f1_count,f2_count,f3_count,confirmed_count,confirmed_per_f3_pct,mean_f3_improvement_pct,median_f3_improvement_pct
-main,H,25,19,76.0,16,16,16,11,68.75,-24.0898,-3.9858
-main,L,8,8,100.0,7,7,7,3,42.8571,3.1932,0.1898
-main,M,8,6,75.0,3,3,3,2,66.6667,2.4618,2.3334
