@@ -1,0 +1,13 @@
+{
+  "task_id": "BigCodeBench/126",
+  "entry_point": "task_func",
+  "libs": [
+    "statistics",
+    "pandas",
+    "numpy",
+    "random"
+  ],
+  "test_cases_count": 2,
+  "seed": 42,
+  "extraction_errors": []
+}

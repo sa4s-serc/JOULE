@@ -1,0 +1,12 @@
+{
+  "task_id": "BigCodeBench/22",
+  "entry_point": "task_func",
+  "libs": [
+    "collections",
+    "random",
+    "itertools"
+  ],
+  "test_cases_count": 7,
+  "seed": 42,
+  "extraction_errors": []
+}

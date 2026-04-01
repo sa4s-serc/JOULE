@@ -1,0 +1,14 @@
+{
+  "created_utc": "2026-03-26T12:41:26.082945+00:00",
+  "repo_root": "/home/shailender/Documents/Hedge/hedge",
+  "tasks_dir": "/tmp/bcb_test",
+  "spectra_script": "/home/shailender/Documents/Hedge/hedge/spectra/spectra.py",
+  "output_root": "/home/shailender/Documents/Hedge/hedge/bigcodebench_spectra_20260326_124126",
+  "budget": 5,
+  "ei_top_k": 2,
+  "no_llm": true,
+  "task_ids": [
+    "BigCodeBench/4"
+  ],
+  "dry_run": true
+}

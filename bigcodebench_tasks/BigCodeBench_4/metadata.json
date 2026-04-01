@@ -1,0 +1,13 @@
+{
+  "task_id": "BigCodeBench/4",
+  "entry_point": "task_func",
+  "libs": [
+    "collections",
+    "itertools"
+  ],
+  "test_cases_count": 6,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:unhashable type: 'list'"
+  ]
+}

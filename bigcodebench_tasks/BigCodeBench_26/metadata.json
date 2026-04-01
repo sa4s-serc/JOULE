@@ -1,0 +1,14 @@
+{
+  "task_id": "BigCodeBench/26",
+  "entry_point": "task_func",
+  "libs": [
+    "base64",
+    "cryptography"
+  ],
+  "test_cases_count": 3,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:Fernet key must be 32 url-safe base64-encoded bytes.",
+    "call_error:Fernet key must be 32 url-safe base64-encoded bytes."
+  ]
+}

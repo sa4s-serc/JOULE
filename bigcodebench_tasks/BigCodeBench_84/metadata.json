@@ -1,0 +1,17 @@
+{
+  "task_id": "BigCodeBench/84",
+  "entry_point": "task_func",
+  "libs": [
+    "pandas",
+    "numpy"
+  ],
+  "test_cases_count": 1,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:n_samples must be a positive integer.",
+    "call_error:products must be a list of strings.",
+    "call_error:profit_margin_min must be less than profit_margin_max and both must be numeric.",
+    "call_error:sales_lower must be less than sales_upper and both must be integers.",
+    "call_error:n_samples must be a positive integer."
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "task_id": "BigCodeBench/27",
+  "entry_point": "task_func",
+  "libs": [
+    "base64",
+    "json",
+    "datetime"
+  ],
+  "test_cases_count": 5,
+  "seed": 42,
+  "extraction_errors": []
+}

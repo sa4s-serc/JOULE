@@ -1,0 +1,16 @@
+{
+  "task_id": "BigCodeBench/141",
+  "entry_point": "task_func",
+  "libs": [
+    "statistics",
+    "pandas",
+    "numpy"
+  ],
+  "test_cases_count": 1,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:rows must be a positive integer greater than 0.",
+    "call_error:rows must be a positive integer greater than 0.",
+    "call_error:rows must be a positive integer greater than 0."
+  ]
+}

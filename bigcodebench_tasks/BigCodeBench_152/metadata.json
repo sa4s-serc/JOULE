@@ -1,0 +1,17 @@
+{
+  "task_id": "BigCodeBench/152",
+  "entry_point": "task_func",
+  "libs": [
+    "pandas",
+    "numpy",
+    "random"
+  ],
+  "test_cases_count": 1,
+  "seed": 42,
+  "extraction_errors": [
+    "test_error:Traceback (most recent call last):\n  File \"<test>\", line 30, in test_all_students_included\nNameError: name 'STUDENTS' is not defined\n",
+    "test_error:Traceback (most recent call last):\n  File \"<test>\", line 26, in test_average_grade_calculation\nNameError: name 'np' is not defined\n",
+    "test_error:Traceback (most recent call last):\n  File \"<test>\", line 14, in test_dataframe_columns\nNameError: name 'COURSES' is not defined\n",
+    "test_error:Traceback (most recent call last):\n  File \"<test>\", line 35, in test_deterministic_grades\nNameError: name 'COURSES' is not defined\n"
+  ]
+}

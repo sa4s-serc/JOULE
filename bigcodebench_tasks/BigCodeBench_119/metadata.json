@@ -1,0 +1,11 @@
+{
+  "task_id": "BigCodeBench/119",
+  "entry_point": "task_func",
+  "libs": [
+    "numpy",
+    "matplotlib"
+  ],
+  "test_cases_count": 1,
+  "seed": 42,
+  "extraction_errors": []
+}

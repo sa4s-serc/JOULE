@@ -1,0 +1,12 @@
+{
+  "task_id": "BigCodeBench/159",
+  "entry_point": "task_func",
+  "libs": [
+    "struct",
+    "io",
+    "gzip"
+  ],
+  "test_cases_count": 4,
+  "seed": 42,
+  "extraction_errors": []
+}

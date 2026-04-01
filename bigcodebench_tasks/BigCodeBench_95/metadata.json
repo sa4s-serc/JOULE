@@ -1,0 +1,14 @@
+{
+  "task_id": "BigCodeBench/95",
+  "entry_point": "task_func",
+  "libs": [
+    "pandas",
+    "random"
+  ],
+  "test_cases_count": 1,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:Invalid 'categories': must be a non-empty list.",
+    "call_error:Invalid 'months': must be a non-empty list."
+  ]
+}

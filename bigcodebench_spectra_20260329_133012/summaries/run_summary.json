@@ -1,0 +1,47 @@
+[
+  {
+    "task_id": "BigCodeBench/0",
+    "func_name": "task_func",
+    "status": "planned",
+    "return_code": 0,
+    "duration_s": 0.0,
+    "baseline_mj": null,
+    "best_mj": null,
+    "improvement_pct": null,
+    "f3_evals": null,
+    "co2_search_ug": null,
+    "chain_len": null,
+    "result_json": null,
+    "command": "/home/shailender/Documents/Hedge/hedge/.venv/bin/python /home/shailender/Documents/Hedge/hedge/spectra/spectra.py --source /home/shailender/Documents/Hedge/hedge/bigcodebench_tasks/BigCodeBench_0/target.py --tests /home/shailender/Documents/Hedge/hedge/bigcodebench_tasks/BigCodeBench_0/test_target.py --func task_func --budget 20 --ei-top-k 2 --out-dir /home/shailender/Documents/Hedge/hedge/bigcodebench_spectra_20260329_133012/runs/BigCodeBench_0/artifacts --co2-intensity 475.0"
+  },
+  {
+    "task_id": "BigCodeBench/3",
+    "func_name": "task_func",
+    "status": "planned",
+    "return_code": 0,
+    "duration_s": 0.0,
+    "baseline_mj": null,
+    "best_mj": null,
+    "improvement_pct": null,
+    "f3_evals": null,
+    "co2_search_ug": null,
+    "chain_len": null,
+    "result_json": null,
+    "command": "/home/shailender/Documents/Hedge/hedge/.venv/bin/python /home/shailender/Documents/Hedge/hedge/spectra/spectra.py --source /home/shailender/Documents/Hedge/hedge/bigcodebench_tasks/BigCodeBench_3/target.py --tests /home/shailender/Documents/Hedge/hedge/bigcodebench_tasks/BigCodeBench_3/test_target.py --func task_func --budget 20 --ei-top-k 2 --out-dir /home/shailender/Documents/Hedge/hedge/bigcodebench_spectra_20260329_133012/runs/BigCodeBench_3/artifacts --co2-intensity 475.0"
+  },
+  {
+    "task_id": "BigCodeBench/4",
+    "func_name": "task_func",
+    "status": "planned",
+    "return_code": 0,
+    "duration_s": 0.0,
+    "baseline_mj": null,
+    "best_mj": null,
+    "improvement_pct": null,
+    "f3_evals": null,
+    "co2_search_ug": null,
+    "chain_len": null,
+    "result_json": null,
+    "command": "/home/shailender/Documents/Hedge/hedge/.venv/bin/python /home/shailender/Documents/Hedge/hedge/spectra/spectra.py --source /home/shailender/Documents/Hedge/hedge/bigcodebench_tasks/BigCodeBench_4/target.py --tests /home/shailender/Documents/Hedge/hedge/bigcodebench_tasks/BigCodeBench_4/test_target.py --func task_func --budget 20 --ei-top-k 2 --out-dir /home/shailender/Documents/Hedge/hedge/bigcodebench_spectra_20260329_133012/runs/BigCodeBench_4/artifacts --co2-intensity 475.0"
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "task_id": "BigCodeBench/23",
+  "entry_point": "task_func",
+  "libs": [
+    "numpy",
+    "itertools"
+  ],
+  "test_cases_count": 5,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:attempt to get argmin of an empty sequence"
+  ]
+}

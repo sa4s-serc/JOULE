@@ -1,0 +1,14 @@
+{
+  "task_id": "BigCodeBench/90",
+  "entry_point": "task_func",
+  "libs": [
+    "math",
+    "numpy"
+  ],
+  "test_cases_count": 4,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:'k' must be a non-negative integer",
+    "call_error:'k' must be a non-negative integer"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "task_id": "BigCodeBench/117",
+  "entry_point": "task_func",
+  "libs": [
+    "pandas",
+    "numpy",
+    "random"
+  ],
+  "test_cases_count": 5,
+  "seed": 42,
+  "extraction_errors": [
+    "call_error:num_of_students must be positive."
+  ]
+}
