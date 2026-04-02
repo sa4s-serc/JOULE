@@ -1,0 +1,212 @@
+Loaded 0 TEST_INPUTS, 5 TEST_CASES
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3.1  ▸  task_func  [Gemini ✓  gemini-2.5-flash]
+  Backend: PSUTIL   GP: ✗   Matplotlib: ✓   Process isolation: ✓
+  EI top-k: 2   CO₂ intensity: 475 gCO₂/kWh   Max fallbacks: 3
+════════════════════════════════════════════════════════════════════════
+
+[Oracle] Establishing baseline (F3, 20 reps)…
+[Gemini] 429 on key #0 — rotated to key #1, cooling down 3.5s
+[Gemini] 429 on key #1 — rotated to key #2, cooling down 5.9s
+         Baseline : 0.9680 ± 0.1000 mJ   CO₂≈0.13µg/call   backend=psutil   inner_mult=513
+
+── Iteration 1 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #1/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+  ✓ Correctness [GenericSemanticRewriteLLM]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'GenericSemanticRewriteLLM' Tier H [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: GenericSemanticRewriteLLM
+         F1 (    5 reps):   4.3321 mJ  -347.3%  CV=0.12  P(↑)=1.000  [inner×119]
+         F2 (    6 reps):   5.0266 mJ  -422.3%  CV=0.04  P(↑)=1.000  outliers=2
+[Gemini] 429 on key #2 — rotated to key #3, cooling down 2.9s
+         F3 (   19 reps):   4.1636 mJ  -334.7%  CV=0.13  P(↑)=1.000  CI=[3.9907,4.4527]mJ  outliers=1
+         ✓ Confirmed: P(better)=1.000 >= 0.900  CV=0.13  CI=[3.9907,4.4527]mJ
+  ✓ Post-confirmation regression check passed (cached).
+
+── Iteration 2 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #2/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+  ✓ Correctness [GenericSemanticRewriteLLM]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'GenericSemanticRewriteLLM' Tier H [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: GenericSemanticRewriteLLM
+         F1 (    5 reps):   1.0545 mJ   -11.3%  CV=0.17  P(↑)=0.868  [inner×265]
+         F2 (    8 reps):   1.1073 mJ   -14.1%  CV=0.09  P(↑)=0.998
+         F3 (   20 reps):   1.1338 mJ   -17.3%  CV=0.12  P(↑)=0.000  CI=[1.0806,1.1871]mJ
+         ✗ Not confirmed: P(better)=0.000 < 0.900  CV=0.12  CI=[1.0806,1.1871]mJ
+
+── Iteration 3 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #3/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+  ✓ Correctness [GenericSemanticRewriteLLM]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'GenericSemanticRewriteLLM' Tier H [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: GenericSemanticRewriteLLM
+         F1 (    5 reps):   0.7513 mJ   +23.0%  CV=0.12  P(↑)=0.999  [inner×916]
+         F2 (    8 reps):   0.6687 mJ   +29.9%  CV=0.10  P(↑)=1.000
+[Gemini] 429 on key #3 — rotated to key #4, cooling down 3.3s
+         F3 (   20 reps):   0.6688 mJ   +30.5%  CV=0.10  P(↑)=1.000  CI=[0.6484,0.7066]mJ
+         ✓ Confirmed: P(better)=1.000 >= 0.900  CV=0.10  CI=[0.6484,0.7066]mJ
+  ✓ Post-confirmation regression check passed (cached).
+  ✓ Pareto archive updated — 2 front member(s)
+
+── Iteration 4 ──────────────────────────────────────────────────────
+[Graph] 4 candidate(s) generated
+  ✓ Correctness [VectorizationDelegate[loop→numpy]]: OK
+  ✓ Correctness [MultipleAssignmentFusion]: OK
+  ✓ Correctness [LoopGlobalToLocalHoisting]: OK
+  ✓ Correctness [ItertoolsDelegateLLM]: OK
+[Surrogate] Scored 4 candidates  (trained=False)
+[MFBO] Selected top-2 candidate(s) by UCB×EI:
+  #1 'VectorizationDelegate[loop→numpy]' Tier H [Gemini]   EI=1000.0000×10⁻³
+  #2 'MultipleAssignmentFusion' Tier L   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: VectorizationDelegate[loop→numpy]
+         F1 (    5 reps):   1.1030 mJ   -11.5%  CV=0.19  P(↑)=0.854  [inner×298]
+         F2 (    8 reps):   0.9872 mJ    -2.9%  CV=0.10  P(↑)=0.747
+         F3 (   18 reps):   0.8899 mJ    +7.8%  CV=0.04  P(↑)=0.998  CI=[0.8760,0.9117]mJ  outliers=2
+         ✓ Confirmed: P(better)=0.998 >= 0.900  CV=0.04  CI=[0.8760,0.9117]mJ
+  ✓ Post-confirmation regression check passed (cached).
+      Candidate #2: MultipleAssignmentFusion
+         F1 (    4 reps):   0.6577 mJ   +32.8%  CV=0.05  P(↑)=1.000  [inner×948]  outliers=1
+         F2 (    8 reps):   0.6947 mJ   +27.2%  CV=0.11  P(↑)=1.000
+         F3 (   20 reps):   0.7727 mJ   +20.2%  CV=0.12  P(↑)=1.000  CI=[0.7345,0.8139]mJ
+         ✓ Confirmed: P(better)=1.000 >= 0.900  CV=0.12  CI=[0.7345,0.8139]mJ
+  ✓ Post-confirmation regression check passed (cached).
+
+── Iteration 5 ──────────────────────────────────────────────────────
+[Graph] 2 candidate(s) generated
+  ✓ Correctness [ItertoolsDelegateLLM]: OK
+  ✓ Correctness [VectorizationDelegate[loop→numpy]]: OK
+[Surrogate] Scored 2 candidates  (trained=False)
+[MFBO] Selected top-2 candidate(s) by UCB×EI:
+  #1 'ItertoolsDelegateLLM' Tier M [Gemini]   EI=1000.0000×10⁻³
+  #2 'VectorizationDelegate[loop→numpy]' Tier H [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: ItertoolsDelegateLLM
+         F1 (    5 reps):   0.6837 mJ   +28.7%  CV=0.04  P(↑)=1.000  [inner×918]
+         F2 (    8 reps):   0.6968 mJ   +27.9%  CV=0.07  P(↑)=1.000
+         F3 (   20 reps):   0.7132 mJ   +25.7%  CV=0.10  P(↑)=1.000  CI=[0.6905,0.7494]mJ
+         ✓ Confirmed: P(better)=1.000 >= 0.900  CV=0.10  CI=[0.6905,0.7494]mJ
+  ✓ Post-confirmation regression check passed (cached).
+      Candidate #2: VectorizationDelegate[loop→numpy]
+         F1 (    5 reps):   0.9712 mJ    -1.3%  CV=0.09  P(↑)=0.605  [inner×491]
+         F2 (    8 reps):   1.0197 mJ    -7.0%  CV=0.16  P(↑)=0.848
+         F3 (   20 reps):   1.0865 mJ   -13.0%  CV=0.19  P(↑)=0.990  CI=[1.0106,1.1948]mJ
+         ✓ Confirmed: P(better)=0.990 >= 0.900  CV=0.19  CI=[1.0106,1.1948]mJ
+  ✓ Post-confirmation regression check passed (cached).
+
+── Iteration 6 ──────────────────────────────────────────────────────
+[Graph] 2 candidate(s) generated
+  ✓ Correctness [ItertoolsDelegateLLM]: OK
+  ✓ Correctness [VectorizationDelegate[loop→numpy]]: OK
+[Surrogate] Scored 2 candidates  (trained=False)
+[MFBO] Selected top-2 candidate(s) by UCB×EI:
+  #1 'ItertoolsDelegateLLM' Tier M [Gemini]   EI=1000.0000×10⁻³
+  #2 'VectorizationDelegate[loop→numpy]' Tier H [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: ItertoolsDelegateLLM
+         F1 (    5 reps):   0.7580 mJ   +20.5%  CV=0.15  P(↑)=0.992  [inner×924]
+         F2 (    8 reps):   0.7456 mJ   +22.2%  CV=0.16  P(↑)=0.999
+         F3 (   20 reps):   0.7605 mJ   +21.2%  CV=0.10  P(↑)=1.000  CI=[0.7278,0.7985]mJ
+         ✓ Confirmed: P(better)=1.000 >= 0.900  CV=0.10  CI=[0.7278,0.7985]mJ
+  ✓ Post-confirmation regression check passed (cached).
+      Candidate #2: VectorizationDelegate[loop→numpy]
+         F1 (    5 reps):   0.9885 mJ    -2.9%  CV=0.04  P(↑)=0.829  [inner×511]
+         F2 (    8 reps):   1.0931 mJ   -12.5%  CV=0.16  P(↑)=0.954
+         F3 (   20 reps):   1.0002 mJ    -3.4%  CV=0.09  P(↑)=0.136  CI=[0.9642,1.0442]mJ
+         ✗ Not confirmed: P(better)=0.136 < 0.900  CV=0.09  CI=[0.9642,1.0442]mJ
+
+[MFBO] Converged (3 iterations without Pareto progress).
+
+[Isolation] Successes: 28   Failures: 0   Adaptive-rep escalations: 0   LLM retries: 0
+[Calibrator] F1→F3 pairs=9  r=0.9965627233173331  MAE=0.08202239821043159  bias=-0.007031816363698478  eff_P_abandon=0.200
+[Calibrator] F2→F3 pairs=9  r=0.998695336608343  eff_P_abandon=0.375
+
+[UCB] Operator performance summary:
+  VectorizationDelegate[loop→numpy]             attempts=  3  confirmed=  2  rate=0.67
+  ItertoolsDelegateLLM                          attempts=  2  confirmed=  2  rate=1.00
+  MultipleAssignmentFusion                      attempts=  1  confirmed=  1  rate=1.00
+
+════════════════════════════════════════════════════════════════════════
+  Results
+════════════════════════════════════════════════════════════════════════
+
+  Chain        : GenericSemanticRewriteLLM
+  Baseline     : 0.9680 ± 0.1000 mJ
+  Optimised    : 0.6688 mJ
+  Improvement  : 30.91%
+  CO₂ search   : 9190.3 µg eq. (475 gCO₂/kWh)
+  F3 evals     : 9 / 20
+  Fallbacks    : 3 / 3
+  Wall-clock   : 228.6s
+
+  Optimised source:
+
+    from itertools import zip_longest
+    import math
+    
+    def task_func(l1, l2, THRESHOLD = 0.5):
+        min_diff = math.inf
+        closest_element = None
+        found_element = False
+    
+        for pair in zip_longest(l1, l2):
+            for val in pair:
+                if val is not None:
+                    current_diff = abs(val - THRESHOLD)
+                    if current_diff < min_diff:
+                        min_diff = current_diff
+                        closest_element = val
+                    found_element = True
+    
+        if not found_element:
+            raise ValueError("attempt to get argmin of an empty sequence")
+    
+        return closest_element
+[Surrogate] Saved trained model state to surrogate_model.pkl
+
+[Plotter] Generating research figures…
+  ✓ Fig 1  Energy Trajectory                 → fig1_energy_trajectory.png
+  ✓ Fig 2  Fidelity Heatmap                  → fig2_fidelity_heatmap.png
+  ✓ Fig 3  Operator Performance              → fig3_operator_performance.png
+  – Fig 4  Surrogate Accuracy                  (skipped – insufficient data)
+  ✓ Fig 5  CO₂ Breakdown                     → fig5_co2_breakdown.png
+  ✓ Fig 6  Correctness by Tier               → fig6_correctness_by_tier.png
+  ✓ Fig 7  Improvement Waterfall             → fig7_waterfall.png
+  ✓ Fig 8  Acquisition Trace                 → fig8_acquisition_trace.png
+  ✓ Fig 9  Measurement Noise                 → fig9_noise_profile.png
+  ✓ Fig 10 Inner Loop Multipliers            → fig10_inner_loop_multipliers.png
+  ✓ Fig 11 Summary Poster                    → fig11_summary_poster.png
+  ✓ Fig 12 CV by Fidelity                    → fig12_cv_by_fidelity.png
+  ✓ Fig 13 Fidelity Calibration              → fig13_fidelity_calibration.png
+  – Fig 14 Abandon Reasons                     (skipped – insufficient data)
+[Plotter] 12 figure(s) saved → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_23/artifacts/task_func/task_func_figures
+
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3 — Summary
+  Energy backend : PSUTIL
+  GP surrogate   : ✗
+  Matplotlib     : ✓
+════════════════════════════════════════════════════════════════════════
+  Label                                      Base(mJ)   Best(mJ)       Δ   F3  Esc    CO₂(µg)
+  ───────────────────────────────────────────────────────────────────────────
+  task_func (target.py)                      0.9680mJ   0.6688mJ  +30.9%   9    3   9190.33  r₁₃=1.00
+════════════════════════════════════════════════════════════════════════
+
+
+  Figures → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_23/artifacts/task_func/task_func_figures
+  Metrics → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_23/artifacts/task_func/task_func_metrics.json
+  CSV     → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_23/artifacts/task_func/task_func_candidates.csv

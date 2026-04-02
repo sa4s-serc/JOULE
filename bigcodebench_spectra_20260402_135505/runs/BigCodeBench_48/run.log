@@ -1,0 +1,222 @@
+<spectra>:49: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+Loaded 0 TEST_INPUTS, 1 TEST_CASES
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3.1  ▸  task_func  [Gemini ✓  gemini-2.5-flash]
+  Backend: PSUTIL   GP: ✗   Matplotlib: ✓   Process isolation: ✓
+  EI top-k: 2   CO₂ intensity: 475 gCO₂/kWh   Max fallbacks: 3
+════════════════════════════════════════════════════════════════════════
+
+[Oracle] Establishing baseline (F3, 20 reps)…
+<spectra_isolated>:49: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+[Gemini] 429 on key #0 — rotated to key #1, cooling down 3.4s
+[Gemini] 429 on key #1 — rotated to key #2, cooling down 5.7s
+[Gemini] 429 on key #2 — rotated to key #3, cooling down 6.7s
+[Gemini] 429 on key #3 — rotated to key #4, cooling down 9.1s
+         Baseline : 92.7966 ± 9.3244 mJ   CO₂≈12.24µg/call   backend=psutil   inner_mult=8
+
+── Iteration 1 ──────────────────────────────────────────────────────
+[Graph] 1 candidate(s) generated
+<spectra_verify>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  ✓ Correctness [LoopGlobalToLocalHoisting]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'LoopGlobalToLocalHoisting' Tier L   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: LoopGlobalToLocalHoisting
+<spectra_isolated>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F1 (    5 reps):  94.3298 mJ    -2.4%  CV=0.17  P(↑)=0.609  [inner×7]
+<spectra_isolated>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+<spectra_isolated>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F2 ( 14+7 reps):  98.0843 mJ    -6.3%  CV=0.20  P(↑)=0.837  outliers=1
+<spectra_isolated>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F3 (   19 reps):  96.4875 mJ    -6.1%  CV=0.18  P(↑)=0.882  CI=[91.5344,107.5991]mJ  outliers=1
+         ✗ Not confirmed: P(better)=0.882 < 0.900  CV=0.18  CI=[91.5344,107.5991]mJ
+
+── Iteration 2 ──────────────────────────────────────────────────────
+[Graph] 1 candidate(s) generated
+<spectra_verify>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  ✓ Correctness [LoopInvariantHoistingLLM]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'LoopInvariantHoistingLLM' Tier M [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: LoopInvariantHoistingLLM
+<spectra_isolated>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F1 (    5 reps):  98.4084 mJ    -7.0%  CV=0.16  P(↑)=0.784  [inner×7]
+<spectra_isolated>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+<spectra_isolated>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F2 ( 14+7 reps):  92.1916 mJ    -1.6%  CV=0.18  P(↑)=0.616  outliers=1
+<spectra_isolated>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F3 (   18 reps):  84.6039 mJ    +8.4%  CV=0.06  P(↑)=0.998  CI=[82.6893,87.2677]mJ  outliers=2
+         ✓ Confirmed: P(better)=0.998 >= 0.900  CV=0.06  CI=[82.6893,87.2677]mJ
+  ✓ Post-confirmation regression check passed (cached).
+  ✓ Pareto archive updated — 2 front member(s)
+
+── Iteration 3 ──────────────────────────────────────────────────────
+[Graph] 1 candidate(s) generated
+<spectra_verify>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  ✓ Correctness [LoopGlobalToLocalHoisting]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'LoopGlobalToLocalHoisting' Tier L   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: LoopGlobalToLocalHoisting
+<spectra_isolated>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F1 (    5 reps):  86.9474 mJ    +2.0%  CV=0.15  P(↑)=0.609  [inner×8]
+<spectra_isolated>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F2 (    7 reps):  91.9129 mJ    -1.3%  CV=0.20  P(↑)=0.561  outliers=1
+<spectra_isolated>:22: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F3 (   18 reps):  89.4603 mJ    +3.0%  CV=0.10  P(↑)=0.820  CI=[86.3494,94.3287]mJ  outliers=2
+         ✗ Not confirmed: P(better)=0.820 < 0.900  CV=0.10  CI=[86.3494,94.3287]mJ
+
+── Iteration 4 ──────────────────────────────────────────────────────
+[Graph] 1 candidate(s) generated
+<spectra_verify>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  ✓ Correctness [LoopInvariantHoistingLLM]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'LoopInvariantHoistingLLM' Tier M [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: LoopInvariantHoistingLLM
+<spectra_isolated>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F1 (    5 reps):  93.6541 mJ    -7.2%  CV=0.28  P(↑)=0.687  [inner×9]
+<spectra_isolated>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F2 (    8 reps):  95.9816 mJ    -7.6%  CV=0.21  P(↑)=0.808
+<spectra_isolated>:50: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+[Gemini] 429 on key #4 — rotated to key #5, cooling down 2.8s
+[Gemini] Fatal API error 400: Bad Request
+         F3 (   19 reps):  89.2599 mJ    +2.9%  CV=0.17  P(↑)=0.739  CI=[83.9451,98.2415]mJ  outliers=1
+         ✗ Not confirmed: P(better)=0.739 < 0.900  CV=0.17  CI=[83.9451,98.2415]mJ
+
+── Iteration 5 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #1/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+<spectra_verify>:24: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  ✓ Correctness [GenericSemanticRewriteLLM]: OK
+[Surrogate] Scored 1 candidates  (trained=False)
+[MFBO] Selected top-1 candidate(s) by UCB×EI:
+  #1 'GenericSemanticRewriteLLM' Tier H [Gemini]   EI=1000.0000×10⁻³
+[Oracle] Evaluating with fidelity escalation…
+      Candidate #1: GenericSemanticRewriteLLM
+<spectra_isolated>:24: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F1 (    4 reps): 100.4124 mJ    -5.0%  CV=0.14  P(↑)=0.718  [inner×9]  outliers=1
+<spectra_isolated>:24: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+<spectra_isolated>:24: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F2 ( 15+7 reps):  91.9369 mJ    -2.4%  CV=0.22  P(↑)=0.646
+<spectra_isolated>:24: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+         F3 (   19 reps):  88.6064 mJ    +1.8%  CV=0.21  P(↑)=0.631  CI=[83.9456,101.5524]mJ  outliers=1
+         ✗ Not confirmed: P(better)=0.631 < 0.900  CV=0.21  CI=[83.9456,101.5524]mJ
+
+[MFBO] Converged (3 iterations without Pareto progress).
+
+[Isolation] Successes: 19   Failures: 0   Adaptive-rep escalations: 3   LLM retries: 0
+[Calibrator] F1→F3 pairs=5  r=-0.3552092507807426  MAE=0.07427392072272694  bias=-0.059344705901656615  eff_P_abandon=0.050
+[Calibrator] F2→F3 pairs=5  r=0.5488214508833894  eff_P_abandon=0.250
+
+[UCB] Operator performance summary:
+  LoopInvariantHoistingLLM                      attempts=  2  confirmed=  1  rate=0.50
+  LoopGlobalToLocalHoisting                     attempts=  2  confirmed=  0  rate=0.00
+
+════════════════════════════════════════════════════════════════════════
+  Results
+════════════════════════════════════════════════════════════════════════
+
+  Chain        : LoopInvariantHoistingLLM
+  Baseline     : 92.7966 ± 9.3244 mJ
+  Optimised    : 84.6039 mJ
+  Improvement  : 8.83%
+  CO₂ search   : 9964.1 µg eq. (475 gCO₂/kWh)
+  F3 evals     : 5 / 20
+  Fallbacks    : 1 / 3
+  Wall-clock   : 112.5s
+
+  Optimised source:
+
+    import time
+    from datetime import datetime
+    import random
+    import matplotlib.pyplot as plt
+    
+    # Constants
+    DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+    
+    
+    import random as _rng_seed; _rng_seed.seed(42)
+    
+    
+    def task_func(n, output_path=None):
+        """
+        Generate n random Unix timestamps and convert them to strings formatted as UTC DATE_FORMAT.
+        Plot a histogram of the distribution of the generated timestamps. If an output path is provided,
+        save the histogram to the specified path. Otherwise, display the plot.
+    
+        Parameters:
+        n (int): The number of timestamps to generate.
+        output_path (str, optional): Path to save the histogram plot. Defaults to None.
+    
+        Returns:
+        list: The list of n formatted timestamps.
+    
+        Requirements:
+        - time
+        - datetime
+        - random
+        - matplotlib.pyplot
+    
+        Example:
+        >>> random.seed(42)
+        >>> timestamps = task_func(n=3, output_path=None)
+        >>> print(timestamps)
+        ['2013-07-06 20:56:46', '1977-07-29 23:34:23', '1971-09-14 11:29:44']
+        """
+        timestamps = []
+        current_unix_time = int(time.time())
+        for _ in range(n):
+            timestamp = random.randint(0, current_unix_time)
+            formatted_time = datetime.utcfromtimestamp(timestamp).strftime(DATE_FORMAT)
+            timestamps.append(formatted_time)
+    
+        plt.hist([datetime.strptime(t, DATE_FORMAT) for t in timestamps])
+    
+        if output_path:
+            plt.savefig(output_path)
+        else:
+            plt.show()
+        return timestamps
+[Surrogate] Saved trained model state to surrogate_model.pkl
+
+[Plotter] Generating research figures…
+  ✓ Fig 1  Energy Trajectory                 → fig1_energy_trajectory.png
+  ✓ Fig 2  Fidelity Heatmap                  → fig2_fidelity_heatmap.png
+  ✓ Fig 3  Operator Performance              → fig3_operator_performance.png
+  – Fig 4  Surrogate Accuracy                  (skipped – insufficient data)
+  ✓ Fig 5  CO₂ Breakdown                     → fig5_co2_breakdown.png
+  ✓ Fig 6  Correctness by Tier               → fig6_correctness_by_tier.png
+  ✓ Fig 7  Improvement Waterfall             → fig7_waterfall.png
+  ✓ Fig 8  Acquisition Trace                 → fig8_acquisition_trace.png
+  ✓ Fig 9  Measurement Noise                 → fig9_noise_profile.png
+  ✓ Fig 10 Inner Loop Multipliers            → fig10_inner_loop_multipliers.png
+  ✓ Fig 11 Summary Poster                    → fig11_summary_poster.png
+  ✓ Fig 12 CV by Fidelity                    → fig12_cv_by_fidelity.png
+  ✓ Fig 13 Fidelity Calibration              → fig13_fidelity_calibration.png
+  – Fig 14 Abandon Reasons                     (skipped – insufficient data)
+[Plotter] 12 figure(s) saved → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_48/artifacts/task_func/task_func_figures
+
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3 — Summary
+  Energy backend : PSUTIL
+  GP surrogate   : ✗
+  Matplotlib     : ✓
+════════════════════════════════════════════════════════════════════════
+  Label                                      Base(mJ)   Best(mJ)       Δ   F3  Esc    CO₂(µg)
+  ───────────────────────────────────────────────────────────────────────────
+  task_func (target.py)                     92.7966mJ  84.6039mJ   +8.8%   5    1   9964.06  r₁₃=-0.36
+════════════════════════════════════════════════════════════════════════
+
+
+  Figures → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_48/artifacts/task_func/task_func_figures
+  Metrics → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_48/artifacts/task_func/task_func_metrics.json
+  CSV     → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_48/artifacts/task_func/task_func_candidates.csv

@@ -1,0 +1,23 @@
+Loaded 0 TEST_INPUTS, 4 TEST_CASES
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3.1  ▸  task_func  [Gemini ✓  gemini-2.5-flash]
+  Backend: PSUTIL   GP: ✗   Matplotlib: ✓   Process isolation: ✓
+  EI top-k: 2   CO₂ intensity: 475 gCO₂/kWh   Max fallbacks: 3
+════════════════════════════════════════════════════════════════════════
+
+[Oracle] Establishing baseline (F3, 20 reps)…
+[Isolation] Worker error: 'dict' object has no attribute 'to_numpy'
+
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3 — Summary
+  Energy backend : PSUTIL
+  GP surrogate   : ✗
+  Matplotlib     : ✓
+════════════════════════════════════════════════════════════════════════
+  Label                                      Base(mJ)   Best(mJ)       Δ   F3  Esc    CO₂(µg)
+  ───────────────────────────────────────────────────────────────────────────
+  task_func (target.py)                     ERROR
+════════════════════════════════════════════════════════════════════════
+

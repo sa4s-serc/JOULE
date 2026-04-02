@@ -533,7 +533,40 @@ class EnergyMeter:
 def _isolated_verify_worker(queue: multiprocessing.Queue, source: str, func_name: str, test_cases: list, epsilon: float):
     """Runs correctness verification in a totally isolated, killable process."""
     import copy, math
+
+    def _brief_value(value):
+        if HAS_NUMPY:
+            try:
+                if isinstance(value, np.ndarray):
+                    summary = (
+                        f"ndarray(shape={value.shape}, dtype={value.dtype}, "
+                        f"value={value.tolist()})"
+                    )
+                elif isinstance(value, np.generic):
+                    summary = f"{type(value).__name__}({value.item()!r})"
+                else:
+                    summary = repr(value)
+            except Exception:
+                summary = repr(value)
+        else:
+            summary = repr(value)
+        if len(summary) > 160:
+            summary = summary[:157] + "..."
+        return f"{type(value).__name__}({summary})"
+
     def _eq(a, b):
+        if HAS_NUMPY:
+            try:
+                if isinstance(a, np.ndarray):
+                    return _eq(a.tolist(), b)
+                if isinstance(b, np.ndarray):
+                    return _eq(a, b.tolist())
+                if isinstance(a, np.generic):
+                    return _eq(a.item(), b)
+                if isinstance(b, np.generic):
+                    return _eq(a, b.item())
+            except Exception:
+                pass
         if isinstance(a, set): return a == b
         if isinstance(a, float):
             if math.isnan(a) and isinstance(b, float) and math.isnan(b): return True
@@ -555,14 +588,21 @@ def _isolated_verify_worker(queue: multiprocessing.Queue, source: str, func_name
             return
 
         for args, exp in test_cases:
-            actual = cand(*copy.deepcopy(args))
+            try:
+                actual = cand(*copy.deepcopy(args))
+            except Exception as exc:
+                queue.put((False, f"Exception[{type(exc).__name__}] on args={args}: {exc}"))
+                return
             if not _eq(exp, actual):
-                queue.put((False, f"Test case mismatch: args={args}"))
+                queue.put((
+                    False,
+                    f"Test case mismatch: args={args}; expected={_brief_value(exp)}; actual={_brief_value(actual)}",
+                ))
                 return
         
         queue.put((True, "OK"))
     except Exception as e:
-        queue.put((False, f"Exception: {str(e)}"))
+        queue.put((False, f"Exception[{type(e).__name__}]: {str(e)}"))
 
 def _isolated_measure_worker(queue: multiprocessing.Queue,
                               source: str, func_name: str,
@@ -2943,9 +2983,12 @@ class LLMOperator(TransformationOperator):
 
     def precondition(self, tree, source): return True
 
-    def apply(self, source, llm=None):
+    def apply(self, source, llm=None, extra_context: str = ""):
         if not llm or not llm.available: return None
-        return llm.transform(source, self.name, self._extra)
+        context = self._extra
+        if extra_context:
+            context = f"{context}\n\n{extra_context}" if context else extra_context
+        return llm.transform(source, self.name, context)
 
 
 class RecursionToDynamicProgramming(LLMOperator):
@@ -5903,6 +5946,57 @@ class SPECTRAOptimizer:
         for pv in self._pareto[:5]:
             all_cands.extend(self._generate_candidates(pv))
         return all_cands
+
+    def _retry_generic_escape(
+        self,
+        candidate: ProgramVariant,
+        reason: str,
+    ) -> tuple[bool, str]:
+        """Retry the generic semantic rewrite once with verifier feedback."""
+        if not self.llm or not self.llm.available or not candidate.chain:
+            return False, reason
+
+        op_info = candidate.chain[-1]
+        if op_info.get("operator") != _ESCAPE_OPERATOR.name:
+            return False, reason
+
+        if not (reason.startswith("Test case mismatch")
+                or reason.startswith("Exception[")):
+            return False, reason
+
+        repair_context = textwrap.dedent(f"""
+            This is a repair pass after a failed correctness check.
+
+            Verifier feedback:
+            {reason}
+
+            Revise the candidate with the smallest semantic change needed to
+            satisfy the verifier. Preserve the same function signature and
+            return semantics, and return only valid Python code.
+        """).strip()
+
+        self._log(f"  [Retry] {op_info['operator']}: {reason}")
+        with self.llm._lock:
+            self.llm._retry_count += 1
+
+        repaired = _ESCAPE_OPERATOR.apply(
+            candidate.source,
+            self.llm,
+            extra_context=repair_context,
+        )
+        if not repaired or repaired == candidate.source:
+            self._log("    [Retry] no change returned")
+            return False, reason
+
+        ok, retry_reason = self.correctness.verify(repaired)
+        if ok:
+            candidate.source = repaired
+            candidate.is_correct = True
+            self._log("    [Retry] succeeded")
+            return True, f"repaired after retry: {reason}"
+
+        self._log(f"    [Retry] failed: {retry_reason}")
+        return False, retry_reason
  
     def _filter_correctness(
         self,
@@ -5932,6 +6026,18 @@ class SPECTRAOptimizer:
                     ok, reason = fut.result()
                 except Exception as e:
                     ok, reason = False, f"verify exception: {e}"
+
+                if (not ok and self.llm and self.llm.available and c.chain
+                        and c.chain[-1].get("operator") == _ESCAPE_OPERATOR.name
+                        and (reason.startswith("Test case mismatch")
+                             or reason.startswith("Exception["))):
+                    retry_ok, retry_reason = self._retry_generic_escape(c, reason)
+                    if retry_ok:
+                        ok = True
+                        reason = retry_reason
+                    else:
+                        reason = retry_reason
+
                 c.is_correct = ok
                 results.append((c, ok, reason))
  

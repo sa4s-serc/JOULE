@@ -1,0 +1,66 @@
+Loaded 0 TEST_INPUTS, 5 TEST_CASES
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3.1  ▸  task_func  [Gemini ✓  gemini-2.5-flash]
+  Backend: PSUTIL   GP: ✗   Matplotlib: ✓   Process isolation: ✓
+  EI top-k: 2   CO₂ intensity: 475 gCO₂/kWh   Max fallbacks: 3
+════════════════════════════════════════════════════════════════════════
+
+[Oracle] Establishing baseline (F3, 20 reps)…
+[Gemini] Network error: <urlopen error [Errno -3] Temporary failure in name resolution>. Retrying in 20.5s…
+[Gemini] 429 on key #0 — rotated to key #1, cooling down 5.4s
+[Gemini] 429 on key #1 — rotated to key #2, cooling down 7.4s
+[Gemini] 429 on key #2 — rotated to key #3, cooling down 9.5s
+[Gemini] 429 on key #3 — rotated to key #4, cooling down 10.8s
+[Gemini] Max retries exceeded.
+         Baseline : 1.2833 ± 0.1820 mJ   CO₂≈0.17µg/call   backend=psutil   inner_mult=269
+
+── Iteration 1 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #1/3
+[Graph] No new candidates — search space exhausted.
+
+[Isolation] Successes: 1   Failures: 0   Adaptive-rep escalations: 0   LLM retries: 0
+[Calibrator] F1→F3 pairs=0  r=n/a  MAE=n/a  bias=n/a  eff_P_abandon=0.100
+[Calibrator] F2→F3 pairs=0  r=n/a  eff_P_abandon=0.250
+
+[UCB] Operator performance summary:
+
+════════════════════════════════════════════════════════════════════════
+  Results
+════════════════════════════════════════════════════════════════════════
+  No statistically significant improvement found.
+[Surrogate] Saved trained model state to surrogate_model.pkl
+
+[Plotter] Generating research figures…
+  – Fig 1  Energy Trajectory                   (skipped – insufficient data)
+  – Fig 2  Fidelity Heatmap                    (skipped – insufficient data)
+  – Fig 3  Operator Performance                (skipped – insufficient data)
+  – Fig 4  Surrogate Accuracy                  (skipped – insufficient data)
+  ✓ Fig 5  CO₂ Breakdown                     → fig5_co2_breakdown.png
+  – Fig 6  Correctness by Tier                 (skipped – insufficient data)
+  – Fig 7  Improvement Waterfall               (skipped – insufficient data)
+  – Fig 8  Acquisition Trace                   (skipped – insufficient data)
+  – Fig 9  Measurement Noise                   (skipped – insufficient data)
+  – Fig 10 Inner Loop Multipliers              (skipped – insufficient data)
+  ✓ Fig 11 Summary Poster                    → fig11_summary_poster.png
+  – Fig 12 CV by Fidelity                      (skipped – insufficient data)
+  – Fig 13 Fidelity Calibration                (skipped – insufficient data)
+  – Fig 14 Abandon Reasons                     (skipped – insufficient data)
+[Plotter] 2 figure(s) saved → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_27/artifacts/task_func/task_func_figures
+
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3 — Summary
+  Energy backend : PSUTIL
+  GP surrogate   : ✗
+  Matplotlib     : ✓
+════════════════════════════════════════════════════════════════════════
+  Label                                      Base(mJ)   Best(mJ)       Δ   F3  Esc    CO₂(µg)
+  ───────────────────────────────────────────────────────────────────────────
+  task_func (target.py)                      1.2833mJ   1.2833mJ   +0.0%   0    0      3.39
+════════════════════════════════════════════════════════════════════════
+
+
+  Figures → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_27/artifacts/task_func/task_func_figures
+  Metrics → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_27/artifacts/task_func/task_func_metrics.json
+  CSV     → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_27/artifacts/task_func/task_func_candidates.csv

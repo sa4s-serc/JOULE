@@ -1,0 +1,47 @@
+{
+  "function": "task_func",
+  "original_source": "import time\nfrom datetime import datetime\nimport random\nimport matplotlib.pyplot as plt\n\n# Constants\nDATE_FORMAT = \"%Y-%m-%d %H:%M:%S\"\n\n\nimport random as _rng_seed; _rng_seed.seed(42)\n\n\ndef task_func(n, output_path=None):\n    \"\"\"\n    Generate n random Unix timestamps and convert them to strings formatted as UTC DATE_FORMAT.\n    Plot a histogram of the distribution of the generated timestamps. If an output path is provided,\n    save the histogram to the specified path. Otherwise, display the plot.\n\n    Parameters:\n    n (int): The number of timestamps to generate.\n    output_path (str, optional): Path to save the histogram plot. Defaults to None.\n\n    Returns:\n    list: The list of n formatted timestamps.\n\n    Requirements:\n    - time\n    - datetime\n    - random\n    - matplotlib.pyplot\n\n    Example:\n    >>> random.seed(42)\n    >>> timestamps = task_func(n=3, output_path=None)\n    >>> print(timestamps)\n    ['2013-07-06 20:56:46', '1977-07-29 23:34:23', '1971-09-14 11:29:44']\n    \"\"\"\n    timestamps = []\n    for _ in range(n):\n        timestamp = random.randint(0, int(time.time()))\n        formatted_time = datetime.utcfromtimestamp(timestamp).strftime(DATE_FORMAT)\n        timestamps.append(formatted_time)\n\n    plt.hist([datetime.strptime(t, DATE_FORMAT) for t in timestamps])\n\n    if output_path:\n        plt.savefig(output_path)\n    else:\n        plt.show()\n    return timestamps",
+  "best_source": "import time\nfrom datetime import datetime\nimport random\nimport matplotlib.pyplot as plt\n\n# Constants\nDATE_FORMAT = \"%Y-%m-%d %H:%M:%S\"\n\n\nimport random as _rng_seed; _rng_seed.seed(42)\n\n\ndef task_func(n, output_path=None):\n    \"\"\"\n    Generate n random Unix timestamps and convert them to strings formatted as UTC DATE_FORMAT.\n    Plot a histogram of the distribution of the generated timestamps. If an output path is provided,\n    save the histogram to the specified path. Otherwise, display the plot.\n\n    Parameters:\n    n (int): The number of timestamps to generate.\n    output_path (str, optional): Path to save the histogram plot. Defaults to None.\n\n    Returns:\n    list: The list of n formatted timestamps.\n\n    Requirements:\n    - time\n    - datetime\n    - random\n    - matplotlib.pyplot\n\n    Example:\n    >>> random.seed(42)\n    >>> timestamps = task_func(n=3, output_path=None)\n    >>> print(timestamps)\n    ['2013-07-06 20:56:46', '1977-07-29 23:34:23', '1971-09-14 11:29:44']\n    \"\"\"\n    timestamps = []\n    current_unix_time = int(time.time())\n    for _ in range(n):\n        timestamp = random.randint(0, current_unix_time)\n        formatted_time = datetime.utcfromtimestamp(timestamp).strftime(DATE_FORMAT)\n        timestamps.append(formatted_time)\n\n    plt.hist([datetime.strptime(t, DATE_FORMAT) for t in timestamps])\n\n    if output_path:\n        plt.savefig(output_path)\n    else:\n        plt.show()\n    return timestamps",
+  "chain": [
+    "LoopInvariantHoistingLLM"
+  ],
+  "improvement_pct": 8.829,
+  "baseline_mj": 92.79661,
+  "baseline_std_mj": 9.324354,
+  "best_mj": 84.603884,
+  "co2_search_ug": 9964.061,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 5,
+  "ei_top_k": 2,
+  "wall_s": 112.54,
+  "energy_backend": "psutil",
+  "fallback_escapes_used": 1,
+  "llm_retries": 0,
+  "isolation_successes": 19,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 3,
+  "calibrator": {
+    "n_f1_f3_pairs": 5,
+    "n_f2_f3_pairs": 5,
+    "f1_f3_pearson": -0.3552092507807426,
+    "f2_f3_pearson": 0.5488214508833894,
+    "f1_f3_mae": 0.07427392072272694,
+    "f2_f3_mae": 0.05820416570620335,
+    "f1_f3_bias": -0.059344705901656615,
+    "f2_f3_bias": -0.05820416570620335,
+    "effective_p_abandon_f1": 0.05,
+    "effective_p_abandon_f2": 0.25
+  },
+  "operator_stats": {
+    "LoopGlobalToLocalHoisting": {
+      "attempts": 2,
+      "confirmations": 0,
+      "rate": 0.0
+    },
+    "LoopInvariantHoistingLLM": {
+      "attempts": 2,
+      "confirmations": 1,
+      "rate": 0.5
+    }
+  }
+}

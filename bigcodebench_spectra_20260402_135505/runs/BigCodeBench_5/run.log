@@ -1,0 +1,80 @@
+Loaded 0 TEST_INPUTS, 5 TEST_CASES
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3.1  ▸  task_func  [Gemini ✓  gemini-2.5-flash]
+  Backend: PSUTIL   GP: ✗   Matplotlib: ✓   Process isolation: ✓
+  EI top-k: 2   CO₂ intensity: 475 gCO₂/kWh   Max fallbacks: 3
+════════════════════════════════════════════════════════════════════════
+
+[Oracle] Establishing baseline (F3, 20 reps)…
+[Gemini] 429 on key #0 — rotated to key #1, cooling down 2.7s
+[Gemini] 429 on key #1 — rotated to key #2, cooling down 4.9s
+         Baseline : 3.2607 ± 0.3921 mJ   CO₂≈0.43µg/call   backend=psutil   inner_mult=147
+
+── Iteration 1 ──────────────────────────────────────────────────────
+[Graph] 1 candidate(s) generated
+  ✗ Correctness [ConcurrentMapDelegateLLM]: Exception[AssertionError] on args=(['x', 'y', 'z'],): daemonic processes are not allowed to have children
+
+── Iteration 2 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #1/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+  [Retry] GenericSemanticRewriteLLM: Test case mismatch: args=(); expected=dict({'a': 45.5, 'b': 29.4659125092029, 'c': 25.575354649194974, 'd': 28.271717316074028, 'e': 29.118550788114437, 'f': 16.886056048968, 'g': 27.48108440364026, '...); actual=dict({'a': 28.271717316074028, 'b': 29.118550788114437, 'c': 16.886056048968, 'd': 27.48108440364026, 'e': 32.67476090195611, 'f': 8.5, 'g': 17.540623403623805, '...)
+    [Retry] failed: Test case mismatch: args=(['x', 'y', 'z'],); expected=dict({'x': 45.5, 'y': 29.4659125092029, 'z': 25.575354649194974}); actual=NoneType(None)
+  ✗ Correctness [GenericSemanticRewriteLLM]: Test case mismatch: args=(['x', 'y', 'z'],); expected=dict({'x': 45.5, 'y': 29.4659125092029, 'z': 25.575354649194974}); actual=NoneType(None)
+
+── Iteration 3 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #2/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+  [Retry] GenericSemanticRewriteLLM: Test case mismatch: args=(); expected=dict({'a': 45.5, 'b': 29.4659125092029, 'c': 25.575354649194974, 'd': 28.271717316074028, 'e': 29.118550788114437, 'f': 16.886056048968, 'g': 27.48108440364026, '...); actual=dict({'a': 28.271717316074028, 'b': 29.11855078811444, 'c': 16.886056048968005, 'd': 27.48108440364026, 'e': 32.67476090195611, 'f': 8.5, 'g': 17.540623403623805,...)
+    [Retry] failed: Test case mismatch: args=(['a'],); expected=dict({'a': 4.5}); actual=dict({'a': 45.5})
+  ✗ Correctness [GenericSemanticRewriteLLM]: Test case mismatch: args=(['a'],); expected=dict({'a': 4.5}); actual=dict({'a': 45.5})
+
+[MFBO] Converged (3 iterations without Pareto progress).
+
+[Isolation] Successes: 1   Failures: 0   Adaptive-rep escalations: 0   LLM retries: 2
+[Calibrator] F1→F3 pairs=0  r=n/a  MAE=n/a  bias=n/a  eff_P_abandon=0.100
+[Calibrator] F2→F3 pairs=0  r=n/a  eff_P_abandon=0.250
+
+[UCB] Operator performance summary:
+
+════════════════════════════════════════════════════════════════════════
+  Results
+════════════════════════════════════════════════════════════════════════
+  No statistically significant improvement found.
+[Surrogate] Saved trained model state to surrogate_model.pkl
+
+[Plotter] Generating research figures…
+  ✓ Fig 1  Energy Trajectory                 → fig1_energy_trajectory.png
+  ✓ Fig 2  Fidelity Heatmap                  → fig2_fidelity_heatmap.png
+  ✓ Fig 3  Operator Performance              → fig3_operator_performance.png
+  – Fig 4  Surrogate Accuracy                  (skipped – insufficient data)
+  ✓ Fig 5  CO₂ Breakdown                     → fig5_co2_breakdown.png
+  ✓ Fig 6  Correctness by Tier               → fig6_correctness_by_tier.png
+  ✓ Fig 7  Improvement Waterfall             → fig7_waterfall.png
+  – Fig 8  Acquisition Trace                   (skipped – insufficient data)
+  – Fig 9  Measurement Noise                   (skipped – insufficient data)
+  – Fig 10 Inner Loop Multipliers              (skipped – insufficient data)
+  ✓ Fig 11 Summary Poster                    → fig11_summary_poster.png
+  – Fig 12 CV by Fidelity                      (skipped – insufficient data)
+  – Fig 13 Fidelity Calibration                (skipped – insufficient data)
+  – Fig 14 Abandon Reasons                     (skipped – insufficient data)
+[Plotter] 7 figure(s) saved → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_5/artifacts/task_func/task_func_figures
+
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3 — Summary
+  Energy backend : PSUTIL
+  GP surrogate   : ✗
+  Matplotlib     : ✓
+════════════════════════════════════════════════════════════════════════
+  Label                                      Base(mJ)   Best(mJ)       Δ   F3  Esc    CO₂(µg)
+  ───────────────────────────────────────────────────────────────────────────
+  task_func (target.py)                      3.2607mJ   3.2607mJ   +0.0%   0    2  80411.45
+════════════════════════════════════════════════════════════════════════
+
+
+  Figures → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_5/artifacts/task_func/task_func_figures
+  Metrics → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_5/artifacts/task_func/task_func_metrics.json
+  CSV     → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_5/artifacts/task_func/task_func_candidates.csv

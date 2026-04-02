@@ -1,0 +1,52 @@
+{
+  "function": "task_func",
+  "original_source": "import numpy as np\nfrom itertools import zip_longest\n\ndef task_func(l1, l2,THRESHOLD = 0.5):\n    \"\"\"\n    Alternates elements from two numeric lists, calculates the absolute difference of each \n    element from a predefined threshold, and returns the element closest to this threshold.\n\n    Parameters:\n    l1 (list): The first input list containing numeric values.\n    l2 (list): The second input list containing numeric values.\n    THRESHOLD (float): The predefined constant representing a numeric value used as a reference point for comparison. Default to 0.5. \n\n    Returns:\n    float: The element from the combined list that is closest to the threshold of 0.5.\n\n    Requirements:\n    - numpy\n    - itertools.zip_longest\n\n    Notes:\n    - If l1 and l2 are of different lengths, elements from the longer list without a corresponding \n      pair in the shorter list will not be paired with 'None'. Only existing numeric elements are considered.\n    - The threshold is fixed at 0.5. Adjustments to the threshold require changes to the THRESHOLD constant.\n\n    Example:\n    >>> l1 = [0.3, 1, 2, 3]\n    >>> l2 = [0.7, 11, 12, 13]\n    >>> closest = task_func(l1, l2)\n    >>> print(closest)\n    0.7\n    \"\"\"\n    combined = [val for pair in zip_longest(l1, l2) for val in pair if val is not None]\n    differences = np.abs(np.array(combined) - THRESHOLD)\n    closest_index = np.argmin(differences)\n    return combined[closest_index]",
+  "best_source": "from itertools import zip_longest\nimport math\n\ndef task_func(l1, l2, THRESHOLD = 0.5):\n    min_diff = math.inf\n    closest_element = None\n    found_element = False\n\n    for pair in zip_longest(l1, l2):\n        for val in pair:\n            if val is not None:\n                current_diff = abs(val - THRESHOLD)\n                if current_diff < min_diff:\n                    min_diff = current_diff\n                    closest_element = val\n                found_element = True\n\n    if not found_element:\n        raise ValueError(\"attempt to get argmin of an empty sequence\")\n\n    return closest_element",
+  "chain": [
+    "GenericSemanticRewriteLLM"
+  ],
+  "improvement_pct": 30.906,
+  "baseline_mj": 0.968018,
+  "baseline_std_mj": 0.100001,
+  "best_mj": 0.668845,
+  "co2_search_ug": 9190.331,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 9,
+  "ei_top_k": 2,
+  "wall_s": 228.64,
+  "energy_backend": "psutil",
+  "fallback_escapes_used": 3,
+  "llm_retries": 0,
+  "isolation_successes": 28,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 9,
+    "n_f2_f3_pairs": 9,
+    "f1_f3_pearson": 0.9965627233173331,
+    "f2_f3_pearson": 0.998695336608343,
+    "f1_f3_mae": 0.08202239821043159,
+    "f2_f3_mae": 0.14167100473705363,
+    "f1_f3_bias": -0.007031816363698478,
+    "f2_f3_bias": -0.09839548575247775,
+    "effective_p_abandon_f1": 0.2,
+    "effective_p_abandon_f2": 0.375
+  },
+  "operator_stats": {
+    "MultipleAssignmentFusion": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    },
+    "VectorizationDelegate[loop\u2192numpy]": {
+      "attempts": 3,
+      "confirmations": 2,
+      "rate": 0.6666666666666666
+    },
+    "ItertoolsDelegateLLM": {
+      "attempts": 2,
+      "confirmations": 2,
+      "rate": 1.0
+    }
+  }
+}

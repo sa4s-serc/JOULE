@@ -1,0 +1,84 @@
+Loaded 0 TEST_INPUTS, 1 TEST_CASES
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3.1  ▸  task_func  [Gemini ✓  gemini-2.5-flash]
+  Backend: PSUTIL   GP: ✗   Matplotlib: ✓   Process isolation: ✓
+  EI top-k: 2   CO₂ intensity: 475 gCO₂/kWh   Max fallbacks: 3
+════════════════════════════════════════════════════════════════════════
+
+[Oracle] Establishing baseline (F3, 20 reps)…
+         Baseline : 2.1830 ± 0.0704 mJ   CO₂≈0.29µg/call   backend=psutil   inner_mult=352
+
+── Iteration 1 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #1/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+[Gemini] 429 on key #0 — rotated to key #1, cooling down 3.5s
+[Gemini] 429 on key #1 — rotated to key #2, cooling down 3.2s
+  [Retry] GenericSemanticRewriteLLM: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': np.float64(48.5), 'b': np.float64(36.6), 'c': np.float64(30.88888888888889), 'd': np.float64(56.9), 'e': np.float64(41.9), 'f': np.float64(28.833333333...); actual=dict({'a': 57.77777777777778, 'b': 76.0, 'c': 32.166666666666664, 'd': 30.0, 'e': 47.8, 'f': 52.25, 'g': 66.5, 'h': 42.166666666666664, 'i': 22.5, 'j': 41.7, 'k':...)
+    [Retry] failed: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': 48.5, 'b': 36.6, 'c': 30.88888888888889, 'd': 56.9, 'e': 41.9, 'f': 28.833333333333332, 'g': 43.7, 'h': 49.4, 'i': 20.5, 'j': 47.42857142857143, 'k': 7...); actual=dict({'a': np.float64(52.285714285714285), 'b': np.float64(54.2), 'c': np.float64(49.666666666666664), 'd': np.float64(55.5), 'e': np.float64(51.888888888888886),...)
+  ✗ Correctness [GenericSemanticRewriteLLM]: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': 48.5, 'b': 36.6, 'c': 30.88888888888889, 'd': 56.9, 'e': 41.9, 'f': 28.833333333333332, 'g': 43.7, 'h': 49.4, 'i': 20.5, 'j': 47.42857142857143, 'k': 7...); actual=dict({'a': np.float64(52.285714285714285), 'b': np.float64(54.2), 'c': np.float64(49.666666666666664), 'd': np.float64(55.5), 'e': np.float64(51.888888888888886),...)
+
+── Iteration 2 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #2/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+  [Retry] GenericSemanticRewriteLLM: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': np.float64(48.5), 'b': np.float64(36.6), 'c': np.float64(30.88888888888889), 'd': np.float64(56.9), 'e': np.float64(41.9), 'f': np.float64(28.833333333...); actual=dict({'a': 57.77777777777778, 'b': 76.0, 'c': 32.166666666666664, 'd': 30.0, 'e': 47.8, 'f': 52.25, 'g': 66.5, 'h': 42.166666666666664, 'i': 22.5, 'j': 41.7, 'k':...)
+    [Retry] failed: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': 48.5, 'b': 36.6, 'c': 30.88888888888889, 'd': 56.9, 'e': 41.9, 'f': 28.833333333333332, 'g': 43.7, 'h': 49.4, 'i': 20.5, 'j': 47.42857142857143, 'k': 7...); actual=dict({'a': np.float64(55.714285714285715), 'b': np.float64(54.285714285714285), 'c': np.float64(31.0), 'd': np.float64(54.6), 'e': np.float64(90.0), 'f': np.float...)
+  ✗ Correctness [GenericSemanticRewriteLLM]: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': 48.5, 'b': 36.6, 'c': 30.88888888888889, 'd': 56.9, 'e': 41.9, 'f': 28.833333333333332, 'g': 43.7, 'h': 49.4, 'i': 20.5, 'j': 47.42857142857143, 'k': 7...); actual=dict({'a': np.float64(55.714285714285715), 'b': np.float64(54.285714285714285), 'c': np.float64(31.0), 'd': np.float64(54.6), 'e': np.float64(90.0), 'f': np.float...)
+
+── Iteration 3 ──────────────────────────────────────────────────────
+[Escape] Search space exhausted — triggering fallback escape #3/3
+[Escape] 1 escape candidate(s) generated
+[Graph] 1 candidate(s) generated
+  [Retry] GenericSemanticRewriteLLM: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': 48.5, 'b': 36.6, 'c': 30.88888888888889, 'd': 56.9, 'e': 41.9, 'f': 28.833333333333332, 'g': 43.7, 'h': 49.4, 'i': 20.5, 'j': 47.42857142857143, 'k': 7...); actual=dict({'a': np.float64(49.5), 'b': np.float64(35.0), 'c': np.float64(44.2), 'd': np.float64(34.25), 'e': np.float64(28.0), 'f': np.float64(59.333333333333336), 'g'...)
+    [Retry] failed: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': 48.5, 'b': 36.6, 'c': 30.88888888888889, 'd': 56.9, 'e': 41.9, 'f': 28.833333333333332, 'g': 43.7, 'h': 49.4, 'i': 20.5, 'j': 47.42857142857143, 'k': 7...); actual=dict({'a': np.float64(71.5), 'b': np.float64(14.0), 'c': np.float64(63.8), 'd': np.float64(83.5), 'e': np.float64(24.5), 'f': np.float64(39.0), 'g': np.float64(19...)
+  ✗ Correctness [GenericSemanticRewriteLLM]: Test case mismatch: args=(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'],); expected=dict({'a': 48.5, 'b': 36.6, 'c': 30.88888888888889, 'd': 56.9, 'e': 41.9, 'f': 28.833333333333332, 'g': 43.7, 'h': 49.4, 'i': 20.5, 'j': 47.42857142857143, 'k': 7...); actual=dict({'a': np.float64(71.5), 'b': np.float64(14.0), 'c': np.float64(63.8), 'd': np.float64(83.5), 'e': np.float64(24.5), 'f': np.float64(39.0), 'g': np.float64(19...)
+
+[MFBO] Converged (3 iterations without Pareto progress).
+
+[Isolation] Successes: 1   Failures: 0   Adaptive-rep escalations: 0   LLM retries: 4
+[Calibrator] F1→F3 pairs=0  r=n/a  MAE=n/a  bias=n/a  eff_P_abandon=0.100
+[Calibrator] F2→F3 pairs=0  r=n/a  eff_P_abandon=0.250
+
+[UCB] Operator performance summary:
+
+════════════════════════════════════════════════════════════════════════
+  Results
+════════════════════════════════════════════════════════════════════════
+  No statistically significant improvement found.
+[Surrogate] Saved trained model state to surrogate_model.pkl
+
+[Plotter] Generating research figures…
+  ✓ Fig 1  Energy Trajectory                 → fig1_energy_trajectory.png
+  ✓ Fig 2  Fidelity Heatmap                  → fig2_fidelity_heatmap.png
+  ✓ Fig 3  Operator Performance              → fig3_operator_performance.png
+  – Fig 4  Surrogate Accuracy                  (skipped – insufficient data)
+  ✓ Fig 5  CO₂ Breakdown                     → fig5_co2_breakdown.png
+  ✓ Fig 6  Correctness by Tier               → fig6_correctness_by_tier.png
+  ✓ Fig 7  Improvement Waterfall             → fig7_waterfall.png
+  – Fig 8  Acquisition Trace                   (skipped – insufficient data)
+  – Fig 9  Measurement Noise                   (skipped – insufficient data)
+  – Fig 10 Inner Loop Multipliers              (skipped – insufficient data)
+  ✓ Fig 11 Summary Poster                    → fig11_summary_poster.png
+  – Fig 12 CV by Fidelity                      (skipped – insufficient data)
+  – Fig 13 Fidelity Calibration                (skipped – insufficient data)
+  – Fig 14 Abandon Reasons                     (skipped – insufficient data)
+[Plotter] 7 figure(s) saved → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_3/artifacts/task_func/task_func_figures
+
+
+════════════════════════════════════════════════════════════════════════
+  SPECTRA Research v3 — Summary
+  Energy backend : PSUTIL
+  GP surrogate   : ✗
+  Matplotlib     : ✓
+════════════════════════════════════════════════════════════════════════
+  Label                                      Base(mJ)   Best(mJ)       Δ   F3  Esc    CO₂(µg)
+  ───────────────────────────────────────────────────────────────────────────
+  task_func (target.py)                      2.1830mJ   2.1830mJ   +0.0%   0    3  170449.22
+════════════════════════════════════════════════════════════════════════
+
+
+  Figures → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_3/artifacts/task_func/task_func_figures
+  Metrics → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_3/artifacts/task_func/task_func_metrics.json
+  CSV     → /home/prakhar/dev/prakhar479/hedge/bigcodebench_spectra_20260402_135505/runs/BigCodeBench_3/artifacts/task_func/task_func_candidates.csv
