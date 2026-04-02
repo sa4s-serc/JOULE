@@ -1,0 +1,11 @@
+.joule/
+.joule.lock
+
+joule_optimizer.egg-info/
+
+__pycache__/
+.pytest_cache/
+*.pyc
+
+.env
+.venv/

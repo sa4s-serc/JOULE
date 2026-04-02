@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+from pathlib import Path
+import os
+import subprocess
+import sys
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parent
+    venv_python = repo_root / ".venv" / "bin" / "python"
+    python = str(venv_python if venv_python.exists() else Path(sys.executable))
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH")
+    src = str(repo_root / "src")
+    env["PYTHONPATH"] = src if not existing else f"{src}:{existing}"
+    command = [python, "-m", "joule.cli", *sys.argv[1:]]
+    return subprocess.call(command, cwd=repo_root, env=env)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

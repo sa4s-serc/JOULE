@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "joule-optimizer"
+version = "0.1.0"
+description = "JOULE: Joint Optimization Unit for Logic Efficiency"
+readme = "GUIDE.md"
+requires-python = ">=3.12"
+dependencies = [
+  "libcst>=1.8.0",
+  "numpy>=2.0.0",
+  "psutil>=7.0.0",
+  "pydantic>=2.0.0",
+  "PyYAML>=6.0.0",
+  "rich>=13.0.0",
+  "scipy>=1.13.0",
+  "typer>=0.12.0",
+]
+
+[project.scripts]
+joule = "joule.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.joule]
+seed = 1337
+artifact_dir = ".joule"
+db_name = "joule.db"
+default_backend = "mock"
+llm_model = ""
+baseline_repetitions = 5
+optimization_budget = 6
+workload_discovery_limit = 8
+dashboard_port = 8501
+dependency_energy_threshold = 0.15
+dependency_latency_threshold = 0.20
+memory_regression_limit = 0.10
+terminal_verbosity = "normal"
+promotion_scalar_min = 0.03
+final_improvement_min = 0.05
+candidate_memory_regression_limit = 0.10
+workload_timeout_s = 30.0
+inner_repetitions_mode = "adaptive"
+inner_repetitions_fixed = 1
+inner_repetitions_min = 1
+inner_repetitions_max = 10000
+adaptive_min_window_s = 0.05
+adaptive_probe_samples = 1
+
+[tool.joule.fidelity]
+f1_repetitions = 3
+f2_repetitions = 7
+f3_repetitions = 12
+
+[tool.joule.backends.rapl]
+path = "/sys/class/powercap/intel-rapl:0/energy_uj"
