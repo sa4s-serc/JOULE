@@ -12,14 +12,23 @@ endif
 SRC_DIR := src
 TEST_DIR := tests
 ARGS ?=
+PIP := $(PYTHON_BIN) -m pip
 
-.PHONY: help run test typecheck check clean clean-artifacts shell
+.PHONY: help install-dev run smoke-example test typecheck check clean clean-artifacts shell
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*##"; printf "Available targets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+install-dev: ## Create or reuse .venv and install editable dev dependencies
+	python3 -m venv .venv
+	$(CURDIR)/.venv/bin/python -m pip install --upgrade pip
+	$(CURDIR)/.venv/bin/python -m pip install -e .[dev]
+
 run: ## Run the CLI entrypoint (use ARGS='--help' for flags)
 	./joule $(ARGS)
+
+smoke-example: ## Run an end-to-end smoke check against example/mock_repo
+	$(PYTHON_BIN) scripts/smoke_example.py
 
 test: ## Run the test suite (use ARGS='-q' for extra pytest flags)
 	$(PYTHON_BIN) -m pytest $(ARGS)

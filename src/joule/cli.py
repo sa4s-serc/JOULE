@@ -13,12 +13,21 @@ from joule.config import JouleSettings, load_settings
 from joule.dashboard.app import render_dashboard_html, render_dashboard_snapshot, serve_dashboard
 from joule.discovery.resolver import discover_targets, resolve_target, resolve_workload_bundle
 from joule.evaluators.oracle import PerformanceOracle
-from joule.integrations.git import apply_patch_to_target, commit, create_branch, file_sha256, preview_patch, stage_files
+from joule.integrations.git import (
+    apply_patch_to_target,
+    commit,
+    create_branch,
+    file_sha256,
+    preview_patch,
+    source_sha256,
+    stage_files,
+)
 from joule.models import RunRecord, RunType
+from joule.orchestrator.explainer import synthesize_explanation
 from joule.orchestrator.mfbo import OptimizationOrchestrator
-from joule.utils.artifacts import ensure_artifacts, run_directory, seed_random, write_artifact
+from joule.utils.artifacts import ensure_artifacts, run_directory, seed_random, write_artifact, write_lockfile
 from joule.utils.db import JouleDB
-from joule.utils.reporting import baseline_report_text, measurement_to_json
+from joule.utils.reporting import baseline_report_text, measurement_to_json, workload_provenance_records
 from joule.utils.terminal import TerminalReporter
 
 app = typer.Typer(help="JOULE optimization toolkit")
@@ -42,11 +51,14 @@ def _resolve_verbosity(settings: JouleSettings, *, verbose: bool, quiet: bool) -
     return settings.terminal_verbosity
 
 
-def _run_metadata(target, settings: JouleSettings) -> dict:
+def _run_metadata(target, settings: JouleSettings, bundle, backend_name: str) -> dict:
     return {
         "target_file_hash": file_sha256(target.file_path),
-        "baseline_source_hash": file_sha256(target.file_path),
+        "baseline_source_hash": source_sha256(target.source),
         "default_backend": settings.default_backend,
+        "selected_backend": backend_name,
+        "config_snapshot": settings.to_record(),
+        "workload_provenance": workload_provenance_records(bundle),
     }
 
 
@@ -74,17 +86,25 @@ def doctor(
 ):
     settings, _db, reporter = _bootstrap(path, verbose=verbose, quiet=quiet)
     chosen_backend = backend or settings.default_backend
-    checks = [
+    required_checks = [
         ("python", "ok", console.color_system is not None, "Python interpreter available"),
         ("typer", "ok", importlib.util.find_spec("typer") is not None, "Typer import"),
         ("libcst", "ok", importlib.util.find_spec("libcst") is not None, "LibCST import"),
         ("psutil", "ok", importlib.util.find_spec("psutil") is not None, "psutil import"),
         ("backend", chosen_backend, _backend_ready(settings, chosen_backend), f"Backend {chosen_backend}"),
-        ("llm", settings.llm_model or "unset", bool(settings.llm_model), "LLM model configured"),
+    ]
+    optional_checks = [
+        ("llm-model", settings.llm_model or "unset", bool(settings.llm_model), "LLM model configured"),
+        ("litellm", "ok", importlib.util.find_spec("litellm") is not None, "LiteLLM installed"),
         ("git", "ok", (settings.project_root / ".git").exists(), "Git repository detected"),
     ]
     reporter.info("doctor", f"Checking project at {settings.project_root}")
-    for name, value, ok, label in checks:
+    reporter.info("doctor", "Required runtime checks")
+    for _, value, ok, label in required_checks:
+        status = "PASS" if ok else "WARN"
+        reporter.info("doctor", f"{status} {label}: {value if value else 'missing'}")
+    reporter.info("doctor", "Optional capabilities")
+    for _, value, ok, label in optional_checks:
         status = "PASS" if ok else "WARN"
         reporter.info("doctor", f"{status} {label}: {value if value else 'missing'}")
 
@@ -109,6 +129,7 @@ def baseline(
     reporter.info("target", f"Resolved {target.qualname} at {target.file_path}")
     bundle = resolve_workload_bundle(settings, target, tests=tests, properties=properties, harness=harness)
     reporter.info("workloads", f"Using {len(bundle.workloads)} workload(s)")
+    chosen_backend = backend or settings.default_backend
     run_id = settings.new_run_id()
     run_dir = run_directory(settings, run_id)
     record = RunRecord(
@@ -118,8 +139,17 @@ def baseline(
         bundle=bundle,
         status="running",
         created_at=datetime.now(UTC).isoformat(),
-        metadata=_run_metadata(target, settings),
+        metadata=_run_metadata(target, settings, bundle, chosen_backend),
     )
+    lock_path = write_lockfile(
+        settings,
+        run_id=run_id,
+        target=target,
+        backend=chosen_backend,
+        target_file_hash=record.metadata["target_file_hash"],
+        baseline_source_hash=record.metadata["baseline_source_hash"],
+    )
+    record.metadata["lock_path"] = str(lock_path)
     db.create_run(record)
     oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
     orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
@@ -153,6 +183,7 @@ def run(
     reporter.info("target", f"Resolved {target.qualname} at {target.file_path}")
     bundle = resolve_workload_bundle(settings, target, tests=tests, properties=properties, harness=harness)
     reporter.info("workloads", f"Using {len(bundle.workloads)} workload(s)")
+    chosen_backend = backend or settings.default_backend
     run_id = settings.new_run_id()
     run_dir = run_directory(settings, run_id)
     record = RunRecord(
@@ -162,8 +193,17 @@ def run(
         bundle=bundle,
         status="running",
         created_at=datetime.now(UTC).isoformat(),
-        metadata=_run_metadata(target, settings),
+        metadata=_run_metadata(target, settings, bundle, chosen_backend),
     )
+    lock_path = write_lockfile(
+        settings,
+        run_id=run_id,
+        target=target,
+        backend=chosen_backend,
+        target_file_hash=record.metadata["target_file_hash"],
+        baseline_source_hash=record.metadata["baseline_source_hash"],
+    )
+    record.metadata["lock_path"] = str(lock_path)
     db.create_run(record)
     oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
     orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
@@ -180,6 +220,10 @@ def run(
             "operator_name": best.operator_name,
             "score": best.score,
             "aggregate": best.report.aggregate.to_record(),
+            "dependencies": best.dependencies,
+            "dependency_policy_state": best.metadata.get("dependency_policy_state"),
+            "improvement_summary": best.metadata.get("improvement_summary"),
+            "explanation_summary": best.metadata.get("explanation_summary") or synthesize_explanation(baseline_report, best),
         }
         metadata["best_candidate"] = best_candidate_payload
         metadata["patch_path"] = str(run_dir / "best.patch")
@@ -187,11 +231,25 @@ def run(
     else:
         reporter.info("result", "No candidate cleared the promotion thresholds")
     db.update_run_status(run_id, "completed", metadata=metadata)
+    candidates = db.get_candidates(run_id)
     summary = {
         "run_id": run_id,
         "baseline": baseline_report.to_record(),
         "best_candidate": best.report.to_record() if best and best.report else None,
         "pareto": [point.candidate_id for point in pareto.points()],
+        "workload_provenance": workload_provenance_records(bundle),
+        "candidates": [
+            {
+                "candidate_id": item["candidate_id"],
+                "operator_name": item["operator_name"],
+                "status": item["status"],
+                "rejected": item["metadata"].get("rejected"),
+                "dependency_policy_state": item["metadata"].get("dependency_policy_state"),
+                "improvement_summary": item["metadata"].get("improvement_summary"),
+                "explanation_summary": item["metadata"].get("explanation_summary"),
+            }
+            for item in candidates
+        ],
     }
     _write_run_summary(db, run_dir, "run_summary.json", summary)
     console.print(json.dumps(summary, indent=2))
@@ -220,6 +278,10 @@ def apply(
         selected = next((item for item in candidates if item["status"] == "accepted"), None)
     if selected is None:
         raise typer.BadParameter(f"No candidate available for run {run_id}")
+    if selected["dependencies"]:
+        raise typer.BadParameter(
+            "Selected candidate requires new dependencies and is review-only in JOULE v0; automatic dependency edits are deferred"
+        )
     expected_hash = run.metadata.get("target_file_hash")
     current_hash = file_sha256(run.target.file_path)
     if expected_hash and current_hash != expected_hash:
@@ -265,6 +327,15 @@ def discover(
             "score": result.score,
             "reasons": result.reasons,
             "workloads": [workload.to_record() for workload in result.workloads],
+            "workload_provenance": [
+                {
+                    "identifier": workload.identifier,
+                    "provenance": workload.metadata.get("provenance", "unknown"),
+                    "resolution_strategy": workload.metadata.get("resolution_strategy", "unknown"),
+                    "alignment_score": workload.metadata.get("alignment_score"),
+                }
+                for workload in result.workloads
+            ],
         }
         for result in results
     ]
@@ -312,6 +383,7 @@ def inspect(
             "bundle": record.bundle.to_record(),
             "metadata": record.metadata,
         },
+        "workload_provenance": workload_provenance_records(record.bundle),
         "measurements": measurements,
         "candidates": candidates,
         "artifacts": db.get_artifacts(run_id),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from contextlib import redirect_stderr, redirect_stdout
 import importlib
 import importlib.util
@@ -36,10 +37,10 @@ def load_object(selector: str, project_root: Path, overlay_root: Path | None = N
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
-        return getattr(module, object_name)
+        return _resolve_attr_path(module, object_name)
     module_name, object_name = selector.replace("::", ":").split(":", 1)
     module = importlib.import_module(module_name)
-    return getattr(module, object_name)
+    return _resolve_attr_path(module, object_name)
 
 
 def execute_workload(
@@ -71,7 +72,7 @@ def execute_workload(
             callback = load_object(workload.selector, project_root, overlay_root=overlay_root)
             for _ in range(inner_repetitions):
                 logical_invocations += 1
-                callback()
+                _call_maybe_async(callback)
             payload = {"return_code": 0, "success": True}
         elif workload.kind is WorkloadKind.HARNESS:
             callback = load_object(workload.selector, project_root, overlay_root=overlay_root)
@@ -80,9 +81,9 @@ def execute_workload(
             for _ in range(inner_repetitions):
                 logical_invocations += 1
                 if len(signature.parameters) == 0:
-                    callback()
+                    _call_maybe_async(callback)
                 else:
-                    callback(target_callable)
+                    _call_maybe_async(callback, target_callable)
             payload = {"return_code": 0, "success": True}
         elif workload.kind is WorkloadKind.GOLDEN_TRACE:
             target_callable = _load_target_callable(target, project_root, overlay_root)
@@ -94,7 +95,7 @@ def execute_workload(
             }
             for _ in range(inner_repetitions):
                 logical_invocations += 1
-                target_callable(**kwargs)
+                _call_maybe_async(target_callable, **kwargs)
             payload = {"return_code": 0, "success": True, "mode": "default-args"}
         else:
             raise ValueError(f"Unsupported workload kind: {workload.kind}")
@@ -190,7 +191,24 @@ def _load_target_callable(target: TargetSpec, project_root: Path, overlay_root: 
         sys.path.insert(0, str(src_path))
     sys.path.insert(0, str(project_root))
     module = importlib.import_module(target.module)
-    return getattr(module, target.function_name)
+    current = module
+    for owner in target.owner_path:
+        current = getattr(current, owner)
+    return getattr(current, target.function_name)
+
+
+def _resolve_attr_path(root: object, attribute_path: str):
+    current = root
+    for segment in attribute_path.split("."):
+        current = getattr(current, segment)
+    return current
+
+
+def _call_maybe_async(callback, *args, **kwargs):
+    result = callback(*args, **kwargs)
+    if inspect.isawaitable(result):
+        return asyncio.run(result)
+    return result
 
 
 def _decode_worker_payload(stdout: str, stderr: str, return_code: int, inner_repetitions: int) -> dict:

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "joule-example-project"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.joule]
+default_backend = "mock"
+optimization_budget = 4
+promotion_scalar_min = 0.0
+final_improvement_min = 0.0
+terminal_verbosity = "normal"

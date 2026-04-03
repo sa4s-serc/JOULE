@@ -77,3 +77,35 @@ def test_repo_launcher_dispatches_to_cli(sample_project):
     )
     assert process.returncode == 0, process.stderr
     assert "<title>JOULE Dashboard</title>" in process.stdout
+
+
+def test_doctor_command_separates_required_and_optional_checks(sample_project):
+    result = runner.invoke(app, ["doctor", str(sample_project)])
+    assert result.exit_code == 0, result.output
+    assert "Required runtime checks" in result.output
+    assert "Optional capabilities" in result.output
+
+
+def test_discover_and_inspect_expose_workload_provenance(sample_project):
+    baseline = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "membership_total",
+            "--tests",
+            "tests/test_algos.py::test_membership_total",
+            "--no-dashboard",
+        ],
+    )
+    assert baseline.exit_code == 0, baseline.output
+
+    discover_result = runner.invoke(app, ["discover", str(sample_project)])
+    assert discover_result.exit_code == 0, discover_result.output
+    assert "workload_provenance" in discover_result.output
+
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", baseline.output).group(1)
+    inspect_result = runner.invoke(app, ["inspect", str(sample_project), run_id])
+    assert inspect_result.exit_code == 0, inspect_result.output
+    assert "workload_provenance" in inspect_result.output

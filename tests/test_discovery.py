@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from joule.config import load_settings
 from joule.discovery.resolver import discover_targets, resolve_target, resolve_workload_bundle
 from joule.models import WorkloadKind
@@ -18,3 +20,48 @@ def test_workload_bundle_falls_back_to_golden_trace(sample_project):
     target = resolve_target(sample_project / "sample_pkg" / "algos.py", "unreferenced_total", project_root=sample_project)
     bundle = resolve_workload_bundle(settings, target, tests=None, properties=None, harness=None)
     assert bundle.workloads[0].kind is WorkloadKind.GOLDEN_TRACE
+    assert bundle.workloads[0].metadata["provenance"] == "golden-default-args"
+
+
+def test_resolve_target_supports_async_and_class_methods(sample_project):
+    source = sample_project / "sample_pkg" / "algos.py"
+    async_target = resolve_target(source, "async_square_total", project_root=sample_project)
+    method_target = resolve_target(source, "NumberCruncher.generator_total", project_root=sample_project)
+
+    assert async_target.is_async is True
+    assert async_target.qualname == "async_square_total"
+    assert method_target.owner_path == ["NumberCruncher"]
+    assert method_target.qualname == "NumberCruncher.generator_total"
+
+
+def test_resolve_target_rejects_impure_and_nested_targets(sample_project):
+    source = sample_project / "sample_pkg" / "algos.py"
+
+    with pytest.raises(ValueError, match="impure"):
+        resolve_target(source, "impure_total", project_root=sample_project)
+    with pytest.raises(ValueError, match="out of scope"):
+        resolve_target(source, "inner_total", project_root=sample_project)
+
+
+def test_workload_bundle_prefers_explicit_selectors(sample_project):
+    settings = load_settings(sample_project)
+    target = resolve_target(sample_project / "sample_pkg" / "algos.py", "membership_total", project_root=sample_project)
+    bundle = resolve_workload_bundle(
+        settings,
+        target,
+        tests=["tests/test_algos.py::test_membership_total"],
+        properties=None,
+        harness=None,
+    )
+
+    assert len(bundle.workloads) == 1
+    assert bundle.workloads[0].metadata["provenance"] == "explicit"
+    assert "using explicit workload selectors" in bundle.notes
+
+
+def test_async_target_without_aligned_workloads_requires_explicit_selectors(sample_project):
+    settings = load_settings(sample_project)
+    target = resolve_target(sample_project / "sample_pkg" / "algos.py", "async_orphan_total", project_root=sample_project)
+
+    with pytest.raises(ValueError, match="Provide --tests/--properties/--harness"):
+        resolve_workload_bundle(settings, target, tests=None, properties=None, harness=None)

@@ -11,7 +11,7 @@ from joule.models import TargetSpec
 
 def preview_patch(target: TargetSpec, candidate_source: str) -> str:
     original = target.file_path.read_text(encoding="utf-8")
-    updated = replace_function_in_module(original, target.function_name, candidate_source)
+    updated = replace_function_in_module(original, target, candidate_source)
     return "".join(
         difflib.unified_diff(
             original.splitlines(keepends=True),
@@ -24,7 +24,7 @@ def preview_patch(target: TargetSpec, candidate_source: str) -> str:
 
 def apply_patch_to_target(target: TargetSpec, candidate_source: str) -> None:
     original = target.file_path.read_text(encoding="utf-8")
-    updated = replace_function_in_module(original, target.function_name, candidate_source)
+    updated = replace_function_in_module(original, target, candidate_source)
     target.file_path.write_text(updated, encoding="utf-8")
 
 
@@ -46,3 +46,7 @@ def commit(project_root: Path, message: str) -> None:
 
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def source_sha256(source: str) -> str:
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()

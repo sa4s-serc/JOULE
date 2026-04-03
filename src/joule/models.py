@@ -32,9 +32,11 @@ class TargetSpec:
     file_path: Path
     function_name: str
     qualname: str
+    owner_path: list[str]
     line_start: int
     line_end: int
     source: str
+    is_async: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_record(self) -> dict[str, Any]:
@@ -51,9 +53,11 @@ class TargetSpec:
             file_path=Path(payload["file_path"]),
             function_name=payload["function_name"],
             qualname=payload["qualname"],
+            owner_path=list(payload.get("owner_path", [])),
             line_start=payload["line_start"],
             line_end=payload["line_end"],
             source=payload["source"],
+            is_async=bool(payload.get("is_async", False)),
             metadata=payload.get("metadata", {}),
         )
 

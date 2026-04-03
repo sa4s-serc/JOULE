@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "joule-optimizer"
 version = "0.1.0"
 description = "JOULE: Joint Optimization Unit for Logic Efficiency"
-readme = "GUIDE.md"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "libcst>=1.8.0",
@@ -17,6 +17,15 @@ dependencies = [
   "rich>=13.0.0",
   "scipy>=1.13.0",
   "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.10.0",
+  "pytest>=8.0.0",
+]
+llm = [
+  "litellm>=1.48.0",
 ]
 
 [project.scripts]

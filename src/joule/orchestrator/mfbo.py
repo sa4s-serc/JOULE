@@ -7,11 +7,13 @@ from joule.config import JouleSettings
 from joule.evaluators.correctness import CorrectnessEngine
 from joule.evaluators.oracle import PerformanceOracle
 from joule.models import CandidateEvaluation, Fidelity, TargetSpec, WorkloadBundle
+from joule.orchestrator.explainer import synthesize_explanation
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
 from joule.surrogate.gp import GaussianProcessSurrogate
 from joule.transformers.registry import OperatorRegistry
 from joule.utils.db import JouleDB
 from joule.utils.metrics import improvement_ratio, scalar_score
+from joule.utils.reporting import improvement_summary
 
 
 class OptimizationOrchestrator:
@@ -81,7 +83,16 @@ class OptimizationOrchestrator:
                         dependencies=result.dependencies,
                         accepted=False,
                         score=float("inf"),
-                        metadata={"rejected": "correctness", "reason": reasons},
+                        metadata={
+                            "rejected": "correctness",
+                            "reason": reasons,
+                            "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
+                            "dependency_policy_reason": (
+                                "candidate proposes additional dependencies and remains review-only"
+                                if result.dependencies
+                                else "candidate uses existing dependencies only"
+                            ),
+                        },
                     )
                     self._record_candidate(run_id, evaluation, status="rejected")
                     self._update_operator(result, success=False, reward=0.0)
@@ -98,7 +109,15 @@ class OptimizationOrchestrator:
                         dependencies=result.dependencies,
                         accepted=False,
                         score=float("inf"),
-                        metadata={"rejected": "surrogate"},
+                        metadata={
+                            "rejected": "surrogate",
+                            "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
+                            "dependency_policy_reason": (
+                                "candidate proposes additional dependencies and remains review-only"
+                                if result.dependencies
+                                else "candidate uses existing dependencies only"
+                            ),
+                        },
                     )
                     self._record_candidate(run_id, evaluation, status="rejected")
                     self._update_operator(result, success=False, reward=0.0)
@@ -153,13 +172,25 @@ class OptimizationOrchestrator:
                     score=candidate_score,
                     report=candidate_report,
                     metadata={
-                        "improvement": improvement_ratio(baseline.aggregate, candidate_report.aggregate)
-                        if candidate_report
-                        else {},
+                        "improvement": improvement_ratio(baseline.aggregate, candidate_report.aggregate) if candidate_report else {},
+                        "improvement_summary": (
+                            improvement_summary(baseline.aggregate, candidate_report.aggregate)
+                            if candidate_report
+                            else {}
+                        ),
+                        "explanation_summary": "",
                         "stage": last_stage,
                         "rejected": None if accepted else rejection_reason or "threshold",
+                        "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
+                        "dependency_policy_reason": (
+                            "candidate proposes additional dependencies and remains review-only"
+                            if result.dependencies
+                            else "candidate uses existing dependencies only"
+                        ),
                     },
                 )
+                if candidate_report:
+                    evaluation.metadata["explanation_summary"] = synthesize_explanation(baseline, evaluation)
                 self._record_candidate(run_id, evaluation, status="accepted" if accepted else "rejected")
                 self._update_operator(result, success=accepted, reward=max(0.0, baseline_score - candidate_score))
                 if accepted:

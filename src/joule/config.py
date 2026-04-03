@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import dataclasses
 import os
 import tomllib
 import uuid
@@ -63,6 +64,12 @@ class JouleSettings:
 
     def new_run_id(self) -> str:
         return uuid.uuid4().hex[:12]
+
+    def to_record(self) -> dict[str, Any]:
+        payload = dataclasses.asdict(self)
+        payload["project_root"] = str(self.project_root)
+        payload["artifact_dir"] = str(self.artifact_dir)
+        return payload
 
 
 def _merge_dict(base: dict, incoming: dict) -> dict:

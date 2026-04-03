@@ -58,6 +58,6 @@ def _materialize_overlay(target: TargetSpec, overlay_root: Path, candidate_sourc
             overlay_init.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_init, overlay_init)
         current = current.parent
-    rewritten = replace_function_in_module(target.file_path.read_text(encoding="utf-8"), target.function_name, candidate_source)
+    rewritten = replace_function_in_module(target.file_path.read_text(encoding="utf-8"), target, candidate_source)
     destination.write_text(rewritten, encoding="utf-8")
     return destination

@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from joule.utils.db import JouleDB
+from joule.utils.reporting import workload_provenance_records
 
 
 def render_dashboard_snapshot(db: JouleDB) -> str:
@@ -115,11 +116,12 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
         f"<tr><td>{escape(item['candidate_id'])}</td><td>{escape(item['operator_name'])}</td>"
         f"<td>{escape(item['status'])}</td><td>{item['score']:.6f}</td>"
         f"<td>{escape(str(item['metadata'].get('stage', '-')))}</td>"
-        f"<td>{escape(str(item['metadata'].get('rejected', '-')))}</td></tr>"
+        f"<td>{escape(str(item['metadata'].get('rejected', '-')))}</td>"
+        f"<td>{escape(_candidate_detail(item['metadata']))}</td></tr>"
         for item in candidates
     )
     if not candidate_rows:
-        candidate_rows = "<tr><td colspan='6'>No candidates yet</td></tr>"
+        candidate_rows = "<tr><td colspan='7'>No candidates yet</td></tr>"
     artifact_items = "".join(
         f"<li><strong>{escape(item['name'])}</strong> <span class='muted'>({escape(item['kind'])})</span></li>"
         for item in artifacts
@@ -136,6 +138,13 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
                 f"mode={calibration['adaptive_mode']} target={calibration['adaptive_target_window_s']:.3f}s"
             )
     calibration_html = "<br>".join(escape(line) for line in calibration_lines) or "No calibration data yet"
+    provenance_items = "".join(
+        (
+            f"<li><strong>{escape(item['identifier'])}</strong> "
+            f"<span class='muted'>{escape(item['provenance'])}/{escape(item['resolution_strategy'])}</span></li>"
+        )
+        for item in workload_provenance_records(run.bundle)
+    ) or "<li>No workload provenance recorded</li>"
     aggregate_html = (
         "<p><strong>Aggregate:</strong> "
         f"latency={latest_measurement['mean_wall_time_s']:.6f}s "
@@ -148,10 +157,12 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     <p><strong>{escape(run.target.qualname)}</strong> <span class='muted'>{escape(str(run.target.file_path))}</span></p>
     <p>Status: <strong>{escape(run.status)}</strong></p>
     {aggregate_html}
+    <h3>Workload Provenance</h3>
+    <ul>{provenance_items}</ul>
     <p><strong>Adaptive Calibration</strong><br>{calibration_html}</p>
     <h3>Candidates</h3>
     <table>
-      <thead><tr><th>ID</th><th>Operator</th><th>Status</th><th>Score</th><th>Stage</th><th>Reason</th></tr></thead>
+      <thead><tr><th>ID</th><th>Operator</th><th>Status</th><th>Score</th><th>Stage</th><th>Reason</th><th>Details</th></tr></thead>
       <tbody>{candidate_rows}</tbody>
     </table>
     <h3>Artifacts</h3>
@@ -159,3 +170,18 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     <h3>Apply Audits</h3>
     <ul>{audit_items}</ul>
     """
+
+
+def _candidate_detail(metadata: dict) -> str:
+    parts = []
+    improvement = metadata.get("improvement_summary", {})
+    summary = improvement.get("summary") if isinstance(improvement, dict) else None
+    if summary:
+        parts.append(summary)
+    dependency_state = metadata.get("dependency_policy_state")
+    if dependency_state:
+        parts.append(f"deps={dependency_state}")
+    explanation = metadata.get("explanation_summary")
+    if explanation:
+        parts.append(str(explanation).splitlines()[0])
+    return " | ".join(parts) if parts else "-"
