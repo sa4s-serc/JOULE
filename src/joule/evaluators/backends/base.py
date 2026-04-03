@@ -6,9 +6,9 @@ import json
 import resource
 import subprocess
 import time
-from typing import Protocol
+from typing import Any, Protocol
 
-import psutil
+import psutil  # type: ignore[import-untyped]
 
 from joule.models import TargetSpec, WorkloadSpec
 from joule.runtime import subprocess_env, worker_command
@@ -32,7 +32,7 @@ class WorkerExecution:
     wall_time_s: float
     cpu_time_s: float
     peak_memory_bytes: int
-    payload: dict
+    payload: dict[str, Any]
 
 
 class EnergyBackend(Protocol):
@@ -77,6 +77,7 @@ def run_worker_process(
         ps_process = None
 
     timed_out = False
+    payload: dict[str, Any]
     while process.poll() is None:
         if ps_process is not None:
             peak_memory = max(peak_memory, _rss_tree(ps_process))
@@ -125,7 +126,8 @@ def run_worker_process(
 
     payload["stdout"] = payload.get("stdout", "")
     payload["stderr"] = payload.get("stderr", "") or stderr.strip()
-    payload["return_code"] = int(payload.get("return_code", process.returncode or 1))
+    return_code = payload.get("return_code", process.returncode or 1)
+    payload["return_code"] = int(return_code) if return_code is not None else int(process.returncode or 1)
     payload["success"] = bool(payload.get("success", False))
     payload["logical_invocations"] = int(payload.get("logical_invocations", inner_repetitions))
     payload["inner_repetitions"] = int(payload.get("inner_repetitions", inner_repetitions))

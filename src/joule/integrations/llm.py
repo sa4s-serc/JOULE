@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from importlib import import_module
 import json
 import os
 from textwrap import dedent
+from typing import Any, cast
 
 from joule.models import TargetSpec, TransformationResult
 
@@ -29,7 +31,7 @@ class LLMClient:
         if not self.model:
             raise LLMUnavailableError("No LLM model configured. Set [tool.joule].llm_model or JOULE_LLM_MODEL.")
         try:
-            from litellm import completion
+            completion = cast(Any, import_module("litellm")).completion
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise LLMUnavailableError("litellm is not installed; set JOULE_FAKE_LLM_RESPONSE for tests.") from exc
 

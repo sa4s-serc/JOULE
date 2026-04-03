@@ -163,6 +163,7 @@ class OptimizationOrchestrator:
                 self._record_candidate(run_id, evaluation, status="accepted" if accepted else "rejected")
                 self._update_operator(result, success=accepted, reward=max(0.0, baseline_score - candidate_score))
                 if accepted:
+                    assert candidate_report is not None
                     pareto.add(ParetoPoint(candidate_id=candidate_id, metrics=candidate_report.aggregate))
                     if best_candidate is None or candidate_score < best_candidate.score:
                         best_candidate = evaluation

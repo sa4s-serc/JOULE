@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import tomllib
 import uuid
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -16,7 +17,7 @@ class FidelitySettings:
 
 @dataclass(slots=True)
 class BackendSettings:
-    options: dict[str, dict[str, object]] = field(default_factory=dict)
+    options: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -86,7 +87,7 @@ def find_project_root(path: Path) -> Path:
 
 def load_settings(path: str | Path) -> JouleSettings:
     project_root = find_project_root(Path(path))
-    payload: dict[str, object] = {}
+    payload: dict[str, Any] = {}
     pyproject = project_root / "pyproject.toml"
     if pyproject.exists():
         with pyproject.open("rb") as handle:

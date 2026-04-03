@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import importlib.util
 import json
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -323,7 +324,7 @@ def _backend_ready(settings: JouleSettings, backend_name: str) -> bool:
     if backend_name == "mock":
         return True
     if backend_name == "rapl":
-        rapl_options = settings.backends.options.get("rapl", {}) if settings.backends.options else {}
+        rapl_options: dict[str, Any] = settings.backends.options.get("rapl", {}) if settings.backends.options else {}
         rapl_path = Path(rapl_options.get("path", "/sys/class/powercap/intel-rapl:0/energy_uj"))
         return rapl_path.exists()
     return False
