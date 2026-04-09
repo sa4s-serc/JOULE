@@ -41,6 +41,8 @@ Measure a known test-backed baseline:
   example/mock_repo/sample_pkg/algos.py \
   --function membership_total \
   --tests tests/test_algos.py::test_membership_total \
+  --hotspots \
+  --output json \
   --no-dashboard
 ```
 
@@ -51,6 +53,8 @@ Run optimization on a simple default-arg function:
   example/mock_repo/sample_pkg/algos.py \
   --function unreferenced_total \
   --budget 4 \
+  --analysis \
+  --output human \
   --no-dashboard
 ```
 
@@ -72,10 +76,10 @@ Render the dashboard HTML to stdout:
 - Validates the local runtime and separates required checks from optional capabilities.
 
 `baseline`
-- Measures the selected target against the resolved workloads and writes a baseline report plus dashboard snapshot.
+- Measures the selected target against the resolved workloads and writes a baseline report, optional hotspot analysis, and a dashboard snapshot.
 
 `run`
-- Runs the optimization flow: baseline measurement, candidate generation, correctness checks, surrogate screening, and multi-fidelity evaluation.
+- Runs the optimization flow: baseline measurement, candidate generation, correctness checks, surrogate screening, multi-fidelity evaluation, and optional deep analysis artifacts.
 
 `inspect`
 - Dumps persisted run state including metadata, candidates, measurements, artifacts, and apply audits.
@@ -110,14 +114,22 @@ After `baseline` or `run`, look for:
     ├── joule.db
     └── runs/
         └── <run_id>/
-            ├── baseline.json or run_summary.json
+            ├── baseline.json
+            ├── baseline_analysis.json
+            ├── run_summary.json
+            ├── optimization_analysis.json
+            ├── hotspots.json
             ├── dashboard.html
             └── best.patch
+            └── candidates/
+                └── <candidate_id>/...
 ```
 
 What matters most:
 - `.joule.lock` records reproducibility metadata and the config snapshot
+- `baseline_analysis.json` captures baseline metrics and optional hotspot profiling
 - `run_summary.json` shows the high-level optimization result
+- `optimization_analysis.json` summarizes the optimization funnel, operator performance, and hotspot data
 - `best.patch` contains the candidate diff when a best accepted candidate exists
 - `dashboard.html` provides a human-readable run snapshot
 
@@ -139,6 +151,7 @@ Use explicit workloads whenever the target needs setup, object state, async orch
 - No background dashboard launch from `run`
 - No nested/local function targeting
 - Dependency-bearing candidates remain review-only and cannot be applied automatically
+- Hotspot profiling and deep optimization analysis are opt-in via `--hotspots` and `--analysis`
 
 ## 9. Where to Go Next
 

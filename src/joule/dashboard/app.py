@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from joule.utils.db import JouleDB
+from joule.utils.analysis import cross_run_trends
 from joule.utils.reporting import workload_provenance_records
 
 
@@ -18,10 +19,11 @@ def render_dashboard_snapshot(db: JouleDB) -> str:
     return "\n".join(lines)
 
 
-def render_dashboard_html(db: JouleDB) -> str:
+def render_dashboard_html(db: JouleDB, selected_run_id: str | None = None) -> str:
     runs = db.list_runs()
-    latest = runs[0]["run_id"] if runs else None
+    latest = selected_run_id or (runs[0]["run_id"] if runs else None)
     current = _run_section(db, latest) if latest else "<p>No runs recorded yet.</p>"
+    trends = _trends_section(runs)
     rows = "".join(
         f"<tr><td>{escape(run['run_id'])}</td><td>{escape(run['run_type'])}</td>"
         f"<td>{escape(run['status'])}</td><td>{escape(run['created_at'])}</td></tr>"
@@ -76,17 +78,21 @@ def render_dashboard_html(db: JouleDB) -> str:
         <h2>Latest Run</h2>
         {current}
       </section>
+      <section class="panel">
+        <h2>Trends</h2>
+        {trends}
+      </section>
     </div>
   </main>
 </body>
 </html>"""
 
 
-def serve_dashboard(db_path: Path, host: str = "127.0.0.1", port: int = 8501) -> None:
+def serve_dashboard(db_path: Path, host: str = "127.0.0.1", port: int = 8501, selected_run_id: str | None = None) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
             db = JouleDB(db_path)
-            payload = render_dashboard_html(db).encode("utf-8")
+            payload = render_dashboard_html(db, selected_run_id=selected_run_id).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
@@ -111,6 +117,8 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     measurements = db.get_measurements(run_id)
     artifacts = db.get_artifacts(run_id)
     audits = db.get_apply_audits(run_id)
+    search_events = db.get_search_events(run_id)
+    hotspots = db.get_hotspot_profiles(run_id)
     latest_measurement = measurements[-1]["aggregate"] if measurements else None
     candidate_rows = "".join(
         f"<tr><td>{escape(item['candidate_id'])}</td><td>{escape(item['operator_name'])}</td>"
@@ -145,6 +153,8 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
         )
         for item in workload_provenance_records(run.bundle)
     ) or "<li>No workload provenance recorded</li>"
+    search_summary = _search_summary(search_events)
+    hotspot_html = _hotspot_section(hotspots)
     aggregate_html = (
         "<p><strong>Aggregate:</strong> "
         f"latency={latest_measurement['mean_wall_time_s']:.6f}s "
@@ -157,9 +167,12 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     <p><strong>{escape(run.target.qualname)}</strong> <span class='muted'>{escape(str(run.target.file_path))}</span></p>
     <p>Status: <strong>{escape(run.status)}</strong></p>
     {aggregate_html}
+    <p><strong>Search funnel</strong><br>{search_summary}</p>
     <h3>Workload Provenance</h3>
     <ul>{provenance_items}</ul>
     <p><strong>Adaptive Calibration</strong><br>{calibration_html}</p>
+    <h3>Hotspots</h3>
+    {hotspot_html}
     <h3>Candidates</h3>
     <table>
       <thead><tr><th>ID</th><th>Operator</th><th>Status</th><th>Score</th><th>Stage</th><th>Reason</th><th>Details</th></tr></thead>
@@ -170,6 +183,56 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     <h3>Apply Audits</h3>
     <ul>{audit_items}</ul>
     """
+
+
+def _trends_section(runs: list[dict]) -> str:
+    trends = cross_run_trends(runs)
+    targets = trends.get("targets", {})
+    if not targets:
+        return "<p>No trend data yet.</p>"
+    rows = []
+    for target, items in targets.items():
+        latest = items[0]
+        rows.append(
+            f"<tr><td>{escape(target)}</td><td>{len(items)}</td>"
+            f"<td>{latest['energy_j']:.6f}J</td><td>{latest['latency_s']:.6f}s</td>"
+            f"<td>{latest['memory_mb']:.3f}MiB</td></tr>"
+        )
+    return (
+        "<table><thead><tr><th>Target</th><th>Runs</th><th>Energy</th><th>Latency</th><th>Memory</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _search_summary(events: list[dict]) -> str:
+    if not events:
+        return "No search events"
+    counts: dict[str, int] = {}
+    for event in events:
+        counts[event["event_type"]] = counts.get(event["event_type"], 0) + 1
+    ordered = [f"{key}={counts[key]}" for key in sorted(counts)]
+    return escape(" ".join(ordered))
+
+
+def _hotspot_section(records: list[dict]) -> str:
+    summary = next((item["payload"] for item in records if item["kind"] == "summary"), None)
+    if not summary:
+        return "<p>No hotspot analysis recorded.</p>"
+    top_functions = summary.get("top_functions", [])
+    ownership = summary.get("ownership", [])
+    fn_rows = "".join(
+        f"<tr><td>{escape(Path(item['file']).name)}</td><td>{item['line']}</td><td>{escape(item['function'])}</td>"
+        f"<td>{item['cumulative_time_s']:.4f}s</td><td>{escape(item['ownership'])}</td></tr>"
+        for item in top_functions
+    ) or "<tr><td colspan='5'>No hotspot functions</td></tr>"
+    owner_rows = "".join(
+        f"<li>{escape(item['bucket'])}: {item['cumulative_time_s']:.4f}s</li>"
+        for item in ownership
+    ) or "<li>No ownership data</li>"
+    return (
+        "<table><thead><tr><th>File</th><th>Line</th><th>Function</th><th>Cumulative</th><th>Owner</th></tr></thead>"
+        f"<tbody>{fn_rows}</tbody></table><ul>{owner_rows}</ul>"
+    )
 
 
 def _candidate_detail(metadata: dict) -> str:

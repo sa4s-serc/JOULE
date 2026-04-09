@@ -40,11 +40,11 @@ def test_run_command_measures_candidates(sample_project):
         ],
     )
     assert result.exit_code == 0, result.output
-    assert '"run_id"' in result.output
-    assert '"pareto"' in result.output
+    assert "Run:" in result.output
+    assert "Funnel:" in result.output
     assert "setup" in result.output
     assert source_path.read_text(encoding="utf-8") == original
-    run_id = re.search(r'"run_id":\s*"([^"]+)"', result.output).group(1)
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", result.output).group(1)
     run_dir = sample_project / ".joule" / "runs" / run_id
     lock_payload = json.loads((sample_project / ".joule.lock").read_text(encoding="utf-8"))
     assert lock_payload["run_id"] == run_id
@@ -53,7 +53,7 @@ def test_run_command_measures_candidates(sample_project):
     assert lock_payload["baseline_source_hash"]
     assert lock_payload["config"]["default_backend"] == "mock"
     assert (run_dir / "run_summary.json").exists()
-    if '"best_candidate": null' not in result.output:
+    if "Best: none accepted" not in result.output:
         assert (run_dir / "best.patch").exists()
 
 
@@ -73,7 +73,7 @@ def test_apply_command_applies_best_candidate(sample_project):
         ],
     )
     assert result.exit_code == 0, result.output
-    run_id = re.search(r'"run_id":\s*"([^"]+)"', result.output).group(1)
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", result.output).group(1)
     settings = load_settings(sample_project)
     candidates = JouleDB(settings.db_path).get_candidates(run_id)
     assert candidates
@@ -108,7 +108,7 @@ def test_apply_rejects_dependency_bearing_candidate(sample_project):
         ],
     )
     assert result.exit_code == 0, result.output
-    run_id = re.search(r'"run_id":\s*"([^"]+)"', result.output).group(1)
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", result.output).group(1)
     settings = load_settings(sample_project)
     db = JouleDB(settings.db_path)
     candidate = db.get_candidates(run_id)[0]
@@ -130,3 +130,28 @@ def test_apply_rejects_dependency_bearing_candidate(sample_project):
     )
     assert apply_result.exit_code != 0
     assert "review-only" in apply_result.output
+
+
+def test_run_analysis_writes_candidate_and_analysis_artifacts(sample_project):
+    _loosen_thresholds(sample_project)
+    target_file = sample_project / "sample_pkg" / "algos.py"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "4",
+            "--analysis",
+            "--output",
+            "json",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    run_id = re.search(r'"run_id":\s*"([^"]+)"', result.output).group(1)
+    run_dir = sample_project / ".joule" / "runs" / run_id
+    assert (run_dir / "optimization_analysis.json").exists()
+    assert (run_dir / "candidates").exists()

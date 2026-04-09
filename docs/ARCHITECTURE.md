@@ -13,7 +13,8 @@ JOULE treats Python optimization as a measured search problem:
 5. Reject invalid candidates early through correctness and surrogate checks
 6. Measure promising candidates through increasing fidelity
 7. Persist everything to SQLite and artifact files
-8. Optionally apply an accepted candidate back to source
+8. Optionally profile hotspot behavior and optimization-process metrics
+9. Optionally apply an accepted candidate back to source
 
 The system is intentionally local-first and artifact-driven. The database is the durable state store, while run directories hold human-facing outputs and snapshots.
 
@@ -27,6 +28,7 @@ Responsibilities:
 - bootstrap settings, artifact directories, database, and terminal reporting
 - expose end-user commands: `doctor`, `baseline`, `run`, `apply`, `discover`, `dashboard`, `inspect`
 - emit `.joule.lock` and run artifact files
+- gate optional `--hotspots` and `--analysis` workflows for deeper reporting
 - enforce v0 policies such as dependency-bearing candidates being review-only
 
 ### Config and artifact layer
@@ -100,6 +102,22 @@ Design notes:
 - The adaptive repetition logic is meant to stabilize fast workloads without requiring massive outer repetition counts.
 - Backend abstraction is intentionally small so new backends can slot in later.
 
+### Hotspot profiling
+
+Primary files:
+- [src/joule/runtime.py](/home/prakhar/dev/prakhar479/hedge/src/joule/runtime.py)
+- [src/joule/evaluators/oracle.py](/home/prakhar/dev/prakhar479/hedge/src/joule/evaluators/oracle.py)
+- [src/joule/utils/analysis.py](/home/prakhar/dev/prakhar479/hedge/src/joule/utils/analysis.py)
+
+Responsibilities:
+- run an opt-in profiling pass after baseline measurement
+- capture cumulative-time and ownership summaries from the worker subprocess
+- persist hotspot payloads per workload and as a merged run summary
+
+Design notes:
+- Hotspot profiling is separated from measurement so it does not distort baseline latency or energy results.
+- v1 focuses on function-level and ownership-level hotspots, not a full trace UI or flamegraph server.
+
 ### Optimization engine
 
 Primary files:
@@ -118,6 +136,7 @@ Responsibilities:
 - screen candidates using correctness and surrogate logic
 - promote or reject candidates across `F1`, `F2`, and `F3`
 - summarize accepted or rejected outcomes
+- persist search events and per-candidate analysis metadata for optional deep analysis
 
 Current design limitations:
 - Search still expands from the baseline instead of true iterative parent selection from the Pareto front.
@@ -133,13 +152,14 @@ Primary files:
 
 Responsibilities:
 - persist runs, workloads, candidates, measurements, artifacts, apply audits, and operator stats
+- persist search events and hotspot profiles
 - shape textual and JSON reports
 - serve a simple HTML dashboard backed by SQLite
 
 Design notes:
 - SQLite is the system of record for run state.
 - Run directories are convenience artifacts for operator workflows and debugging.
-- The dashboard is deliberately simple in v0: it favors inspectability over UI sophistication.
+- The dashboard is deliberately simple in v0: it favors inspectability over UI sophistication, while now surfacing funnel and hotspot summaries.
 
 ## 3. End-to-End Command Flows
 
@@ -150,7 +170,8 @@ Design notes:
 3. Write `.joule.lock`
 4. Create a run record in SQLite
 5. Measure the baseline at `F3`
-6. Persist results and render a dashboard snapshot
+6. Optionally profile hotspots from the resolved workloads
+7. Persist results and render a dashboard snapshot
 
 ### `run`
 
@@ -160,8 +181,9 @@ Design notes:
 4. Run syntax and correctness checks in an overlay
 5. Run surrogate screening
 6. Measure promising candidates through `F1`, `F2`, `F3`
-7. Persist candidate metadata, measurements, provenance, and explanations
-8. Write run summary and dashboard snapshot
+7. Persist candidate metadata, measurements, provenance, explanations, and search events
+8. Optionally persist deeper per-candidate artifacts and hotspot summaries
+9. Write run summary and dashboard snapshot
 
 ### `apply`
 
@@ -232,10 +254,14 @@ Stored in SQLite:
 Stored in `.joule/`:
 - `.joule.lock`
 - `baseline.json`
+- `baseline_analysis.json`
 - `run_summary.json`
+- `optimization_analysis.json`
+- `hotspots.json`
 - `dashboard.html`
 - `best.patch`
 - `best_candidate.py`
+- `candidates/<candidate_id>/...` when `--analysis` is enabled
 
 ## 6. Design Decisions
 

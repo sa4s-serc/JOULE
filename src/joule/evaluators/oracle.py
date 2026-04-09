@@ -8,6 +8,7 @@ import tempfile
 from joule.config import JouleSettings
 from joule.evaluators.backends import MockEnergyBackend, RaplEnergyBackend
 from joule.evaluators.correctness import _materialize_overlay
+from joule.runtime import invoke_profile_worker
 from joule.models import CalibrationResult, Fidelity, MeasurementReport, MetricSample, TargetSpec, WorkloadBundle
 from joule.utils.metrics import aggregate_samples
 
@@ -181,6 +182,42 @@ class PerformanceOracle:
             stderr=measurement.stderr,
             metadata=metadata,
         )
+
+    def profile_bundle_hotspots(
+        self,
+        *,
+        target: TargetSpec,
+        bundle: WorkloadBundle,
+        candidate_source: str | None = None,
+    ) -> list[dict]:
+        overlay_context = tempfile.TemporaryDirectory(prefix="joule-overlay-") if candidate_source else None
+        overlay_root = Path(overlay_context.name) if overlay_context else None
+        if overlay_root and candidate_source:
+            _materialize_overlay(target, overlay_root, candidate_source)
+        try:
+            records: list[dict] = []
+            for workload in bundle.workloads:
+                profiled = invoke_profile_worker(
+                    target,
+                    workload,
+                    overlay_root=overlay_root,
+                    inner_repetitions=1,
+                    timeout_s=self.settings.workload_timeout_s,
+                )
+                profile = profiled.get("profile", {"functions": [], "ownership": []})
+                records.append(
+                    {
+                        "workload_id": workload.identifier,
+                        "success": bool(profiled.get("success", False)),
+                        "return_code": int(profiled.get("return_code", 1)),
+                        "stderr": str(profiled.get("stderr", "")),
+                        "profile": profile,
+                    }
+                )
+            return records
+        finally:
+            if overlay_context:
+                overlay_context.cleanup()
 
 
 def _get_backend(name: str, settings: JouleSettings):

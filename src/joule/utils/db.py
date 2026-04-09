@@ -74,6 +74,27 @@ CREATE TABLE IF NOT EXISTS operator_stats (
   successes INTEGER NOT NULL DEFAULT 0,
   reward REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS search_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  candidate_id TEXT,
+  operator_name TEXT,
+  event_type TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  detail_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hotspot_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  candidate_id TEXT,
+  workload_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 
@@ -306,6 +327,94 @@ class JouleDB:
                 "INSERT INTO apply_audits(run_id, candidate_id, applied_at, metadata_json) VALUES(?, ?, ?, ?)",
                 (run_id, candidate_id, applied_at, json.dumps(metadata)),
             )
+
+    def record_search_event(
+        self,
+        *,
+        run_id: str,
+        event_type: str,
+        stage: str,
+        created_at: str,
+        detail: dict,
+        candidate_id: str | None = None,
+        operator_name: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO search_events(run_id, candidate_id, operator_name, event_type, stage, detail_json, created_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, candidate_id, operator_name, event_type, stage, json.dumps(detail), created_at),
+            )
+
+    def get_search_events(self, run_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT candidate_id, operator_name, event_type, stage, detail_json, created_at
+                FROM search_events
+                WHERE run_id = ?
+                ORDER BY id
+                """,
+                (run_id,),
+            ).fetchall()
+        return [
+            {
+                "candidate_id": row[0],
+                "operator_name": row[1],
+                "event_type": row[2],
+                "stage": row[3],
+                "detail": json.loads(row[4]),
+                "created_at": row[5],
+            }
+            for row in rows
+        ]
+
+    def record_hotspot_profile(
+        self,
+        *,
+        run_id: str,
+        workload_id: str,
+        kind: str,
+        payload: dict,
+        created_at: str,
+        candidate_id: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hotspot_profiles(run_id, candidate_id, workload_id, kind, payload_json, created_at)
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, candidate_id, workload_id, kind, json.dumps(payload), created_at),
+            )
+
+    def get_hotspot_profiles(self, run_id: str, candidate_id: str | None = None) -> list[dict]:
+        query = """
+            SELECT candidate_id, workload_id, kind, payload_json, created_at
+            FROM hotspot_profiles
+            WHERE run_id = ?
+        """
+        params: list[object] = [run_id]
+        if candidate_id is None:
+            query += " AND candidate_id IS NULL"
+        else:
+            query += " AND candidate_id = ?"
+            params.append(candidate_id)
+        query += " ORDER BY id"
+        with self.connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [
+            {
+                "candidate_id": row[0],
+                "workload_id": row[1],
+                "kind": row[2],
+                "payload": json.loads(row[3]),
+                "created_at": row[4],
+            }
+            for row in rows
+        ]
 
     def get_apply_audits(self, run_id: str) -> list[dict]:
         with self.connect() as conn:

@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 
 from joule.config import JouleSettings, load_settings
-from joule.dashboard.app import render_dashboard_html, render_dashboard_snapshot, serve_dashboard
+from joule.dashboard.app import render_dashboard_html, serve_dashboard
 from joule.discovery.resolver import discover_targets, resolve_target, resolve_workload_bundle
 from joule.evaluators.oracle import PerformanceOracle
 from joule.integrations.git import (
@@ -25,9 +25,18 @@ from joule.integrations.git import (
 from joule.models import RunRecord, RunType
 from joule.orchestrator.explainer import synthesize_explanation
 from joule.orchestrator.mfbo import OptimizationOrchestrator
+from joule.utils.analysis import (
+    build_baseline_analysis,
+    build_optimization_analysis,
+    candidate_detail_payload,
+    human_baseline_summary,
+    human_run_summary,
+    json_pretty,
+    summarize_hotspots,
+)
 from joule.utils.artifacts import ensure_artifacts, run_directory, seed_random, write_artifact, write_lockfile
 from joule.utils.db import JouleDB
-from joule.utils.reporting import baseline_report_text, measurement_to_json, workload_provenance_records
+from joule.utils.reporting import measurement_to_json, workload_provenance_records
 from joule.utils.terminal import TerminalReporter
 
 app = typer.Typer(help="JOULE optimization toolkit")
@@ -53,6 +62,7 @@ def _resolve_verbosity(settings: JouleSettings, *, verbose: bool, quiet: bool) -
 
 def _run_metadata(target, settings: JouleSettings, bundle, backend_name: str) -> dict:
     return {
+        "target_qualname": target.qualname,
         "target_file_hash": file_sha256(target.file_path),
         "baseline_source_hash": source_sha256(target.source),
         "default_backend": settings.default_backend,
@@ -75,6 +85,63 @@ def _write_run_summary(
     output = write_artifact(run_dir, name, json.dumps(payload, indent=2))
     _write_dashboard_snapshot(db, run_dir)
     return output
+
+
+def _resolve_output(*, output: str, json_output: bool) -> str:
+    if json_output:
+        return "json"
+    return output
+
+
+def _collect_hotspot_analysis(
+    *,
+    oracle: PerformanceOracle,
+    db: JouleDB,
+    run_id: str,
+    target,
+    bundle,
+    run_dir: Path,
+    reporter: TerminalReporter,
+    enabled: bool,
+    limit: int,
+) -> dict | None:
+    if not enabled:
+        return None
+    reporter.info("hotspots", "Profiling workloads for hotspot analysis")
+    records = oracle.profile_bundle_hotspots(target=target, bundle=bundle)
+    created_at = datetime.now(UTC).isoformat()
+    for item in records:
+        db.record_hotspot_profile(
+            run_id=run_id,
+            workload_id=item["workload_id"],
+            kind="workload",
+            payload=item,
+            created_at=created_at,
+        )
+    summary = summarize_hotspots(records, limit=limit)
+    db.record_hotspot_profile(
+        run_id=run_id,
+        workload_id="all",
+        kind="summary",
+        payload=summary,
+        created_at=created_at,
+    )
+    write_artifact(run_dir, "hotspots.json", json_pretty(summary))
+    return summary
+
+
+def _write_candidate_artifacts(run_dir: Path, candidates: list[dict]) -> None:
+    candidates_dir = run_dir / "candidates"
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    for item in candidates:
+        candidate_dir = candidates_dir / item["candidate_id"]
+        candidate_dir.mkdir(parents=True, exist_ok=True)
+        write_artifact(candidate_dir, "candidate.json", json_pretty(item))
+        write_artifact(candidate_dir, "candidate.py", item["source_code"])
+
+
+def _artifact_paths_payload(run_dir: Path, names: list[str]) -> dict[str, str]:
+    return {name: str(run_dir / name) for name in names if (run_dir / name).exists()}
 
 
 @app.command()
@@ -117,8 +184,11 @@ def baseline(
     properties: list[str] = typer.Option(None, "--properties", help="Property callables"),
     harness: str | None = typer.Option(None, "--harness", help="Harness callable"),
     backend: str | None = typer.Option(None, "--backend", help="Energy backend"),
+    output: str = typer.Option("human", "--output", help="Output format: human or json"),
     json_output: bool = typer.Option(False, "--json", help="Print JSON report"),
     repetitions: int | None = typer.Option(None, "--repetitions", help="Override repetition count"),
+    hotspots: bool = typer.Option(False, "--hotspots", help="Run hotspot analysis after baseline measurement"),
+    hotspot_limit: int = typer.Option(12, "--hotspot-limit", help="Number of hotspot functions to keep"),
     no_dashboard: bool = typer.Option(False, "--no-dashboard", help="Skip dashboard hint output"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
@@ -154,12 +224,35 @@ def baseline(
     oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
     orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
     report = orchestrator.baseline(run_id, target, bundle, repetitions=repetitions)
-    metadata = {**record.metadata, "aggregate": report.aggregate.to_record()}
+    hotspot_summary = _collect_hotspot_analysis(
+        oracle=oracle,
+        db=db,
+        run_id=run_id,
+        target=target,
+        bundle=bundle,
+        run_dir=run_dir,
+        reporter=reporter,
+        enabled=hotspots,
+        limit=hotspot_limit,
+    )
+    baseline_analysis = build_baseline_analysis(
+        run_id=run_id,
+        target_qualname=target.qualname,
+        report=report,
+        hotspot_summary=hotspot_summary,
+    )
+    write_artifact(run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
+    metadata = {**record.metadata, "aggregate": report.aggregate.to_record(), "hotspots_enabled": hotspots}
     db.update_run_status(run_id, "completed", metadata=metadata)
     write_artifact(run_dir, "baseline.json", measurement_to_json(report))
     _write_dashboard_snapshot(db, run_dir)
-    output = measurement_to_json(report) if json_output else baseline_report_text(bundle, report)
-    console.print(output)
+    chosen_output = _resolve_output(output=output, json_output=json_output)
+    if json_output:
+        console.print(measurement_to_json(report))
+    elif chosen_output == "json":
+        console.print(json_pretty(baseline_analysis))
+    else:
+        console.print(human_baseline_summary(report, bundle.notes, hotspot_summary))
     if not no_dashboard:
         reporter.info("dashboard", f"Snapshot written to {run_dir / 'dashboard.html'}")
 
@@ -173,6 +266,8 @@ def run(
     harness: str | None = typer.Option(None, "--harness", help="Harness callable"),
     backend: str | None = typer.Option(None, "--backend", help="Energy backend"),
     budget: int | None = typer.Option(None, "--budget", help="Candidate budget"),
+    output: str = typer.Option("human", "--output", help="Output format: human or json"),
+    analysis: bool = typer.Option(False, "--analysis", help="Persist deep optimization analysis artifacts"),
     no_dashboard: bool = typer.Option(False, "--no-dashboard", help="Skip dashboard hint output"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
@@ -207,8 +302,31 @@ def run(
     db.create_run(record)
     oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
     orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
-    baseline_report, pareto, best = orchestrator.optimize(run_id, target, bundle, budget=budget)
-    metadata = {**record.metadata, "aggregate": baseline_report.aggregate.to_record(), "pareto_size": len(pareto.points())}
+    baseline_report, pareto, best = orchestrator.optimize(run_id, target, bundle, budget=budget, analysis=analysis)
+    hotspot_summary = _collect_hotspot_analysis(
+        oracle=oracle,
+        db=db,
+        run_id=run_id,
+        target=target,
+        bundle=bundle,
+        run_dir=run_dir,
+        reporter=reporter,
+        enabled=analysis,
+        limit=12,
+    )
+    baseline_analysis = build_baseline_analysis(
+        run_id=run_id,
+        target_qualname=target.qualname,
+        report=baseline_report,
+        hotspot_summary=hotspot_summary,
+    )
+    write_artifact(run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
+    metadata = {
+        **record.metadata,
+        "aggregate": baseline_report.aggregate.to_record(),
+        "pareto_size": len(pareto.points()),
+        "analysis_enabled": analysis,
+    }
     best_candidate_payload = None
     if best and best.report:
         diff = preview_patch(target, best.source)
@@ -232,12 +350,25 @@ def run(
         reporter.info("result", "No candidate cleared the promotion thresholds")
     db.update_run_status(run_id, "completed", metadata=metadata)
     candidates = db.get_candidates(run_id)
+    if analysis:
+        _write_candidate_artifacts(run_dir, candidates)
+    search_events = db.get_search_events(run_id)
+    optimization_analysis = build_optimization_analysis(
+        run_id=run_id,
+        target_qualname=target.qualname,
+        baseline=baseline_report,
+        candidates=candidates,
+        events=search_events,
+        hotspot_summary=hotspot_summary,
+    )
+    write_artifact(run_dir, "optimization_analysis.json", json_pretty(optimization_analysis))
     summary = {
         "run_id": run_id,
         "baseline": baseline_report.to_record(),
-        "best_candidate": best.report.to_record() if best and best.report else None,
+        "best_candidate": best_candidate_payload,
         "pareto": [point.candidate_id for point in pareto.points()],
         "workload_provenance": workload_provenance_records(bundle),
+        "analysis": optimization_analysis,
         "candidates": [
             {
                 "candidate_id": item["candidate_id"],
@@ -251,8 +382,21 @@ def run(
             for item in candidates
         ],
     }
+    summary["artifact_paths"] = _artifact_paths_payload(
+        run_dir,
+        [
+            "run_summary.json",
+            "optimization_analysis.json",
+            "hotspots.json",
+            "best.patch",
+            "dashboard.html",
+        ],
+    )
     _write_run_summary(db, run_dir, "run_summary.json", summary)
-    console.print(json.dumps(summary, indent=2))
+    if output == "json":
+        console.print(json_pretty(summary))
+    else:
+        console.print(human_run_summary(summary))
     if not no_dashboard:
         reporter.info("dashboard", f"Snapshot written to {run_dir / 'dashboard.html'}")
 
@@ -347,6 +491,7 @@ def dashboard(
     path: Path,
     host: str = typer.Option("127.0.0.1", "--host", help="Dashboard host"),
     port: int | None = typer.Option(None, "--port", help="Dashboard port"),
+    run_id: str | None = typer.Option(None, "--run-id", help="Specific run to render"),
     once: bool = typer.Option(False, "--once", help="Print HTML instead of serving"),
     verbose: bool = typer.Option(False, "--verbose", help="Print startup details"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
@@ -354,16 +499,18 @@ def dashboard(
     settings, db, reporter = _bootstrap(path, verbose=verbose, quiet=quiet)
     chosen_port = port or settings.dashboard_port
     if once:
-        console.print(render_dashboard_html(db))
+        console.print(render_dashboard_html(db, selected_run_id=run_id))
         return
     reporter.info("dashboard", f"Serving dashboard at http://{host}:{chosen_port}")
-    serve_dashboard(settings.db_path, host=host, port=chosen_port)
+    serve_dashboard(settings.db_path, host=host, port=chosen_port, selected_run_id=run_id)
 
 
 @app.command()
 def inspect(
     path: Path,
     run_id: str,
+    candidate_id: str | None = typer.Option(None, "--candidate-id", help="Inspect a specific candidate"),
+    output: str = typer.Option("json", "--output", help="Output format: human or json"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed inspection events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
@@ -373,6 +520,8 @@ def inspect(
     record = db.get_run(run_id)
     measurements = db.get_measurements(run_id)
     candidates = db.get_candidates(run_id)
+    hotspot_profiles = db.get_hotspot_profiles(run_id)
+    search_events = db.get_search_events(run_id)
     payload = {
         "run": {
             "run_id": record.run_id,
@@ -386,10 +535,19 @@ def inspect(
         "workload_provenance": workload_provenance_records(record.bundle),
         "measurements": measurements,
         "candidates": candidates,
+        "search_events": search_events,
+        "hotspots": hotspot_profiles,
         "artifacts": db.get_artifacts(run_id),
         "apply_audits": db.get_apply_audits(run_id),
     }
-    console.print(json.dumps(payload, indent=2))
+    if candidate_id:
+        selected = next((item for item in candidates if item["candidate_id"] == candidate_id), None)
+        if selected is None:
+            raise typer.BadParameter(f"Unknown candidate_id {candidate_id!r} for run {run_id}")
+        candidate_payload = candidate_detail_payload(selected, measurements)
+        console.print(json_pretty(candidate_payload) if output == "json" else json_pretty(candidate_payload))
+        return
+    console.print(json_pretty(payload) if output == "json" else json_pretty(payload))
 
 
 def _backend_ready(settings: JouleSettings, backend_name: str) -> bool:

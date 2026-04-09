@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from contextlib import redirect_stderr, redirect_stdout
+import cProfile
 import importlib
 import importlib.util
 import inspect
@@ -10,6 +11,7 @@ import io
 import json
 import os
 from pathlib import Path
+import pstats
 import subprocess
 import sys
 
@@ -142,12 +144,52 @@ def invoke_worker(
     return _decode_worker_payload(stdout, stderr, process.returncode, inner_repetitions)
 
 
+def invoke_profile_worker(
+    target: TargetSpec,
+    workload: WorkloadSpec,
+    overlay_root: Path | None = None,
+    *,
+    inner_repetitions: int = 1,
+    timeout_s: float = 30.0,
+) -> dict:
+    command = worker_command(
+        target,
+        workload,
+        overlay_root=overlay_root,
+        inner_repetitions=inner_repetitions,
+        profile_mode="hotspots",
+    )
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=subprocess_env(target.project_root, overlay_root),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        return {
+            "success": False,
+            "return_code": 124,
+            "stdout": stdout or "",
+            "stderr": (stderr or "").strip() or f"Timed out after {timeout_s:.1f}s",
+            "logical_invocations": inner_repetitions,
+            "inner_repetitions": inner_repetitions,
+            "profile": {"functions": [], "ownership": []},
+        }
+    return _decode_worker_payload(stdout, stderr, process.returncode, inner_repetitions)
+
+
 def worker_command(
     target: TargetSpec,
     workload: WorkloadSpec,
     *,
     overlay_root: Path | None = None,
     inner_repetitions: int = 1,
+    profile_mode: str | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -162,6 +204,8 @@ def worker_command(
     ]
     if overlay_root:
         command.extend(["--overlay-root", str(overlay_root)])
+    if profile_mode:
+        command.extend(["--profile-mode", profile_mode])
     return command
 
 
@@ -243,23 +287,97 @@ def _normalize_pytest_selector(selector: str, project_root: Path) -> str:
     return f"{file_path}::{rest}"
 
 
+def execute_workload_with_profile(
+    target: TargetSpec,
+    workload: WorkloadSpec,
+    project_root: Path,
+    overlay_root: Path | None = None,
+    *,
+    inner_repetitions: int = 1,
+) -> dict:
+    profiler = cProfile.Profile()
+    profiler.enable()
+    payload = execute_workload(
+        target,
+        workload,
+        project_root=project_root,
+        overlay_root=overlay_root,
+        inner_repetitions=inner_repetitions,
+    )
+    profiler.disable()
+    payload["profile"] = _serialize_profile(profiler, project_root, overlay_root)
+    return payload
+
+
+def _serialize_profile(profiler: cProfile.Profile, project_root: Path, overlay_root: Path | None) -> dict:
+    stats = pstats.Stats(profiler)
+    functions = []
+    ownership_totals: dict[str, float] = {}
+    raw_stats = getattr(stats, "stats", {})
+    for (filename, line_no, function_name), stat in raw_stats.items():
+        primitive_calls, total_calls, total_time, cumulative_time, _callers = stat
+        ownership = _ownership_bucket(filename, project_root, overlay_root)
+        ownership_totals[ownership] = ownership_totals.get(ownership, 0.0) + cumulative_time
+        functions.append(
+            {
+                "file": filename,
+                "line": int(line_no),
+                "function": function_name,
+                "primitive_calls": int(primitive_calls),
+                "total_calls": int(total_calls),
+                "total_time_s": float(total_time),
+                "cumulative_time_s": float(cumulative_time),
+                "ownership": ownership,
+            }
+        )
+    functions.sort(key=lambda item: item["cumulative_time_s"], reverse=True)
+    ownership_info = [
+        {"bucket": bucket, "cumulative_time_s": total}
+        for bucket, total in sorted(ownership_totals.items(), key=lambda item: item[1], reverse=True)
+    ]
+    return {"functions": functions[:40], "ownership": ownership_info}
+
+
+def _ownership_bucket(filename: str, project_root: Path, overlay_root: Path | None) -> str:
+    if not filename or filename.startswith("~"):
+        return "builtin"
+    file_path = Path(filename)
+    if overlay_root and str(file_path).startswith(str(overlay_root)):
+        return "candidate-overlay"
+    if str(file_path).startswith(str(project_root)):
+        return "project"
+    if "/python" in str(file_path).lower() or "lib/python" in str(file_path).lower():
+        return "stdlib-or-site"
+    return "external"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-json", required=True)
     parser.add_argument("--workload-json", required=True)
     parser.add_argument("--overlay-root")
     parser.add_argument("--inner-repetitions", type=int, default=1)
+    parser.add_argument("--profile-mode")
     args = parser.parse_args(argv)
     target = TargetSpec.from_record(json.loads(args.target_json))
     workload = WorkloadSpec.from_record(json.loads(args.workload_json))
     try:
-        payload = execute_workload(
-            target,
-            workload,
-            project_root=target.project_root,
-            overlay_root=Path(args.overlay_root) if args.overlay_root else None,
-            inner_repetitions=max(1, args.inner_repetitions),
-        )
+        if args.profile_mode == "hotspots":
+            payload = execute_workload_with_profile(
+                target,
+                workload,
+                project_root=target.project_root,
+                overlay_root=Path(args.overlay_root) if args.overlay_root else None,
+                inner_repetitions=max(1, args.inner_repetitions),
+            )
+        else:
+            payload = execute_workload(
+                target,
+                workload,
+                project_root=target.project_root,
+                overlay_root=Path(args.overlay_root) if args.overlay_root else None,
+                inner_repetitions=max(1, args.inner_repetitions),
+            )
         print(json.dumps(payload))
         return 0 if payload.get("success", False) else 1
     except Exception as exc:  # pragma: no cover - exercised via subprocess
