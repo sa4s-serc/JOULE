@@ -152,8 +152,10 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     skipped_count = sum(1 for item in candidates if item.get("status") == "skipped")
     candidate_rows = "".join(
         f"<tr class='candidate-row' data-status='{escape(item['status'])}' data-score='{item['score']:.12f}' "
-        f"data-stage='{escape(str(item['metadata'].get('stage', '-')))}'>"
+        f"data-stage='{escape(str(item['metadata'].get('stage', '-')))}' "
+        f"data-tier='{escape(str(item['metadata'].get('operator_tier', '-')))}'>"
         f"<td>{escape(item['candidate_id'])}</td><td>{escape(item['operator_name'])}</td>"
+        f"<td>{escape(str(item['metadata'].get('operator_tier', '-')))}</td>"
         f"<td>{escape(item['status'])}</td><td>{item['score']:.6f}</td>"
         f"<td>{escape(str(item['metadata'].get('stage', '-')))}</td>"
         f"<td>{escape(str(item['metadata'].get('rejected', '-')))}</td>"
@@ -161,7 +163,7 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
         for item in candidates
     )
     if not candidate_rows:
-        candidate_rows = "<tr><td colspan='7'>No candidates yet</td></tr>"
+        candidate_rows = "<tr><td colspan='8'>No candidates yet</td></tr>"
     artifact_items = "".join(
         f"<li><strong>{escape(item['name'])}</strong> <span class='muted'>({escape(item['kind'])})</span></li>"
         for item in artifacts
@@ -230,6 +232,14 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
                     <option value="skipped">skipped</option>
                 </select>
             </label>
+            <label>Tier
+                <select id="candidate-tier-filter" onchange="filterCandidates()">
+                    <option value="all">all</option>
+                    <option value="L">L</option>
+                    <option value="M">M</option>
+                    <option value="H">H</option>
+                </select>
+            </label>
             <label>Sort
                 <select id="candidate-sort" onchange="filterCandidates()">
                     <option value="score-asc">score asc</option>
@@ -239,7 +249,7 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
             </label>
         </div>
     <table>
-      <thead><tr><th>ID</th><th>Operator</th><th>Status</th><th>Score</th><th>Stage</th><th>Reason</th><th>Details</th></tr></thead>
+      <thead><tr><th>ID</th><th>Operator</th><th>Tier</th><th>Status</th><th>Score</th><th>Stage</th><th>Reason</th><th>Details</th></tr></thead>
             <tbody id="candidate-table-body">{candidate_rows}</tbody>
     </table>
     <h3>Artifacts</h3>
@@ -249,13 +259,17 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
         <script>
             function filterCandidates() {{
                 const statusFilter = document.getElementById('candidate-status-filter');
+                const tierFilter = document.getElementById('candidate-tier-filter');
                 const sortMode = document.getElementById('candidate-sort');
                 const body = document.getElementById('candidate-table-body');
                 if (!body) return;
                 const rows = Array.from(body.querySelectorAll('.candidate-row'));
                 const wanted = statusFilter ? statusFilter.value : 'all';
+                const wantedTier = tierFilter ? tierFilter.value : 'all';
                 rows.forEach((row) => {{
-                    const keep = wanted === 'all' || row.dataset.status === wanted;
+                    const statusOk = wanted === 'all' || row.dataset.status === wanted;
+                    const tierOk = wantedTier === 'all' || row.dataset.tier === wantedTier;
+                    const keep = statusOk && tierOk;
                     row.style.display = keep ? '' : 'none';
                 }});
                 const visible = rows.filter((row) => row.style.display !== 'none');
@@ -324,6 +338,13 @@ def _hotspot_section(records: list[dict]) -> str:
 
 def _candidate_detail(metadata: dict) -> str:
     parts = []
+    tier = metadata.get("operator_tier")
+    descriptor = metadata.get("operator_tier_descriptor")
+    if tier:
+        if descriptor:
+            parts.append(f"tier={tier} ({descriptor})")
+        else:
+            parts.append(f"tier={tier}")
     improvement = metadata.get("improvement_summary", {})
     summary = improvement.get("summary") if isinstance(improvement, dict) else None
     if summary:

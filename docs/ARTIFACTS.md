@@ -29,6 +29,14 @@ Question: What happened during optimization flow?
 - Check `.joule/runs/<run_id>/optimization_analysis.json` for funnel and operator stats.
 - Check `.joule/runs/<run_id>/events.jsonl` for stage-by-stage timeline.
 
+Question: Which transformations exist and what do they do?
+- Run `./joule transformations <project> --output human` for the runtime catalog.
+- Read [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md) for tiering, operator intent, and implementation notes.
+
+Question: How do I verify deterministic rewrite output shape stability?
+- Check [tests/golden/deterministic_operator_snapshots.json](../tests/golden/deterministic_operator_snapshots.json).
+- Run [tests/test_transformer_golden_snapshots.py](../tests/test_transformer_golden_snapshots.py).
+
 Question: Was anything applied to source control?
 - Check `apply_audits` in `inspect` output.
 - Check git history if `apply --branch` or `apply --commit` was used.

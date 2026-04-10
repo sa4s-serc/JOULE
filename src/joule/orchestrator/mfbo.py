@@ -114,6 +114,7 @@ class OptimizationOrchestrator:
             total_budget=budget or self.settings.optimization_budget,
             max_parent_expansions=max(1, self.settings.search_branching_factor) * max(1, len(self.registry.operators)),
         )
+        escape_used = False
         if self.reporter:
             self.reporter.info("progress", f"Optimization budget: {state.total_budget} measured candidate(s)")
         while state.measured < state.total_budget:
@@ -131,13 +132,85 @@ class OptimizationOrchestrator:
                 break
             parent = parent_snapshots[parent_id]
             parent_context = build_parent_context(parent, phase=phase, analysis=analysis)
-            operator = self.registry.select_operator(phase=phase, parent_generation=parent.generation_depth)
+            candidate_target = self._target_with_source(target, parent.source, parent_id=parent_id)
+            operator = None
+            if state.no_frontier_gain >= self.settings.search_convergence_patience:
+                select_escape = getattr(self.registry, "select_escape_operator_for_candidate", None)
+                escape_operator = (
+                    select_escape(
+                        target=candidate_target,
+                        context=parent_context,
+                        phase=phase,
+                        parent_generation=parent.generation_depth,
+                    )
+                    if callable(select_escape)
+                    else None
+                )
+                if escape_operator is not None and not escape_used:
+                    operator = escape_operator
+                    escape_used = True
+                    self._record_event(
+                        run_id,
+                        event_type="escape_invoked",
+                        stage="search",
+                        candidate_id=parent_id,
+                        operator_name=escape_operator.name,
+                        detail={
+                            "reason": "frontier_stagnation",
+                            "patience": self.settings.search_convergence_patience,
+                        },
+                    )
+                    if self.reporter:
+                        self.reporter.info("progress", f"Stagnation detected: invoking escape operator {escape_operator.name}")
+                else:
+                    if self.reporter:
+                        self.reporter.info(
+                            "progress",
+                            "Stopping early: frontier stagnation threshold reached",
+                        )
+                    self._record_event(
+                        run_id,
+                        event_type="converged",
+                        stage="search",
+                        detail={
+                            "reason": "frontier_stagnation",
+                            "patience": self.settings.search_convergence_patience,
+                            "escape_used": escape_used,
+                            "precheck_pruned": True,
+                        },
+                    )
+                    break
+            if operator is None:
+                select_for_candidate = getattr(self.registry, "select_operator_for_candidate", None)
+                if callable(select_for_candidate):
+                    operator = select_for_candidate(
+                        target=candidate_target,
+                        context=parent_context,
+                        phase=phase,
+                        parent_generation=parent.generation_depth,
+                    )
+                else:
+                    operator = self.registry.select_operator(phase=phase, parent_generation=parent.generation_depth)
+                if operator is None:
+                    self._record_event(
+                        run_id,
+                        event_type="operator_pruned",
+                        stage="search",
+                        candidate_id=parent_id,
+                        detail={
+                            "reason": "no_valid_operator",
+                            "phase": phase.value,
+                            "generation_depth": parent.generation_depth,
+                        },
+                    )
+                    pareto.mark_exhausted(parent_id)
+                    continue
             if self.reporter:
                 self.reporter.verbose(
                     "scheduler",
                     f"phase={phase.value} parent={parent_id} depth={parent.generation_depth} operator={operator.name}",
                 )
-            proposals = operator.generate(target, parent_context)
+            proposals = operator.generate(candidate_target, parent_context)
             if not proposals:
                 self._record_event(
                     run_id,
@@ -497,6 +570,7 @@ class OptimizationOrchestrator:
                 if accepted:
                     accepted_evaluations[candidate_id] = evaluation
                     state.no_frontier_gain = 0
+                    escape_used = False
                     if self.reporter:
                         self.reporter.info("progress", f"Accepted candidate {candidate_id} into frontier")
                 else:
@@ -508,21 +582,7 @@ class OptimizationOrchestrator:
                             f"Candidate {candidate_id} rejected ({rejection_reason or 'threshold'})",
                         )
                 if state.no_frontier_gain >= self.settings.search_convergence_patience:
-                    if self.reporter:
-                        self.reporter.info(
-                            "progress",
-                            "Stopping early: frontier stagnation threshold reached",
-                        )
-                    self._record_event(
-                        run_id,
-                        event_type="converged",
-                        stage="search",
-                        detail={
-                            "reason": "frontier_stagnation",
-                            "patience": self.settings.search_convergence_patience,
-                        },
-                    )
-                    state.measured = state.total_budget
+                    # Break out early so the next outer-loop iteration can trigger the escape operator.
                     break
             if pareto.expansion_count(parent_id) >= state.max_parent_expansions:
                 pareto.mark_exhausted(parent_id)
@@ -696,6 +756,8 @@ class OptimizationOrchestrator:
                 "duplicate_of": duplicate_of,
                 "surrogate": screening or {},
                 "operator_family": proposal.operator_family,
+                "operator_tier": proposal.operator_tier.value,
+                "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
                 "proposal_rank": proposal.proposal_rank,
                 **dependency_policy_metadata(proposal.dependencies),
             },
@@ -709,3 +771,20 @@ class OptimizationOrchestrator:
         observations = self.db.get_recent_candidate_observations(limit=limit)
         for source, score in reversed(observations):
             self.surrogate.record(source, score)
+
+    def _target_with_source(self, target: TargetSpec, source: str, *, parent_id: str) -> TargetSpec:
+        metadata = dict(target.metadata)
+        metadata["candidate_parent_id"] = parent_id
+        return TargetSpec(
+            project_root=target.project_root,
+            module=target.module,
+            file_path=target.file_path,
+            function_name=target.function_name,
+            qualname=target.qualname,
+            owner_path=list(target.owner_path),
+            line_start=target.line_start,
+            line_end=target.line_end,
+            source=source,
+            is_async=target.is_async,
+            metadata=metadata,
+        )

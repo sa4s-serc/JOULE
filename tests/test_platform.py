@@ -227,3 +227,20 @@ def test_run_help_exposes_budget_and_path_guidance():
     assert result.exit_code == 0, result.output
     assert "Path to a target .py file or project root" in result.output
     assert "--budget" in result.output
+
+
+def test_transformations_command_lists_registered_operators(sample_project):
+    result = runner.invoke(app, ["transformations", str(sample_project)])
+    assert result.exit_code == 0, result.output
+    assert "Registered Transformations" in result.output
+    assert "ForLoopToComprehension" in result.output
+    assert "GenericSemanticRewriteLLM" in result.output
+
+
+def test_transformations_command_json_output(sample_project):
+    result = runner.invoke(app, ["transformations", str(sample_project), "--output", "json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    names = {item["name"] for item in payload["transformations"]}
+    assert "ForLoopToComprehension" in names
+    assert "GenericSemanticRewriteLLM" in names

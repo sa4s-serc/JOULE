@@ -39,6 +39,30 @@ class SearchPhase(str, Enum):
     CONFIRMATION = "confirmation"
 
 
+class Tier(str, Enum):
+    L = "L"
+    M = "M"
+    H = "H"
+
+
+def normalize_tier(value: "Tier | str") -> Tier:
+    if isinstance(value, Tier):
+        return value
+    normalized = str(value).strip().upper()
+    if normalized in {"L", "M", "H"}:
+        return Tier(normalized)
+    raise ValueError(f"Unknown operator tier: {value!r}")
+
+
+def tier_descriptor(value: "Tier | str") -> str:
+    mapping = {
+        Tier.L: "syntactic",
+        Tier.M: "semantic",
+        Tier.H: "algorithmic",
+    }
+    return mapping[normalize_tier(value)]
+
+
 @dataclass(slots=True)
 class TargetSpec:
     project_root: Path
@@ -222,6 +246,7 @@ class TransformationResult:
     reasoning: str
     dependencies: list[str] = field(default_factory=list)
     operator_family: str = "deterministic"
+    operator_tier: Tier = Tier.L
     proposal_rank: int = 0
     feature_hints: dict[str, float] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)

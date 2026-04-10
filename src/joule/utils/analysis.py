@@ -67,6 +67,8 @@ def summarize_operator_performance(candidates: list[dict], baseline_aggregate: d
                 "rejected": 0,
                 "stage_reached": Counter(),
                 "rejection_reasons": Counter(),
+                "tier_counts": Counter(),
+                "tier_descriptors": Counter(),
                 "improvements": [],
             },
         )
@@ -84,6 +86,12 @@ def summarize_operator_performance(candidates: list[dict], baseline_aggregate: d
         reason = item.get("metadata", {}).get("rejected")
         if reason:
             entry["rejection_reasons"][str(reason)] += 1
+        tier = item.get("metadata", {}).get("operator_tier")
+        if tier:
+            entry["tier_counts"][str(tier)] += 1
+        tier_descriptor = item.get("metadata", {}).get("operator_tier_descriptor")
+        if tier_descriptor:
+            entry["tier_descriptors"][str(tier_descriptor)] += 1
         improvement = item.get("metadata", {}).get("improvement_summary")
         if isinstance(improvement, dict):
             entry["improvements"].append(
@@ -107,6 +115,9 @@ def summarize_operator_performance(candidates: list[dict], baseline_aggregate: d
             entry["avg_memory_delta"] = 0.0
         entry["stage_reached"] = dict(entry["stage_reached"])
         entry["rejection_reasons"] = dict(entry["rejection_reasons"].most_common())
+        entry["tier_counts"] = dict(entry["tier_counts"].most_common())
+        entry["tier_descriptors"] = dict(entry["tier_descriptors"].most_common())
+        entry["primary_tier"] = next(iter(entry["tier_counts"]), None)
         entry["acceptance_rate"] = entry["accepted"] / max(entry["attempts"], 1)
         results.append(entry)
     results.sort(key=lambda item: (-item["acceptance_rate"], -item["attempts"], item["operator_name"]))

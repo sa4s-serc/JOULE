@@ -22,7 +22,7 @@ This creates `.venv` and installs the project in editable mode with test tooling
 make smoke-example
 ```
 
-This verifies the end-to-end toolchain against [example/mock_repo](/home/prakhar/dev/prakhar479/hedge/example/mock_repo). It runs:
+This verifies the end-to-end toolchain against [example/mock_repo](example/mock_repo). It runs:
 
 1. `doctor`
 2. `baseline`
@@ -64,6 +64,25 @@ Run optimization on a simple default-arg function:
   --no-dashboard
 ```
 
+Run optimization on a richer function with broader transformation surface:
+
+```bash
+./joule run \
+  example/mock_repo/sample_pkg/algos.py \
+  --function optimization_surface_demo \
+  --tests tests/test_algos.py::test_optimization_surface_demo \
+  --budget 6 \
+  --analysis \
+  --output human \
+  --no-dashboard
+```
+
+Inspect the registered transformation catalog:
+
+```bash
+./joule transformations example/mock_repo --output human
+```
+
 Inspect the run:
 
 ```bash
@@ -86,6 +105,9 @@ Render the dashboard HTML to stdout:
 
 `run`
 - Runs the optimization flow: baseline measurement, candidate generation, correctness checks, surrogate screening, multi-fidelity evaluation, and optional deep analysis artifacts.
+
+`transformations`
+- Lists deterministic, LLM, and escape transformations with tier and precheck metadata.
 
 `inspect`
 - Dumps persisted run state including metadata, candidates, measurements, artifacts, and apply audits.
@@ -185,7 +207,8 @@ If you hit this policy, continue with manual review using `best.patch` and candi
 
 Use this map:
 
-- [README.md](/home/prakhar/dev/prakhar479/hedge/README.md): high-level capabilities and command map
+- [README.md](README.md): high-level capabilities and command map
 - [docs/ARTIFACTS.md](docs/ARTIFACTS.md): file-by-file troubleshooting and lookup
-- [docs/ARCHITECTURE.md](/home/prakhar/dev/prakhar479/hedge/docs/ARCHITECTURE.md): internals and data flow
-- [GUIDE.md](/home/prakhar/dev/prakhar479/hedge/GUIDE.md): roadmap and deferred scope
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): internals and data flow
+- [docs/TRANSFORMATIONS.md](docs/TRANSFORMATIONS.md): full transformation catalog and snapshot contract
+- [GUIDE.md](GUIDE.md): roadmap and deferred scope

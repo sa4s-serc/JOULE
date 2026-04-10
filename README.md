@@ -62,11 +62,25 @@ If you want optional LLM-backed candidate generation as well:
 make test ARGS='-q'
 make smoke-example
 ./joule doctor example/mock_repo
+./joule transformations example/mock_repo --output human
 ./joule baseline example/mock_repo/sample_pkg/algos.py --function membership_total --tests tests/test_algos.py::test_membership_total --hotspots --output json
 ./joule run example/mock_repo/sample_pkg/algos.py --function unreferenced_total --budget 4 --analysis --output human
 ./joule run example/mock_repo/sample_pkg/algos.py --function unreferenced_total --output json --no-dashboard | ./joule parse-json
 ./joule dashboard example/mock_repo --once
 ```
+
+## Transformations
+
+- Inspect the full live transformation catalog:
+
+```bash
+./joule transformations example/mock_repo --output human
+```
+
+- Read the full operator reference and implementation notes: [docs/TRANSFORMATIONS.md](docs/TRANSFORMATIONS.md)
+- Deterministic rewrite output shape is locked by golden snapshots.
+- Snapshot file: [tests/golden/deterministic_operator_snapshots.json](tests/golden/deterministic_operator_snapshots.json)
+- Snapshot test: [tests/test_transformer_golden_snapshots.py](tests/test_transformer_golden_snapshots.py)
 
 ## Workload Decision Guide
 
@@ -89,7 +103,7 @@ Rule of thumb: optimization quality is bounded by workload realism.
 ├── scripts/smoke_example.py
 ├── GUIDE.md                # roadmap and v0 scope
 ├── QUICKSTART.md           # task-oriented setup and first run guide
-└── docs/ARCHITECTURE.md    # architecture and design reference
+└── docs/                   # architecture, artifacts, and transformations references
 ```
 
 ## Example Workflow
@@ -100,7 +114,7 @@ The fastest end-to-end check is the bundled smoke project:
 make smoke-example
 ```
 
-That command runs `doctor`, `baseline`, `run`, `inspect`, and `dashboard --once` against [example/mock_repo](/home/prakhar/dev/prakhar479/hedge/example/mock_repo) and verifies that the expected artifacts are produced.
+That command runs `doctor`, `baseline`, `run`, `inspect`, and `dashboard --once` against [example/mock_repo](example/mock_repo) and verifies that the expected artifacts are produced.
 
 ## Outputs and Artifacts
 
@@ -122,10 +136,11 @@ Important files:
 
 ## Documentation
 
-- [QUICKSTART.md](/home/prakhar/dev/prakhar479/hedge/QUICKSTART.md): first successful setup and first run
+- [QUICKSTART.md](QUICKSTART.md): first successful setup and first run
 - [docs/ARTIFACTS.md](docs/ARTIFACTS.md): artifact lookup by question and persona
-- [docs/ARCHITECTURE.md](/home/prakhar/dev/prakhar479/hedge/docs/ARCHITECTURE.md): architecture, execution flow, and design decisions
-- [GUIDE.md](/home/prakhar/dev/prakhar479/hedge/GUIDE.md): roadmap, scope boundaries, and deferred work
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architecture, execution flow, and design decisions
+- [docs/TRANSFORMATIONS.md](docs/TRANSFORMATIONS.md): full catalog of deterministic, LLM, and escape transformations
+- [GUIDE.md](GUIDE.md): roadmap, scope boundaries, and deferred work
 
 ## Notes
 

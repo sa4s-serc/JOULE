@@ -1,0 +1,134 @@
+{
+  "ChainedComparisonFusion": {
+    "expected": "def f(a, b, c):\n    return a < b < c",
+    "source": "def f(a, b, c):\n    return a < b and b < c\n"
+  },
+  "ConcatListLiteralFusion": {
+    "expected": "def f():\n    return [1, 2, 3, 4]",
+    "source": "def f():\n    return [1, 2] + [3, 4]\n"
+  },
+  "ConstantConditionElision": {
+    "expected": "def f(x):\n    return x + 1",
+    "source": "def f(x):\n    if True:\n        return x + 1\n    else:\n        return x - 1\n"
+  },
+  "CounterSubstitution": {
+    "expected": "from collections import Counter\n\ndef f(xs):\n    counts = Counter()\n    for x in xs:\n        counts[x] += 1\n    return counts",
+    "source": "def f(xs):\n    counts = {}\n    for x in xs:\n        if x in counts:\n            counts[x] += 1\n        else:\n            counts[x] = 1\n    return counts\n"
+  },
+  "DataStructureSubstitution[list->set]": {
+    "expected": "def f(x):\n    return x in {1, 3, 5, 7, 9}",
+    "source": "def f(x):\n    return x in [1, 3, 5, 7, 9]\n"
+  },
+  "DefaultDictSubstitution": {
+    "expected": "from collections import defaultdict\n\ndef f(pairs):\n    groups = defaultdict(lambda: [])\n    for key, value in pairs:\n        groups[key].append(value)\n    return groups",
+    "source": "def f(pairs):\n    groups = {}\n    for key, value in pairs:\n        if key not in groups:\n            groups[key] = []\n        groups[key].append(value)\n    return groups\n"
+  },
+  "DictGetWithDefault": {
+    "expected": "def f(mapping, key):\n    value = mapping.get(key, 0)\n    return value",
+    "source": "def f(mapping, key):\n    if key in mapping:\n        value = mapping[key]\n    else:\n        value = 0\n    return value\n"
+  },
+  "DictKeysMembershipElision": {
+    "expected": "def f(mapping, key):\n    return key in mapping",
+    "source": "def f(mapping, key):\n    return key in mapping.keys()\n"
+  },
+  "EnumerateSubstitution": {
+    "expected": "def f(xs):\n    out = []\n    for i, value in enumerate(xs):\n        out.append((i, value))\n    return out",
+    "source": "def f(xs):\n    out = []\n    for i in range(len(xs)):\n        value = xs[i]\n        out.append((i, value))\n    return out\n"
+  },
+  "FStringConversion": {
+    "expected": "def f(a, b):\n    return f'a={a} b={b}'",
+    "source": "def f(a, b):\n    return 'a={} b={}'.format(a, b)\n"
+  },
+  "ForLoopToComprehension": {
+    "expected": "def f(xs):\n    out = [value * 2 for value in xs]\n    return out",
+    "source": "def f(xs):\n    out = []\n    for value in xs:\n        out.append(value * 2)\n    return out\n"
+  },
+  "GeneratorToYieldFrom": {
+    "expected": "def f(xs):\n    yield from xs",
+    "source": "def f(xs):\n    for item in xs:\n        yield item\n"
+  },
+  "HeapNLargestSmallest": {
+    "expected": "import heapq\n\ndef f(xs, k):\n    return heapq.nsmallest(k, xs)",
+    "source": "def f(xs, k):\n    return sorted(xs)[:k]\n"
+  },
+  "IdentityCompareNormalization": {
+    "expected": "def f(x):\n    return x is None",
+    "source": "def f(x):\n    return x == None\n"
+  },
+  "IteratorSubstitution": {
+    "expected": "def f(xs):\n    total = 0\n    for value in xs:\n        total += value\n    return total",
+    "source": "def f(xs):\n    total = 0\n    for value in iter(xs):\n        total += value\n    return total\n"
+  },
+  "JoinListCompToGenerator": {
+    "expected": "def f(xs):\n    return ','.join((str(x) for x in xs))",
+    "source": "def f(xs):\n    return ','.join([str(x) for x in xs])\n"
+  },
+  "ListPopZeroToDeque": {
+    "expected": "from collections import deque\n\ndef f():\n    queue = deque([1, 2, 3])\n    out = []\n    while queue:\n        out.append(queue.popleft())\n    return out",
+    "source": "def f():\n    queue = [1, 2, 3]\n    out = []\n    while queue:\n        out.append(queue.pop(0))\n    return out\n"
+  },
+  "LocalImportHoisting": {
+    "expected": "import math\n\ndef f(x):\n    return math.sqrt(x)",
+    "source": "def f(x):\n    import math\n    return math.sqrt(x)\n"
+  },
+  "LoopGlobalToLocalHoisting": {
+    "expected": "def f(rows):\n    total = 0\n    _len_local = len\n    for row in rows:\n        total += _len_local(row)\n    return total",
+    "source": "def f(rows):\n    total = 0\n    for row in rows:\n        total += len(row)\n    return total\n"
+  },
+  "LoopMembershipSetCache": {
+    "expected": "def f(xs, lookup):\n    total = 0\n    _lookup_set = set(lookup)\n    for x in xs:\n        if x in _lookup_set:\n            total += 1\n    return total",
+    "source": "def f(xs, lookup):\n    total = 0\n    for x in xs:\n        if x in lookup:\n            total += 1\n    return total\n"
+  },
+  "MemoizationAddition": {
+    "expected": "from functools import lru_cache\n\n@lru_cache(maxsize=None)\ndef f(n):\n    if n < 2:\n        return n\n    return f(n - 1) + f(n - 2)",
+    "source": "def f(n):\n    if n < 2:\n        return n\n    return f(n - 1) + f(n - 2)\n"
+  },
+  "MultipleAssignmentFusion": {
+    "expected": "def f():\n    a, b = (1, 2)\n    return a + b",
+    "source": "def f():\n    a = 1\n    b = 2\n    return a + b\n"
+  },
+  "MultipleOrToSetMembership": {
+    "expected": "def f(x):\n    return x in {1, 3, 5}",
+    "source": "def f(x):\n    return x == 1 or x == 3 or x == 5\n"
+  },
+  "NotInNormalization": {
+    "expected": "def f(x, items):\n    return x not in items",
+    "source": "def f(x, items):\n    return not (x in items)\n"
+  },
+  "ReductionListCompToGenerator": {
+    "expected": "def f(xs):\n    return sum((x for x in xs))",
+    "source": "def f(xs):\n    return sum([x for x in xs])\n"
+  },
+  "ReturnBoolSimplification": {
+    "expected": "def f(x):\n    return x > 0",
+    "source": "def f(x):\n    if x > 0:\n        return True\n    else:\n        return False\n"
+  },
+  "SeenSetForAppendDedup": {
+    "expected": "def f(items):\n    out = []\n    _out_seen = set()\n    for item in items:\n        if item not in _out_seen:\n            _out_seen.add(item)\n            out.append(item)\n    return out",
+    "source": "def f(items):\n    out = []\n    for item in items:\n        if item not in out:\n            out.append(item)\n    return out\n"
+  },
+  "SortedToInPlaceSort": {
+    "expected": "def f(xs):\n    xs = list(xs)\n    xs.sort()\n    return xs",
+    "source": "def f(xs):\n    xs = list(xs)\n    xs = sorted(xs)\n    return xs\n"
+  },
+  "StringConcatToJoin": {
+    "expected": "def f(a, b, c):\n    return ''.join((str(a), str(b), str(c)))",
+    "source": "def f(a, b, c):\n    return str(a) + str(b) + str(c)\n"
+  },
+  "TupleUnpackInLoop": {
+    "expected": "def f(pairs):\n    total = 0\n    for a, b in pairs:\n        total += a + b\n    return total",
+    "source": "def f(pairs):\n    total = 0\n    for pair in pairs:\n        a = pair[0]\n        b = pair[1]\n        total += a + b\n    return total\n"
+  },
+  "container_membership": {
+    "expected": "def f(x):\n    return x in {1, 3, 5, 7, 9}",
+    "source": "def f(x):\n    return x in [1, 3, 5, 7, 9]\n"
+  },
+  "empty_literal": {
+    "expected": "def f():\n    x = []\n    y = {}\n    return (x, y)",
+    "source": "def f():\n    x = list()\n    y = dict()\n    return x, y\n"
+  },
+  "sum_generator": {
+    "expected": "def f(xs):\n    return sum((x for x in xs if x % 2 == 0))",
+    "source": "def f(xs):\n    return sum([x for x in xs if x % 2 == 0])\n"
+  }
+}

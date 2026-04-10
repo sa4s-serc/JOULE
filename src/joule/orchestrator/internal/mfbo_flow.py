@@ -46,6 +46,8 @@ def generated_candidate_detail(
         "generation_depth": generation_depth,
         "proposal_rank": proposal.proposal_rank,
         "operator_family": proposal.operator_family,
+        "operator_tier": proposal.operator_tier.value,
+        "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
     }
 
 
@@ -92,6 +94,9 @@ def build_correctness_rejection_evaluation(
             "phase": phase.value,
             "source_hash": source_hash,
             "surrogate": screening,
+            "operator_family": proposal.operator_family,
+            "operator_tier": proposal.operator_tier.value,
+            "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
             **dependency_policy_metadata(proposal.dependencies),
         },
     )
@@ -130,6 +135,8 @@ def build_candidate_metadata(
         "frontier_state": frontier_state.value,
         "surrogate": screening,
         "operator_family": proposal.operator_family,
+        "operator_tier": proposal.operator_tier.value,
+        "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
         "proposal_rank": proposal.proposal_rank,
         **dependency_policy_metadata(proposal.dependencies),
     }

@@ -6,7 +6,7 @@ This document explains how JOULE is structured today, how a run moves through th
 
 - New user: [QUICKSTART.md](../QUICKSTART.md)
 - CI or automation: [README.md](../README.md) + [docs/ARTIFACTS.md](ARTIFACTS.md)
-- Advanced architecture and roadmap: [GUIDE.md](../GUIDE.md) + this document
+- Advanced architecture and roadmap: [GUIDE.md](../GUIDE.md), [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md), and this document
 
 ## 1. System Overview
 
@@ -28,7 +28,7 @@ The system is intentionally local-first and artifact-driven. The database is the
 
 ### CLI layer
 
-Primary entrypoint: [src/joule/cli.py](/home/prakhar/dev/prakhar479/hedge/src/joule/cli.py)
+Primary entrypoint: [src/joule/cli.py](../src/joule/cli.py)
 
 Responsibilities:
 - bootstrap settings, artifact directories, database, and terminal reporting
@@ -40,8 +40,8 @@ Responsibilities:
 ### Config and artifact layer
 
 Primary files:
-- [src/joule/config.py](/home/prakhar/dev/prakhar479/hedge/src/joule/config.py)
-- [src/joule/utils/artifacts.py](/home/prakhar/dev/prakhar479/hedge/src/joule/utils/artifacts.py)
+- [src/joule/config.py](../src/joule/config.py)
+- [src/joule/utils/artifacts.py](../src/joule/utils/artifacts.py)
 
 Responsibilities:
 - load `tool.joule` settings from project `pyproject.toml`
@@ -52,11 +52,11 @@ Responsibilities:
 ### Discovery and workload resolution
 
 Primary files:
-- [src/joule/discovery/resolver.py](/home/prakhar/dev/prakhar479/hedge/src/joule/discovery/resolver.py)
-- [src/joule/discovery/workloads.py](/home/prakhar/dev/prakhar479/hedge/src/joule/discovery/workloads.py)
-- [src/joule/discovery/profiler.py](/home/prakhar/dev/prakhar479/hedge/src/joule/discovery/profiler.py)
-- [src/joule/discovery/synthesizer.py](/home/prakhar/dev/prakhar479/hedge/src/joule/discovery/synthesizer.py)
-- [src/joule/discovery/purity.py](/home/prakhar/dev/prakhar479/hedge/src/joule/discovery/purity.py)
+- [src/joule/discovery/resolver.py](../src/joule/discovery/resolver.py)
+- [src/joule/discovery/workloads.py](../src/joule/discovery/workloads.py)
+- [src/joule/discovery/profiler.py](../src/joule/discovery/profiler.py)
+- [src/joule/discovery/synthesizer.py](../src/joule/discovery/synthesizer.py)
+- [src/joule/discovery/purity.py](../src/joule/discovery/purity.py)
 
 Responsibilities:
 - resolve supported targets: top-level sync functions, top-level async functions, class methods
@@ -73,9 +73,9 @@ Design notes:
 ### Runtime and correctness
 
 Primary files:
-- [src/joule/runtime.py](/home/prakhar/dev/prakhar479/hedge/src/joule/runtime.py)
-- [src/joule/evaluators/correctness.py](/home/prakhar/dev/prakhar479/hedge/src/joule/evaluators/correctness.py)
-- [src/joule/integrations/libcst_tools.py](/home/prakhar/dev/prakhar479/hedge/src/joule/integrations/libcst_tools.py)
+- [src/joule/runtime.py](../src/joule/runtime.py)
+- [src/joule/evaluators/correctness.py](../src/joule/evaluators/correctness.py)
+- [src/joule/integrations/libcst_tools.py](../src/joule/integrations/libcst_tools.py)
 
 Responsibilities:
 - execute workloads in subprocesses
@@ -90,9 +90,9 @@ Design notes:
 ### Measurement backends
 
 Primary files:
-- [src/joule/evaluators/oracle.py](/home/prakhar/dev/prakhar479/hedge/src/joule/evaluators/oracle.py)
-- [src/joule/evaluators/backends/mock.py](/home/prakhar/dev/prakhar479/hedge/src/joule/evaluators/backends/mock.py)
-- [src/joule/evaluators/backends/rapl.py](/home/prakhar/dev/prakhar479/hedge/src/joule/evaluators/backends/rapl.py)
+- [src/joule/evaluators/oracle.py](../src/joule/evaluators/oracle.py)
+- [src/joule/evaluators/backends/mock.py](../src/joule/evaluators/backends/mock.py)
+- [src/joule/evaluators/backends/rapl.py](../src/joule/evaluators/backends/rapl.py)
 
 Responsibilities:
 - calibrate inner repetitions
@@ -111,9 +111,9 @@ Design notes:
 ### Hotspot profiling
 
 Primary files:
-- [src/joule/runtime.py](/home/prakhar/dev/prakhar479/hedge/src/joule/runtime.py)
-- [src/joule/evaluators/oracle.py](/home/prakhar/dev/prakhar479/hedge/src/joule/evaluators/oracle.py)
-- [src/joule/utils/analysis.py](/home/prakhar/dev/prakhar479/hedge/src/joule/utils/analysis.py)
+- [src/joule/runtime.py](../src/joule/runtime.py)
+- [src/joule/evaluators/oracle.py](../src/joule/evaluators/oracle.py)
+- [src/joule/utils/analysis.py](../src/joule/utils/analysis.py)
 
 Responsibilities:
 - run an opt-in profiling pass after baseline measurement
@@ -127,18 +127,20 @@ Design notes:
 ### Optimization engine
 
 Primary files:
-- [src/joule/orchestrator/mfbo.py](/home/prakhar/dev/prakhar479/hedge/src/joule/orchestrator/mfbo.py)
-- [src/joule/orchestrator/pareto.py](/home/prakhar/dev/prakhar479/hedge/src/joule/orchestrator/pareto.py)
-- [src/joule/orchestrator/explainer.py](/home/prakhar/dev/prakhar479/hedge/src/joule/orchestrator/explainer.py)
-- [src/joule/surrogate/gp.py](/home/prakhar/dev/prakhar479/hedge/src/joule/surrogate/gp.py)
-- [src/joule/transformers/registry.py](/home/prakhar/dev/prakhar479/hedge/src/joule/transformers/registry.py)
-- [src/joule/transformers/deterministic.py](/home/prakhar/dev/prakhar479/hedge/src/joule/transformers/deterministic.py)
-- [src/joule/transformers/generative.py](/home/prakhar/dev/prakhar479/hedge/src/joule/transformers/generative.py)
+- [src/joule/orchestrator/mfbo.py](../src/joule/orchestrator/mfbo.py)
+- [src/joule/orchestrator/pareto.py](../src/joule/orchestrator/pareto.py)
+- [src/joule/orchestrator/explainer.py](../src/joule/orchestrator/explainer.py)
+- [src/joule/surrogate/gp.py](../src/joule/surrogate/gp.py)
+- [src/joule/transformers/registry.py](../src/joule/transformers/registry.py)
+- [src/joule/transformers/deterministic/](../src/joule/transformers/deterministic)
+- [src/joule/transformers/generative/](../src/joule/transformers/generative)
 
 Responsibilities:
 - run the optimization loop
 - rank operators
+- deterministically precheck operator applicability via AST pattern matching before generation
 - generate candidate source variants
+- lock deterministic source-to-source rewrite shape through golden snapshot tests
 - screen candidates using correctness and surrogate logic
 - promote or reject candidates across `F1`, `F2`, and `F3`
 - summarize accepted or rejected outcomes
@@ -152,9 +154,9 @@ Current design limitations:
 ### Persistence and reporting
 
 Primary files:
-- [src/joule/utils/db.py](/home/prakhar/dev/prakhar479/hedge/src/joule/utils/db.py)
-- [src/joule/utils/reporting.py](/home/prakhar/dev/prakhar479/hedge/src/joule/utils/reporting.py)
-- [src/joule/dashboard/app.py](/home/prakhar/dev/prakhar479/hedge/src/joule/dashboard/app.py)
+- [src/joule/utils/db.py](../src/joule/utils/db.py)
+- [src/joule/utils/reporting.py](../src/joule/utils/reporting.py)
+- [src/joule/dashboard/app.py](../src/joule/dashboard/app.py)
 
 Responsibilities:
 - persist runs, workloads, candidates, measurements, artifacts, apply audits, and operator stats
@@ -190,6 +192,13 @@ Design notes:
 7. Persist candidate metadata, measurements, provenance, explanations, and search events
 8. Optionally persist deeper per-candidate artifacts and hotspot summaries
 9. Write run summary and dashboard snapshot
+
+### `transformations`
+
+1. Load project settings
+2. Enumerate deterministic, generative, and escape transformation operators
+3. Show operator family, tier, precheck AST pattern nodes, and activation status
+4. Provide an inspectable runtime view aligned with [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md)
 
 ### `apply`
 
@@ -331,7 +340,8 @@ Expected next architecture steps:
 
 ## 9. Related Docs
 
-- [README.md](/home/prakhar/dev/prakhar479/hedge/README.md)
-- [QUICKSTART.md](/home/prakhar/dev/prakhar479/hedge/QUICKSTART.md)
-- [GUIDE.md](/home/prakhar/dev/prakhar479/hedge/GUIDE.md)
+- [README.md](../README.md)
+- [QUICKSTART.md](../QUICKSTART.md)
+- [GUIDE.md](../GUIDE.md)
+- [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md)
 - [docs/ARTIFACTS.md](ARTIFACTS.md)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from collections import Counter
 import importlib.util
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any, Literal
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from joule.cli_helpers.flow import ExecutionContext, create_run_record, resolve_target_and_bundle
 from joule.config import JouleSettings, load_settings
@@ -26,6 +28,8 @@ from joule.integrations.git import (
 from joule.models import RunType
 from joule.orchestrator.explainer import synthesize_explanation
 from joule.orchestrator.mfbo import OptimizationOrchestrator
+from joule.transformers.deterministic import default_deterministic_operators
+from joule.transformers.generative import default_llm_operators, escape_llm_operators
 from joule.utils.analysis import (
     build_baseline_analysis,
     build_optimization_analysis,
@@ -208,6 +212,53 @@ def _build_execution_context(
     )
 
 
+def _transformation_catalog(settings: JouleSettings) -> list[dict[str, Any]]:
+    model = settings.llm_model if settings.llm_model.strip() else "unconfigured"
+    deterministic = default_deterministic_operators()
+    llm = default_llm_operators(model)
+    escape = escape_llm_operators(model)
+    records: list[dict[str, Any]] = []
+    for operator in deterministic:
+        records.append(
+            {
+                "name": operator.name,
+                "family": operator.family,
+                "tier": operator.tier_name(),
+                "descriptor": operator.tier_description(),
+                "escape_only": operator.escape_only,
+                "precheck_pattern_nodes": [item.__name__ for item in operator.precheck_node_types],
+                "active_by_default": True,
+            }
+        )
+    llm_enabled = bool(settings.llm_model.strip())
+    for operator in llm:
+        records.append(
+            {
+                "name": operator.name,
+                "family": operator.family,
+                "tier": operator.tier_name(),
+                "descriptor": operator.tier_description(),
+                "escape_only": operator.escape_only,
+                "precheck_pattern_nodes": [item.__name__ for item in operator.precheck_node_types],
+                "active_by_default": llm_enabled,
+            }
+        )
+    for operator in escape:
+        records.append(
+            {
+                "name": operator.name,
+                "family": operator.family,
+                "tier": operator.tier_name(),
+                "descriptor": operator.tier_description(),
+                "escape_only": operator.escape_only,
+                "precheck_pattern_nodes": [item.__name__ for item in operator.precheck_node_types],
+                "active_by_default": llm_enabled,
+            }
+        )
+    records.sort(key=lambda item: (item["family"], item["tier"], item["name"]))
+    return records
+
+
 @app.command()
 def doctor(
     path: Path = typer.Argument(..., help=PATH_HELP),
@@ -238,6 +289,47 @@ def doctor(
     for _, value, ok, label in optional_checks:
         status = "PASS" if ok else "WARN"
         reporter.info("doctor", f"{status} {label}: {value if value else 'missing'}")
+
+
+@app.command("transformations")
+def transformations(
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    output: str = typer.Option("human", "--output", help="Output format: human or json"),
+):
+    output_mode = _resolve_output_mode(output)
+    settings = load_settings(path)
+    payload = _transformation_catalog(settings)
+    if output_mode == "json":
+        typer.echo(json_pretty({"transformations": payload}))
+        return
+    family_counts = Counter(item["family"] for item in payload)
+    tier_counts = Counter(item["tier"] for item in payload)
+    table = Table(title="Registered Transformations")
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Family", no_wrap=True)
+    table.add_column("Tier", no_wrap=True)
+    table.add_column("Descriptor", no_wrap=True)
+    table.add_column("Active", no_wrap=True)
+    table.add_column("Escape", no_wrap=True)
+    table.add_column("Precheck Pattern", overflow="fold")
+    for item in payload:
+        table.add_row(
+            item["name"],
+            item["family"],
+            item["tier"],
+            item["descriptor"],
+            "yes" if item["active_by_default"] else "no",
+            "yes" if item["escape_only"] else "no",
+            ", ".join(item["precheck_pattern_nodes"]) or "none",
+        )
+    console.print(table)
+    console.print(
+        "Summary: "
+        + f"total={len(payload)} "
+        + " ".join(f"{family}={count}" for family, count in sorted(family_counts.items()))
+        + " "
+        + " ".join(f"tier_{tier}={count}" for tier, count in sorted(tier_counts.items()))
+    )
 
 
 @app.command()
@@ -388,6 +480,8 @@ def run(
         best_candidate_payload = {
             "candidate_id": best.candidate_id,
             "operator_name": best.operator_name,
+            "operator_tier": best.metadata.get("operator_tier"),
+            "operator_tier_descriptor": best.metadata.get("operator_tier_descriptor"),
             "score": best.score,
             "aggregate": best.report.aggregate.to_record(),
             "dependencies": best.dependencies,
@@ -425,6 +519,8 @@ def run(
             {
                 "candidate_id": item["candidate_id"],
                 "operator_name": item["operator_name"],
+                "operator_tier": item["metadata"].get("operator_tier"),
+                "operator_tier_descriptor": item["metadata"].get("operator_tier_descriptor"),
                 "status": item["status"],
                 "rejected": item["metadata"].get("rejected"),
                 "dependency_policy_state": item["metadata"].get("dependency_policy_state"),
