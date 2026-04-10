@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from pathlib import Path
 import json
+from typing import Any
 
 from joule.models import MeasurementReport
 from joule.utils.metrics import improvement_ratio
@@ -256,6 +257,51 @@ def human_run_summary(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def _metrics_text_from_record(record: dict[str, Any]) -> str:
+    return (
+        f"latency={float(record.get('mean_wall_time_s', 0.0)):.6f}s "
+        f"energy={float(record.get('mean_energy_j', 0.0)):.6f}J "
+        f"memory={float(record.get('mean_peak_memory_bytes', 0.0)) / (1024 * 1024):.3f}MiB "
+        f"repetitions={int(record.get('repetitions', 0))} "
+        f"success_rate={float(record.get('success_rate', 0.0)):.2f}"
+    )
+
+
+def human_baseline_analysis_summary(payload: dict[str, Any]) -> str:
+    baseline = payload.get("baseline") or {}
+    aggregate = baseline.get("aggregate") or {}
+    lines = [
+        f"Run: {payload.get('run_id', 'unknown')}",
+        f"Target: {payload.get('target', 'unknown')}",
+    ]
+    if aggregate:
+        lines.append("Aggregate: " + _metrics_text_from_record(aggregate))
+    hotspots = payload.get("hotspots") or {}
+    if hotspots:
+        top_functions = hotspots.get("top_functions") or []
+        lines.append(f"Hotspots: top_functions={len(top_functions)}")
+    else:
+        lines.append("Hotspots: none")
+    return "\n".join(lines)
+
+
+def human_discover_summary(payload: list[dict[str, Any]]) -> str:
+    lines = [f"Discover: {len(payload)} target(s)"]
+    preview = payload[:10]
+    for item in preview:
+        target = item.get("target") or {}
+        qualname = target.get("qualname", "unknown")
+        score = item.get("score", 0)
+        workloads = item.get("workloads") or []
+        provenance = item.get("workload_provenance") or []
+        lines.append(
+            f"- {qualname}: score={score} workloads={len(workloads)} provenance={len(provenance)}"
+        )
+    if len(payload) > len(preview):
+        lines.append(f"... {len(payload) - len(preview)} more target(s)")
+    return "\n".join(lines)
+
+
 def json_pretty(payload: dict) -> str:
     return json.dumps(payload, indent=2)
 
@@ -265,6 +311,137 @@ def candidate_detail_payload(candidate: dict, measurements: list[dict]) -> dict:
         "candidate": candidate,
         "measurements": [item for item in measurements if item.get("candidate_id") == candidate["candidate_id"]],
     }
+
+
+def human_json_payload_summary(payload: Any) -> str:
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict) and "target" in payload[0]:
+            return human_discover_summary(payload)
+        return f"JSON list payload with {len(payload)} item(s)"
+    if not isinstance(payload, dict):
+        return f"JSON payload type: {type(payload).__name__}"
+    if "run" in payload and "summary" in payload:
+        return human_inspect_summary(payload)
+    if "candidate" in payload and "measurements" in payload:
+        return human_candidate_detail_summary(payload)
+    if "analysis" in payload and "baseline" in payload and "run_id" in payload:
+        return human_run_summary(payload)
+    if "baseline" in payload and "target" in payload and "run_id" in payload:
+        return human_baseline_analysis_summary(payload)
+    return "Unsupported JSON payload shape; use --output json for raw data or inspect known artifact files"
+
+
+def _measurement_issue_samples(measurements: list[dict], *, limit: int = 5) -> list[dict]:
+    issues: list[dict] = []
+    for report in measurements:
+        for sample in report.get("samples", []):
+            stderr = str(sample.get("stderr", "")).strip()
+            success = bool(sample.get("success", False))
+            if success and not stderr:
+                continue
+            issue = {
+                "candidate_id": report.get("candidate_id"),
+                "workload_id": sample.get("workload_id"),
+                "fidelity": sample.get("fidelity"),
+                "success": success,
+                "return_code": sample.get("return_code"),
+                "stderr_excerpt": stderr.splitlines()[0][:180] if stderr else "",
+            }
+            issues.append(issue)
+            if len(issues) >= limit:
+                return issues
+    return issues
+
+
+def summarize_inspect_payload(
+    *,
+    candidates: list[dict],
+    measurements: list[dict],
+    search_events: list[dict],
+    hotspots: list[dict],
+    artifacts: list[dict],
+    apply_audits: list[dict],
+) -> dict:
+    candidate_status = Counter(item.get("status", "unknown") for item in candidates)
+    dependency_review_required = sum(
+        1
+        for item in candidates
+        if item.get("metadata", {}).get("dependency_policy_state") == "review_required"
+    )
+    search_summary = summarize_search_events(search_events)
+    return {
+        "candidate_counts": {
+            "total": len(candidates),
+            "accepted": candidate_status.get("accepted", 0),
+            "rejected": candidate_status.get("rejected", 0),
+            "skipped": candidate_status.get("skipped", 0),
+            "dependency_review_required": dependency_review_required,
+        },
+        "measurement_reports": len(measurements),
+        "search_event_count": len(search_events),
+        "hotspot_profile_count": len(hotspots),
+        "artifact_count": len(artifacts),
+        "apply_audit_count": len(apply_audits),
+        "top_rejection": next(iter((search_summary.get("rejection_reasons") or {}).items()), None),
+        "measurement_issues": _measurement_issue_samples(measurements),
+    }
+
+
+def human_candidate_detail_summary(candidate_payload: dict) -> str:
+    candidate = candidate_payload["candidate"]
+    measurements = candidate_payload.get("measurements", [])
+    metadata = candidate.get("metadata", {})
+    lines = [
+        f"Candidate: {candidate['candidate_id']}",
+        f"Status: {candidate['status']} via {candidate['operator_name']}",
+        f"Parent: {candidate.get('parent_id')}",
+        f"Stage: {metadata.get('stage', 'unknown')} phase={metadata.get('phase', 'unknown')}",
+        f"Dependency policy: {metadata.get('dependency_policy_state', 'unknown')}",
+        f"Measurements: {len(measurements)} report(s)",
+    ]
+    if metadata.get("improvement_summary", {}).get("summary"):
+        lines.append(f"Improvement: {metadata['improvement_summary']['summary']}")
+    if metadata.get("rejected"):
+        lines.append(f"Rejected: {metadata['rejected']}")
+    return "\n".join(lines)
+
+
+def human_inspect_summary(payload: dict) -> str:
+    run = payload["run"]
+    summary = payload.get("summary", {})
+    candidate_counts = summary.get("candidate_counts", {})
+    lines = [
+        f"Run: {run['run_id']} ({run['run_type']}) status={run['status']}",
+        f"Target: {run['target']['qualname']}",
+        f"Workloads: {len(run['bundle'].get('workloads', []))}",
+        (
+            "Candidates: "
+            f"total={candidate_counts.get('total', 0)} "
+            f"accepted={candidate_counts.get('accepted', 0)} "
+            f"rejected={candidate_counts.get('rejected', 0)} "
+            f"skipped={candidate_counts.get('skipped', 0)}"
+        ),
+        (
+            "Diagnostics: "
+            f"measurement_reports={summary.get('measurement_reports', 0)} "
+            f"search_events={summary.get('search_event_count', 0)} "
+            f"hotspots={summary.get('hotspot_profile_count', 0)}"
+        ),
+    ]
+    if summary.get("top_rejection"):
+        reason, count = summary["top_rejection"]
+        lines.append(f"Top rejection: {reason} ({count})")
+    issues = summary.get("measurement_issues") or []
+    if issues:
+        first = issues[0]
+        lines.append(
+            "Worker issue: "
+            f"workload={first.get('workload_id')} fidelity={first.get('fidelity')} "
+            f"success={first.get('success')} return_code={first.get('return_code')}"
+        )
+        if first.get("stderr_excerpt"):
+            lines.append(f"Worker stderr: {first['stderr_excerpt']}")
+    return "\n".join(lines)
 
 
 def cross_run_trends(runs: list[dict]) -> dict:

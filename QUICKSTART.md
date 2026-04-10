@@ -2,6 +2,12 @@
 
 This quickstart gets JOULE running locally and walks through one complete example flow.
 
+## 0. Choose Your Intent
+
+- New user: follow sections 1 through 4, then run section 6 artifact checks.
+- CI or automation: run sections 1, 2, 5, and 7 with `--output json --no-dashboard`.
+- Advanced exploration: include `--analysis` and inspect `events.jsonl` plus candidate packs.
+
 ## 1. Install Dev Dependencies
 
 ```bash
@@ -61,7 +67,7 @@ Run optimization on a simple default-arg function:
 Inspect the run:
 
 ```bash
-./joule inspect example/mock_repo <run_id>
+./joule inspect example/mock_repo --run-id <run_id>
 ```
 
 Render the dashboard HTML to stdout:
@@ -85,23 +91,27 @@ Render the dashboard HTML to stdout:
 - Dumps persisted run state including metadata, candidates, measurements, artifacts, and apply audits.
 
 `dashboard`
-- Serves or prints an HTML view backed by the SQLite run database.
+- Serves or prints a guided HTML view backed by SQLite with run navigation, candidate filters, and recommended next actions.
+
+`parse-json`
+- Converts raw JSON command output into concise terminal summaries.
 
 `apply`
 - Applies an accepted candidate back to the source file if the target hash still matches and the candidate does not require new dependencies.
 
 ## 5. Choose the Right Workload Strategy
 
-Preferred order:
+Decision flow:
 
-1. Explicit selectors via `--tests`, `--properties`, or `--harness`
-2. Heuristic pytest discovery
-3. Safe default-argument fallback when the target can be called without extra state
+1. Does the target require async orchestration, class state, fixtures, or realistic external inputs?
+2. If yes, use explicit selectors (`--tests`, `--properties`, `--harness`).
+3. If no, pytest discovery can work when tests are clearly aligned by naming and location.
+4. If no tests are available, use default-arg fallback only for pure, simple targets.
 
-Guidance:
-- Use explicit selectors for async targets when possible.
-- Use explicit selectors for class methods that depend on object setup.
-- Treat default-arg fallback as a convenience for simple pure functions, not as a replacement for meaningful tests.
+Operational guidance:
+- Explicit selectors are required for reliable claims on async and stateful targets.
+- Default-arg fallback is a convenience path, not a quality path.
+- If results look weak or unstable, revisit workload realism before changing optimizer settings.
 
 ## 6. Read the Generated Artifacts
 
@@ -120,6 +130,7 @@ After `baseline` or `run`, look for:
             ├── optimization_analysis.json
             ├── hotspots.json
             ├── dashboard.html
+            ├── events.jsonl
             └── best.patch
             └── candidates/
                 └── <candidate_id>/...
@@ -130,8 +141,11 @@ What matters most:
 - `baseline_analysis.json` captures baseline metrics and optional hotspot profiling
 - `run_summary.json` shows the high-level optimization result
 - `optimization_analysis.json` summarizes the optimization funnel, operator performance, and hotspot data
+- `events.jsonl` stores structured stage-by-stage terminal events for diagnostics and CI scraping
 - `best.patch` contains the candidate diff when a best accepted candidate exists
 - `dashboard.html` provides a human-readable run snapshot
+
+Need question-based lookup? See [docs/ARTIFACTS.md](docs/ARTIFACTS.md).
 
 ## 7. Try JOULE on Another Project
 
@@ -140,12 +154,26 @@ Basic pattern:
 ```bash
 ./joule baseline path/to/file.py --function my_function --tests tests/test_file.py::test_my_function
 ./joule run path/to/file.py --function my_function --tests tests/test_file.py::test_my_function --budget 6
-./joule inspect /path/to/project <run_id>
+./joule inspect /path/to/project --run-id <run_id>
+
+# Humanized JSON helpers:
+./joule run path/to/file.py --function my_function --output json --no-dashboard | ./joule parse-json
+./joule discover /path/to/project --output human
 ```
 
 Use explicit workloads whenever the target needs setup, object state, async orchestration, or meaningful real-world inputs.
 
-## 8. Known v0 Constraints
+## 8. Understand Dependency Policy (v0)
+
+In v0, dependency-bearing candidates are inspectable but not auto-applicable.
+
+- `run` can generate candidates that list new dependencies.
+- `inspect` and candidate artifacts show exactly what those dependencies are.
+- `apply` refuses those candidates until dependency automation and rollback controls are available.
+
+If you hit this policy, continue with manual review using `best.patch` and candidate packs.
+
+## 9. Known v0 Constraints
 
 - No automatic dependency installation or dependency-file modification
 - No background dashboard launch from `run`
@@ -153,8 +181,11 @@ Use explicit workloads whenever the target needs setup, object state, async orch
 - Dependency-bearing candidates remain review-only and cannot be applied automatically
 - Hotspot profiling and deep optimization analysis are opt-in via `--hotspots` and `--analysis`
 
-## 9. Where to Go Next
+## 10. Where to Go Next
 
-- [README.md](/home/prakhar/dev/prakhar479/hedge/README.md) for the high-level project overview
-- [docs/ARCHITECTURE.md](/home/prakhar/dev/prakhar479/hedge/docs/ARCHITECTURE.md) for internals and design
-- [GUIDE.md](/home/prakhar/dev/prakhar479/hedge/GUIDE.md) for roadmap and deferred work
+Use this map:
+
+- [README.md](/home/prakhar/dev/prakhar479/hedge/README.md): high-level capabilities and command map
+- [docs/ARTIFACTS.md](docs/ARTIFACTS.md): file-by-file troubleshooting and lookup
+- [docs/ARCHITECTURE.md](/home/prakhar/dev/prakhar479/hedge/docs/ARCHITECTURE.md): internals and data flow
+- [GUIDE.md](/home/prakhar/dev/prakhar479/hedge/GUIDE.md): roadmap and deferred scope

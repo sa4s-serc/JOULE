@@ -39,6 +39,7 @@ class JouleSettings:
     baseline_repetitions: int = 5
     optimization_budget: int = 6
     workload_discovery_limit: int = 8
+    hotspot_limit: int = 12
     dashboard_port: int = 8501
     dependency_energy_threshold: float = 0.15
     dependency_latency_threshold: float = 0.20
@@ -89,16 +90,6 @@ class JouleSettings:
         return payload
 
 
-def _merge_dict(base: dict, incoming: dict) -> dict:
-    merged = dict(base)
-    for key, value in incoming.items():
-        if isinstance(value, dict) and isinstance(base.get(key), dict):
-            merged[key] = _merge_dict(base[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
 def find_project_root(path: Path) -> Path:
     candidate = path.resolve()
     if candidate.is_file():
@@ -130,6 +121,7 @@ def load_settings(path: str | Path) -> JouleSettings:
         baseline_repetitions=int(payload.get("baseline_repetitions", 5)),
         optimization_budget=int(payload.get("optimization_budget", 6)),
         workload_discovery_limit=int(payload.get("workload_discovery_limit", 8)),
+        hotspot_limit=int(payload.get("hotspot_limit", 12)),
         dashboard_port=int(payload.get("dashboard_port", 8501)),
         dependency_energy_threshold=float(payload.get("dependency_energy_threshold", 0.15)),
         dependency_latency_threshold=float(payload.get("dependency_latency_threshold", 0.20)),

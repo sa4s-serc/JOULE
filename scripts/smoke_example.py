@@ -53,9 +53,9 @@ def main() -> int:
     run_summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
     candidate_ids = [item["candidate_id"] for item in run_summary["candidates"]]
     if candidate_ids:
-        run_command(["inspect", str(EXAMPLE_ROOT), run_id, "--candidate-id", candidate_ids[0]])
+        run_command(["inspect", str(EXAMPLE_ROOT), "--run-id", run_id, "--candidate-id", candidate_ids[0]])
     dashboard = run_command(["dashboard", str(EXAMPLE_ROOT), "--run-id", run_id, "--once"])
-    baseline_inspect = run_command(["inspect", str(EXAMPLE_ROOT), baseline_run_id])
+    baseline_inspect = run_command(["inspect", str(EXAMPLE_ROOT), "--run-id", baseline_run_id])
     if "hotspots" not in baseline_inspect:
         raise SystemExit("Baseline inspect output did not include hotspot data")
 

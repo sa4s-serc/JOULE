@@ -62,3 +62,29 @@ def test_baseline_hotspots_json_output_includes_hotspots(sample_project):
     )
     assert result.exit_code == 0, result.output
     assert '"hotspots"' in result.output
+
+
+def test_baseline_rejects_non_positive_repetitions(sample_project):
+    result = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "membership_total",
+            "--tests",
+            "tests/test_algos.py::test_membership_total",
+            "--repetitions",
+            "0",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--repetitions must be >= 1" in result.output
+
+
+def test_baseline_help_includes_path_and_function_guidance():
+    result = runner.invoke(app, ["baseline", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "Path to a target .py file or project root" in result.output
+    assert "module.func" in result.output

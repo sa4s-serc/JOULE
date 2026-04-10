@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-import pytest
+import json
 
+import pytest
+from typer.testing import CliRunner
+
+from joule.cli import app
 from joule.config import load_settings
 from joule.discovery.resolver import discover_targets, resolve_target, resolve_workload_bundle
 from joule.models import WorkloadKind
+
+
+runner = CliRunner()
 
 
 def test_discover_targets_aligns_tests(sample_project):
@@ -65,3 +72,19 @@ def test_async_target_without_aligned_workloads_requires_explicit_selectors(samp
 
     with pytest.raises(ValueError, match="Provide --tests/--properties/--harness"):
         resolve_workload_bundle(settings, target, tests=None, properties=None, harness=None)
+
+
+def test_discover_cli_returns_json_payload_with_provenance(sample_project):
+    result = runner.invoke(app, ["discover", str(sample_project)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert isinstance(payload, list)
+    assert payload
+    first = payload[0]
+    assert "target" in first
+    assert "workload_provenance" in first
+    if first["workload_provenance"]:
+        item = first["workload_provenance"][0]
+        assert "identifier" in item
+        assert "provenance" in item
+        assert "resolution_strategy" in item

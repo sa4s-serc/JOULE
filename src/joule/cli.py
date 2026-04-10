@@ -4,7 +4,8 @@ from datetime import UTC, datetime
 import importlib.util
 import json
 from pathlib import Path
-from typing import Any
+import sys
+from typing import Any, Literal
 
 import typer
 from rich.console import Console
@@ -29,9 +30,14 @@ from joule.utils.analysis import (
     build_baseline_analysis,
     build_optimization_analysis,
     candidate_detail_payload,
+    human_candidate_detail_summary,
+    human_discover_summary,
     human_baseline_summary,
+    human_inspect_summary,
+    human_json_payload_summary,
     human_run_summary,
     json_pretty,
+    summarize_inspect_payload,
     summarize_hotspots,
 )
 from joule.utils.artifacts import ensure_artifacts, seed_random, write_artifact
@@ -41,6 +47,32 @@ from joule.utils.terminal import TerminalReporter
 
 app = typer.Typer(help="JOULE optimization toolkit")
 console = Console()
+
+PATH_HELP = "Path to a target .py file or project root with pyproject.toml"
+
+
+def _validate_positive(value: int | None, *, option_name: str) -> None:
+    if value is not None and value < 1:
+        raise typer.BadParameter(f"{option_name} must be >= 1")
+
+
+def _resolve_output_mode(output: str) -> Literal["human", "json"]:
+    normalized = output.strip().lower()
+    if normalized in {"human", "json"}:
+        return normalized  # type: ignore[return-value]
+    if normalized == "parsed":
+        return "human"
+    raise typer.BadParameter("--output must be either 'human' or 'json'")
+
+
+def _load_json_input(file: Path | None) -> Any:
+    raw = file.read_text(encoding="utf-8") if file else sys.stdin.read()
+    if not raw.strip():
+        raise typer.BadParameter("No JSON payload provided. Pass --file or pipe JSON to stdin.")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"Invalid JSON payload: {exc.msg} at line {exc.lineno} column {exc.colno}") from exc
 
 
 def _bootstrap(path: Path, *, verbose: bool = False, quiet: bool = False):
@@ -72,12 +104,6 @@ def _write_run_summary(
 ) -> Path:
     output = write_artifact(run_dir, name, json.dumps(payload, indent=2))
     _write_dashboard_snapshot(db, run_dir)
-    return output
-
-
-def _resolve_output(*, output: str, json_output: bool) -> str:
-    if json_output:
-        return "json"
     return output
 
 
@@ -163,6 +189,8 @@ def _build_execution_context(
         bundle=bundle,
         chosen_backend=chosen_backend,
     )
+    reporter.set_log_file(run_dir / "events.jsonl")
+    reporter.info("run", f"Initialized {run_type.value} run {run_id}")
     oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
     orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
     return ExecutionContext(
@@ -182,7 +210,7 @@ def _build_execution_context(
 
 @app.command()
 def doctor(
-    path: Path,
+    path: Path = typer.Argument(..., help=PATH_HELP),
     backend: str | None = typer.Option(None, "--backend", help="Backend to validate"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed checks"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
@@ -214,21 +242,36 @@ def doctor(
 
 @app.command()
 def baseline(
-    path: Path,
-    function: str = typer.Option(..., "--function", help="Target function name"),
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    function: str = typer.Option(
+        ...,
+        "--function",
+        help="Target function qualname (for example: module.func or ClassName.method)",
+    ),
     tests: list[str] = typer.Option(None, "--tests", help="Explicit pytest node ids"),
     properties: list[str] = typer.Option(None, "--properties", help="Property callables"),
     harness: str | None = typer.Option(None, "--harness", help="Harness callable"),
     backend: str | None = typer.Option(None, "--backend", help="Energy backend"),
     output: str = typer.Option("human", "--output", help="Output format: human or json"),
-    json_output: bool = typer.Option(False, "--json", help="Print JSON report"),
-    repetitions: int | None = typer.Option(None, "--repetitions", help="Override repetition count"),
+    repetitions: int | None = typer.Option(
+        None,
+        "--repetitions",
+        help="Override baseline repetitions (default: [tool.joule].baseline_repetitions)",
+    ),
     hotspots: bool = typer.Option(False, "--hotspots", help="Run hotspot analysis after baseline measurement"),
-    hotspot_limit: int = typer.Option(12, "--hotspot-limit", help="Number of hotspot functions to keep"),
+    hotspot_limit: int | None = typer.Option(
+        None,
+        "--hotspot-limit",
+        help="Number of hotspot functions to keep (default: [tool.joule].hotspot_limit)",
+    ),
     no_dashboard: bool = typer.Option(False, "--no-dashboard", help="Skip dashboard hint output"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
+    _validate_positive(repetitions, option_name="--repetitions")
+    _validate_positive(hotspot_limit, option_name="--hotspot-limit")
+    output_mode = _resolve_output_mode(output)
+    effective_quiet = quiet or (output_mode == "json" and not verbose)
     context = _build_execution_context(
         path=path,
         function=function,
@@ -238,7 +281,7 @@ def baseline(
         backend=backend,
         run_type=RunType.BASELINE,
         verbose=verbose,
-        quiet=quiet,
+        quiet=effective_quiet,
     )
     report = context.orchestrator.baseline(context.run_id, context.target, context.bundle, repetitions=repetitions)
     hotspot_summary = _collect_hotspot_analysis(
@@ -250,7 +293,7 @@ def baseline(
         run_dir=context.run_dir,
         reporter=context.reporter,
         enabled=hotspots,
-        limit=hotspot_limit,
+        limit=hotspot_limit if hotspot_limit is not None else context.settings.hotspot_limit,
     )
     baseline_analysis = build_baseline_analysis(
         run_id=context.run_id,
@@ -263,11 +306,9 @@ def baseline(
     context.db.update_run_status(context.run_id, "completed", metadata=metadata)
     write_artifact(context.run_dir, "baseline.json", measurement_to_json(report))
     _write_dashboard_snapshot(context.db, context.run_dir)
-    chosen_output = _resolve_output(output=output, json_output=json_output)
-    if json_output:
-        console.print(measurement_to_json(report))
-    elif chosen_output == "json":
-        console.print(json_pretty(baseline_analysis))
+    context.reporter.info("artifacts", f"Run artifacts written to {context.run_dir}")
+    if output_mode == "json":
+        typer.echo(json_pretty(baseline_analysis))
     else:
         console.print(human_baseline_summary(report, context.bundle.notes, hotspot_summary))
     if not no_dashboard:
@@ -276,19 +317,26 @@ def baseline(
 
 @app.command()
 def run(
-    path: Path,
-    function: str = typer.Option(..., "--function", help="Target function name"),
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    function: str = typer.Option(
+        ...,
+        "--function",
+        help="Target function qualname (for example: module.func or ClassName.method)",
+    ),
     tests: list[str] = typer.Option(None, "--tests", help="Explicit pytest node ids"),
     properties: list[str] = typer.Option(None, "--properties", help="Property callables"),
     harness: str | None = typer.Option(None, "--harness", help="Harness callable"),
     backend: str | None = typer.Option(None, "--backend", help="Energy backend"),
-    budget: int | None = typer.Option(None, "--budget", help="Candidate budget"),
+    budget: int | None = typer.Option(None, "--budget", help="Candidate budget (must be >= 1)"),
     output: str = typer.Option("human", "--output", help="Output format: human or json"),
     analysis: bool = typer.Option(False, "--analysis", help="Persist deep optimization analysis artifacts"),
     no_dashboard: bool = typer.Option(False, "--no-dashboard", help="Skip dashboard hint output"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
+    _validate_positive(budget, option_name="--budget")
+    output_mode = _resolve_output_mode(output)
+    effective_quiet = quiet or (output_mode == "json" and not verbose)
     context = _build_execution_context(
         path=path,
         function=function,
@@ -298,7 +346,7 @@ def run(
         backend=backend,
         run_type=RunType.OPTIMIZE,
         verbose=verbose,
-        quiet=quiet,
+        quiet=effective_quiet,
     )
     baseline_report, pareto, best = context.orchestrator.optimize(
         context.run_id,
@@ -316,7 +364,7 @@ def run(
         run_dir=context.run_dir,
         reporter=context.reporter,
         enabled=analysis,
-        limit=12,
+        limit=context.settings.hotspot_limit,
     )
     baseline_analysis = build_baseline_analysis(
         run_id=context.run_id,
@@ -394,11 +442,13 @@ def run(
             "hotspots.json",
             "best.patch",
             "dashboard.html",
+            "events.jsonl",
         ],
     )
     _write_run_summary(context.db, context.run_dir, "run_summary.json", summary)
-    if output == "json":
-        console.print(json_pretty(summary))
+    context.reporter.info("artifacts", f"Run artifacts written to {context.run_dir}")
+    if output_mode == "json":
+        typer.echo(json_pretty(summary))
     else:
         console.print(human_run_summary(summary))
     if not no_dashboard:
@@ -407,7 +457,7 @@ def run(
 
 @app.command()
 def apply(
-    path: Path,
+    path: Path = typer.Argument(..., help=PATH_HELP),
     run_id: str = typer.Option(..., "--run-id", help="Run identifier to apply"),
     candidate_id: str | None = typer.Option(None, "--candidate-id", help="Specific candidate to apply"),
     branch: bool = typer.Option(False, "--branch", help="Create a joule/<run_id> branch before applying"),
@@ -425,15 +475,20 @@ def apply(
     else:
         selected = next((item for item in candidates if item["status"] == "accepted"), None)
     if selected is None:
-        raise typer.BadParameter(f"No candidate available for run {run_id}")
-    if selected["dependencies"]:
         raise typer.BadParameter(
-            "Selected candidate requires new dependencies and is review-only in JOULE v0; automatic dependency edits are deferred"
+            f"No accepted candidate available for run {run_id}; use 'joule inspect {path} --run-id {run_id}' to review candidates"
+        )
+    if selected["dependencies"]:
+        dependencies = ", ".join(str(dep) for dep in selected["dependencies"])
+        raise typer.BadParameter(
+            f"Candidate {selected['candidate_id']} requires new dependencies ({dependencies}) and remains review-only in JOULE v0"
         )
     expected_hash = run.metadata.get("target_file_hash")
     current_hash = file_sha256(run.target.file_path)
     if expected_hash and current_hash != expected_hash:
-        raise typer.BadParameter("Target file changed since the run was measured; refusing to apply")
+        raise typer.BadParameter(
+            f"Target file changed since measurement (expected {expected_hash[:8]}, current {current_hash[:8]}); refusing to apply"
+        )
     if branch:
         branch_name = create_branch(run.target.project_root, run_id)
         reporter.info("git", f"Created branch {branch_name}")
@@ -462,12 +517,13 @@ def apply(
 
 @app.command()
 def discover(
-    path: Path,
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    output: str = typer.Option("json", "--output", help="Output format: human or json"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed discovery events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
     settings, _db, reporter = _bootstrap(path, verbose=verbose, quiet=quiet)
-    reporter.info("discovery", f"Scanning {settings.project_root}")
+    reporter.verbose("discovery", f"Scanning {settings.project_root}")
     results = discover_targets(settings, path)
     payload = [
         {
@@ -487,12 +543,16 @@ def discover(
         }
         for result in results
     ]
-    console.print(json.dumps(payload, indent=2))
+    output_mode = _resolve_output_mode(output)
+    if output_mode == "json":
+        typer.echo(json.dumps(payload, indent=2))
+    else:
+        console.print(human_discover_summary(payload))
 
 
 @app.command()
 def dashboard(
-    path: Path,
+    path: Path = typer.Argument(..., help=PATH_HELP),
     host: str = typer.Option("127.0.0.1", "--host", help="Dashboard host"),
     port: int | None = typer.Option(None, "--port", help="Dashboard port"),
     run_id: str | None = typer.Option(None, "--run-id", help="Specific run to render"),
@@ -511,14 +571,16 @@ def dashboard(
 
 @app.command()
 def inspect(
-    path: Path,
-    run_id: str,
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    run_id: str = typer.Option(..., "--run-id", help="Run identifier produced by baseline or run"),
     candidate_id: str | None = typer.Option(None, "--candidate-id", help="Inspect a specific candidate"),
     output: str = typer.Option("json", "--output", help="Output format: human or json"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed inspection events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
-    settings, db, reporter = _bootstrap(path, verbose=verbose, quiet=quiet)
+    output_mode = _resolve_output_mode(output)
+    effective_quiet = quiet or (output_mode == "json" and not verbose)
+    settings, db, reporter = _bootstrap(path, verbose=verbose, quiet=effective_quiet)
     del settings
     reporter.info("inspect", f"Loading run {run_id}")
     record = db.get_run(run_id)
@@ -544,14 +606,36 @@ def inspect(
         "artifacts": db.get_artifacts(run_id),
         "apply_audits": db.get_apply_audits(run_id),
     }
+    payload["summary"] = summarize_inspect_payload(
+        candidates=candidates,
+        measurements=measurements,
+        search_events=search_events,
+        hotspots=hotspot_profiles,
+        artifacts=payload["artifacts"],
+        apply_audits=payload["apply_audits"],
+    )
     if candidate_id:
         selected = next((item for item in candidates if item["candidate_id"] == candidate_id), None)
         if selected is None:
             raise typer.BadParameter(f"Unknown candidate_id {candidate_id!r} for run {run_id}")
         candidate_payload = candidate_detail_payload(selected, measurements)
-        console.print(json_pretty(candidate_payload) if output == "json" else json_pretty(candidate_payload))
+        if output_mode == "json":
+            typer.echo(json_pretty(candidate_payload))
+        else:
+            console.print(human_candidate_detail_summary(candidate_payload))
         return
-    console.print(json_pretty(payload) if output == "json" else json_pretty(payload))
+    if output_mode == "json":
+        typer.echo(json_pretty(payload))
+    else:
+        console.print(human_inspect_summary(payload))
+
+
+@app.command("parse-json")
+def parse_json(
+    file: Path | None = typer.Option(None, "--file", help="Read JSON payload from file instead of stdin"),
+):
+    payload = _load_json_input(file)
+    console.print(human_json_payload_summary(payload))
 
 
 def _backend_ready(settings: JouleSettings, backend_name: str) -> bool:

@@ -28,6 +28,28 @@ def test_dashboard_once_returns_html(sample_project):
     assert "<title>JOULE Dashboard</title>" in result.output
 
 
+def test_dashboard_once_includes_guided_sections(sample_project):
+    baseline = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "membership_total",
+            "--tests",
+            "tests/test_algos.py::test_membership_total",
+            "--no-dashboard",
+        ],
+    )
+    assert baseline.exit_code == 0, baseline.output
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", baseline.output).group(1)
+
+    result = runner.invoke(app, ["dashboard", str(sample_project), "--run-id", run_id, "--once"])
+    assert result.exit_code == 0, result.output
+    assert "Recommended Next Steps" in result.output
+    assert "candidate-status-filter" in result.output
+
+
 def test_adaptive_measurement_uses_inner_repetitions(sample_project):
     pyproject = sample_project / "pyproject.toml"
     pyproject.write_text(
@@ -41,7 +63,8 @@ def test_adaptive_measurement_uses_inner_repetitions(sample_project):
             str(sample_project / "sample_pkg" / "algos.py"),
             "--function",
             "unreferenced_total",
-            "--json",
+            "--output",
+            "json",
             "--no-dashboard",
         ],
     )
@@ -49,7 +72,7 @@ def test_adaptive_measurement_uses_inner_repetitions(sample_project):
     match = re.search(r'(\{\s*"run_id".*\})', result.output, flags=re.DOTALL)
     assert match, result.output
     payload = json.loads(match.group(1))
-    assert payload["samples"][0]["metadata"]["inner_repetitions"] > 1
+    assert payload["baseline"]["samples"][0]["metadata"]["inner_repetitions"] > 1
 
 
 def test_mock_backend_reports_full_metrics(sample_project):
@@ -106,6 +129,101 @@ def test_discover_and_inspect_expose_workload_provenance(sample_project):
     assert "workload_provenance" in discover_result.output
 
     run_id = re.search(r"Run:\s*([a-f0-9]+)", baseline.output).group(1)
-    inspect_result = runner.invoke(app, ["inspect", str(sample_project), run_id])
+    inspect_result = runner.invoke(app, ["inspect", str(sample_project), "--run-id", run_id])
     assert inspect_result.exit_code == 0, inspect_result.output
     assert "workload_provenance" in inspect_result.output
+    assert '"summary"' in inspect_result.output
+
+
+def test_inspect_human_output_is_readable(sample_project):
+    baseline = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "membership_total",
+            "--tests",
+            "tests/test_algos.py::test_membership_total",
+            "--no-dashboard",
+        ],
+    )
+    assert baseline.exit_code == 0, baseline.output
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", baseline.output).group(1)
+
+    inspect_result = runner.invoke(
+        app,
+        ["inspect", str(sample_project), "--run-id", run_id, "--output", "human"],
+    )
+    assert inspect_result.exit_code == 0, inspect_result.output
+    assert "Run:" in inspect_result.output
+    assert "Candidates:" in inspect_result.output
+    assert "Diagnostics:" in inspect_result.output
+
+
+def test_discover_human_output_is_human_readable(sample_project):
+    result = runner.invoke(app, ["discover", str(sample_project), "--output", "human"])
+    assert result.exit_code == 0, result.output
+    assert "Discover:" in result.output
+    assert "target(s)" in result.output
+
+
+def test_parse_json_helper_summarizes_run_output(sample_project):
+    run_result = runner.invoke(
+        app,
+        [
+            "run",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "2",
+            "--output",
+            "json",
+            "--no-dashboard",
+        ],
+    )
+    assert run_result.exit_code == 0, run_result.output
+
+    parsed = runner.invoke(app, ["parse-json"], input=run_result.output)
+    assert parsed.exit_code == 0, parsed.output
+    assert "Run:" in parsed.output
+    assert "Baseline:" in parsed.output
+
+
+def test_parse_json_helper_rejects_invalid_payload(sample_project):
+    del sample_project
+    parsed = runner.invoke(app, ["parse-json"], input="not-json")
+    assert parsed.exit_code != 0
+    assert "Invalid JSON payload" in parsed.output
+
+
+def test_inspect_unknown_candidate_returns_actionable_error(sample_project):
+    baseline = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "membership_total",
+            "--tests",
+            "tests/test_algos.py::test_membership_total",
+            "--no-dashboard",
+        ],
+    )
+    assert baseline.exit_code == 0, baseline.output
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", baseline.output).group(1)
+
+    inspect_result = runner.invoke(
+        app,
+        ["inspect", str(sample_project), "--run-id", run_id, "--candidate-id", "missing-id"],
+    )
+    assert inspect_result.exit_code != 0
+    assert "Unknown candidate_id" in inspect_result.output
+
+
+def test_run_help_exposes_budget_and_path_guidance():
+    result = runner.invoke(app, ["run", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "Path to a target .py file or project root" in result.output
+    assert "--budget" in result.output

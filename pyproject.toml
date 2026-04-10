@@ -50,6 +50,7 @@ llm_model = ""
 baseline_repetitions = 5
 optimization_budget = 6
 workload_discovery_limit = 8
+hotspot_limit = 12
 dashboard_port = 8501
 dependency_energy_threshold = 0.15
 dependency_latency_threshold = 0.20

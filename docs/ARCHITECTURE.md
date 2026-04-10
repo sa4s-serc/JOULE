@@ -2,6 +2,12 @@
 
 This document explains how JOULE is structured today, how a run moves through the system, and which design decisions define the current v0.
 
+## Experience Paths and Doc Map
+
+- New user: [QUICKSTART.md](../QUICKSTART.md)
+- CI or automation: [README.md](../README.md) + [docs/ARTIFACTS.md](ARTIFACTS.md)
+- Advanced architecture and roadmap: [GUIDE.md](../GUIDE.md) + this document
+
 ## 1. System Overview
 
 JOULE treats Python optimization as a measured search problem:
@@ -159,7 +165,7 @@ Responsibilities:
 Design notes:
 - SQLite is the system of record for run state.
 - Run directories are convenience artifacts for operator workflows and debugging.
-- The dashboard is deliberately simple in v0: it favors inspectability over UI sophistication, while now surfacing funnel and hotspot summaries.
+- The dashboard remains artifact-backed, but now includes guided run navigation, candidate filter/sort controls, and recommended next-step cues.
 
 ## 3. End-to-End Command Flows
 
@@ -259,9 +265,12 @@ Stored in `.joule/`:
 - `optimization_analysis.json`
 - `hotspots.json`
 - `dashboard.html`
+- `events.jsonl`
 - `best.patch`
 - `best_candidate.py`
 - `candidates/<candidate_id>/...` when `--analysis` is enabled
+
+Use [docs/ARTIFACTS.md](ARTIFACTS.md) for question-based artifact lookup.
 
 ## 6. Design Decisions
 
@@ -325,3 +334,4 @@ Expected next architecture steps:
 - [README.md](/home/prakhar/dev/prakhar479/hedge/README.md)
 - [QUICKSTART.md](/home/prakhar/dev/prakhar479/hedge/QUICKSTART.md)
 - [GUIDE.md](/home/prakhar/dev/prakhar479/hedge/GUIDE.md)
+- [docs/ARTIFACTS.md](ARTIFACTS.md)

@@ -155,3 +155,62 @@ def test_run_analysis_writes_candidate_and_analysis_artifacts(sample_project):
     run_dir = sample_project / ".joule" / "runs" / run_id
     assert (run_dir / "optimization_analysis.json").exists()
     assert (run_dir / "candidates").exists()
+
+
+def test_run_rejects_non_positive_budget(sample_project):
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "0",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--budget must be >= 1" in result.output
+
+
+def test_run_writes_structured_events_and_summary_path(sample_project):
+    _loosen_thresholds(sample_project)
+    target_file = sample_project / "sample_pkg" / "algos.py"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "3",
+            "--output",
+            "json",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    run_id = payload["run_id"]
+    run_dir = sample_project / ".joule" / "runs" / run_id
+    events_path = run_dir / "events.jsonl"
+    assert events_path.exists()
+    assert events_path.read_text(encoding="utf-8").strip()
+    assert payload["artifact_paths"].get("events.jsonl") == str(events_path)
+
+
+def test_apply_commit_requires_branch(sample_project):
+    result = runner.invoke(
+        app,
+        [
+            "apply",
+            str(sample_project),
+            "--run-id",
+            "deadbeef0000",
+            "--commit",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--commit requires --branch" in result.output

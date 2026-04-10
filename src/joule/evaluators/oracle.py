@@ -74,6 +74,12 @@ class PerformanceOracle:
                         inner_repetitions=calibration.inner_repetitions,
                         timeout_s=self.settings.workload_timeout_s,
                     )
+                    self._report_worker_diagnostics(
+                        workload_id=workload.identifier,
+                        fidelity=fidelity,
+                        repetition=repetition,
+                        measurement=measurement,
+                    )
                     sample = self._to_metric_sample(
                         measurement=measurement,
                         workload_id=workload.identifier,
@@ -182,6 +188,22 @@ class PerformanceOracle:
             stderr=measurement.stderr,
             metadata=metadata,
         )
+
+    def _report_worker_diagnostics(self, *, workload_id: str, fidelity: Fidelity, repetition: int, measurement) -> None:
+        if not self.reporter:
+            return
+        if not measurement.success:
+            self.reporter.warn(
+                "worker",
+                f"{workload_id} {fidelity.value} sample {repetition} failed (return_code={measurement.return_code})",
+            )
+        stderr = str(measurement.stderr or "").strip()
+        if stderr:
+            excerpt = stderr.splitlines()[0][:180]
+            self.reporter.debug(
+                "worker",
+                f"{workload_id} {fidelity.value} sample {repetition} stderr: {excerpt}",
+            )
 
     def profile_bundle_hotspots(
         self,

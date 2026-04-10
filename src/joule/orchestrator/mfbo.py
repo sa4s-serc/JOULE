@@ -114,10 +114,14 @@ class OptimizationOrchestrator:
             total_budget=budget or self.settings.optimization_budget,
             max_parent_expansions=max(1, self.settings.search_branching_factor) * max(1, len(self.registry.operators)),
         )
+        if self.reporter:
+            self.reporter.info("progress", f"Optimization budget: {state.total_budget} measured candidate(s)")
         while state.measured < state.total_budget:
             phase = self._phase_for_index(state.measured, state.total_budget)
             parent_id = pareto.sample_active_parent(max_generation=self.settings.search_max_generations)
             if parent_id is None:
+                if self.reporter:
+                    self.reporter.info("progress", "Stopping early: no active frontier candidates left")
                 self._record_event(
                     run_id,
                     event_type="converged",
@@ -238,6 +242,11 @@ class OptimizationOrchestrator:
                     parent.rejection_history.append("duplicate_source")
                     continue
                 state.measured += 1
+                if self.reporter:
+                    self.reporter.info(
+                        "progress",
+                        f"Evaluating candidate {state.measured}/{state.total_budget} ({candidate_id}) phase={phase.value}",
+                    )
                 seen_sources[source_hash] = candidate_id
                 screening = self.surrogate.screen_candidate(
                     source=proposal.candidate_source,
@@ -249,6 +258,11 @@ class OptimizationOrchestrator:
                     context=parent_context,
                 )
                 if screening["decision"] == "reject":
+                    if self.reporter:
+                        self.reporter.verbose(
+                            "progress",
+                            f"Candidate {candidate_id} screened out ({screening['reason']})",
+                        )
                     self._record_screened_candidate(
                         run_id,
                         candidate_id=candidate_id,
@@ -289,6 +303,8 @@ class OptimizationOrchestrator:
                 )
                 correctness_duration = perf_counter() - correctness_started
                 if not valid:
+                    if self.reporter:
+                        self.reporter.verbose("progress", f"Candidate {candidate_id} failed correctness checks")
                     evaluation = build_correctness_rejection_evaluation(
                         candidate_id=candidate_id,
                         proposal=proposal,
@@ -481,10 +497,22 @@ class OptimizationOrchestrator:
                 if accepted:
                     accepted_evaluations[candidate_id] = evaluation
                     state.no_frontier_gain = 0
+                    if self.reporter:
+                        self.reporter.info("progress", f"Accepted candidate {candidate_id} into frontier")
                 else:
                     parent.rejection_history.append(rejection_reason or "threshold")
                     state.no_frontier_gain += 1
+                    if self.reporter:
+                        self.reporter.verbose(
+                            "progress",
+                            f"Candidate {candidate_id} rejected ({rejection_reason or 'threshold'})",
+                        )
                 if state.no_frontier_gain >= self.settings.search_convergence_patience:
+                    if self.reporter:
+                        self.reporter.info(
+                            "progress",
+                            "Stopping early: frontier stagnation threshold reached",
+                        )
                     self._record_event(
                         run_id,
                         event_type="converged",
@@ -508,6 +536,11 @@ class OptimizationOrchestrator:
 
         best_point = pareto.best(exclude_ids={"baseline"})
         best_candidate = accepted_evaluations.get(best_point.candidate_id) if best_point else None
+        if self.reporter:
+            self.reporter.info(
+                "progress",
+                f"Optimization complete: measured {state.measured}/{state.total_budget} candidate(s)",
+            )
         return baseline, pareto, best_candidate
 
     def _record_candidate(self, run_id: str, evaluation: CandidateEvaluation, *, status: str) -> None:
