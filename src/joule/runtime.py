@@ -1,48 +1,38 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 from contextlib import redirect_stderr, redirect_stdout
 import cProfile
 import importlib
-import importlib.util
-import inspect
 import io
 import json
 import os
 from pathlib import Path
 import pstats
-import subprocess
 import sys
-
-import pytest
+from typing import Any
 
 from joule.models import TargetSpec, WorkloadKind, WorkloadSpec
+from joule.runtime_helpers.worker import (
+    execute_golden_trace_workload,
+    execute_harness_workload,
+    execute_property_workload,
+    execute_pytest_workload,
+    extend_runtime_import_paths,
+    invoke_worker as invoke_worker_process,
+    load_module_for_file_selector,
+    resolve_attr_path,
+)
 
 
-def load_object(selector: str, project_root: Path, overlay_root: Path | None = None):
-    if overlay_root:
-        sys.path.insert(0, str(overlay_root))
-    src_path = project_root / "src"
-    if src_path.exists():
-        sys.path.insert(0, str(src_path))
-    sys.path.insert(0, str(project_root))
+def load_object(selector: str, project_root: Path, overlay_root: Path | None = None) -> Any:
+    extend_runtime_import_paths(project_root, overlay_root)
     if ".py::" in selector:
-        module_path, object_name = selector.split("::", 1)
-        file_path = Path(module_path)
-        if not file_path.is_absolute():
-            file_path = project_root / file_path
-        module_name = file_path.with_suffix("").name
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Unable to import {selector}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return _resolve_attr_path(module, object_name)
+        module, object_name = load_module_for_file_selector(selector, project_root)
+        return resolve_attr_path(module, object_name)
     module_name, object_name = selector.replace("::", ":").split(":", 1)
     module = importlib.import_module(module_name)
-    return _resolve_attr_path(module, object_name)
+    return resolve_attr_path(module, object_name)
 
 
 def execute_workload(
@@ -56,49 +46,39 @@ def execute_workload(
     captured_stdout = io.StringIO()
     captured_stderr = io.StringIO()
     logical_invocations = 0
-    payload: dict[str, object]
+    payload: dict[str, Any]
     with redirect_stdout(captured_stdout), redirect_stderr(captured_stderr):
         if workload.kind is WorkloadKind.PYTEST:
-            selector = _normalize_pytest_selector(workload.selector, project_root)
-            return_code = 0
-            success = True
-            for _ in range(inner_repetitions):
-                logical_invocations += 1
-                result = pytest.main([selector, "-q"], plugins=[])
-                return_code = int(result)
-                if return_code != 0:
-                    success = False
-                    break
-            payload = {"return_code": return_code, "success": success}
+            payload, logical_invocations = execute_pytest_workload(
+                selector=workload.selector,
+                project_root=project_root,
+                inner_repetitions=inner_repetitions,
+                normalize_selector=_normalize_pytest_selector,
+            )
         elif workload.kind is WorkloadKind.PROPERTY:
-            callback = load_object(workload.selector, project_root, overlay_root=overlay_root)
-            for _ in range(inner_repetitions):
-                logical_invocations += 1
-                _call_maybe_async(callback)
-            payload = {"return_code": 0, "success": True}
+            payload, logical_invocations = execute_property_workload(
+                selector=workload.selector,
+                project_root=project_root,
+                overlay_root=overlay_root,
+                inner_repetitions=inner_repetitions,
+                load_object_fn=load_object,
+            )
         elif workload.kind is WorkloadKind.HARNESS:
-            callback = load_object(workload.selector, project_root, overlay_root=overlay_root)
-            target_callable = _load_target_callable(target, project_root, overlay_root)
-            signature = inspect.signature(callback)
-            for _ in range(inner_repetitions):
-                logical_invocations += 1
-                if len(signature.parameters) == 0:
-                    _call_maybe_async(callback)
-                else:
-                    _call_maybe_async(callback, target_callable)
-            payload = {"return_code": 0, "success": True}
+            payload, logical_invocations = execute_harness_workload(
+                target=target,
+                selector=workload.selector,
+                project_root=project_root,
+                overlay_root=overlay_root,
+                inner_repetitions=inner_repetitions,
+                load_object_fn=load_object,
+            )
         elif workload.kind is WorkloadKind.GOLDEN_TRACE:
-            target_callable = _load_target_callable(target, project_root, overlay_root)
-            signature = inspect.signature(target_callable)
-            kwargs = {
-                parameter.name: parameter.default
-                for parameter in signature.parameters.values()
-                if parameter.default is not inspect.Signature.empty
-            }
-            for _ in range(inner_repetitions):
-                logical_invocations += 1
-                _call_maybe_async(target_callable, **kwargs)
-            payload = {"return_code": 0, "success": True, "mode": "default-args"}
+            payload, logical_invocations = execute_golden_trace_workload(
+                target=target,
+                project_root=project_root,
+                overlay_root=overlay_root,
+                inner_repetitions=inner_repetitions,
+            )
         else:
             raise ValueError(f"Unsupported workload kind: {workload.kind}")
     payload.update(
@@ -121,27 +101,13 @@ def invoke_worker(
     timeout_s: float = 30.0,
 ) -> dict:
     command = worker_command(target, workload, overlay_root=overlay_root, inner_repetitions=inner_repetitions)
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    return invoke_worker_process(
+        command=command,
         env=subprocess_env(target.project_root, overlay_root),
+        timeout_s=timeout_s,
+        inner_repetitions=inner_repetitions,
+        include_profile=False,
     )
-    try:
-        stdout, stderr = process.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        stdout, stderr = process.communicate()
-        return {
-            "success": False,
-            "return_code": 124,
-            "stdout": stdout or "",
-            "stderr": (stderr or "").strip() or f"Timed out after {timeout_s:.1f}s",
-            "logical_invocations": inner_repetitions,
-            "inner_repetitions": inner_repetitions,
-        }
-    return _decode_worker_payload(stdout, stderr, process.returncode, inner_repetitions)
 
 
 def invoke_profile_worker(
@@ -159,28 +125,13 @@ def invoke_profile_worker(
         inner_repetitions=inner_repetitions,
         profile_mode="hotspots",
     )
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    return invoke_worker_process(
+        command=command,
         env=subprocess_env(target.project_root, overlay_root),
+        timeout_s=timeout_s,
+        inner_repetitions=inner_repetitions,
+        include_profile=True,
     )
-    try:
-        stdout, stderr = process.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        stdout, stderr = process.communicate()
-        return {
-            "success": False,
-            "return_code": 124,
-            "stdout": stdout or "",
-            "stderr": (stderr or "").strip() or f"Timed out after {timeout_s:.1f}s",
-            "logical_invocations": inner_repetitions,
-            "inner_repetitions": inner_repetitions,
-            "profile": {"functions": [], "ownership": []},
-        }
-    return _decode_worker_payload(stdout, stderr, process.returncode, inner_repetitions)
 
 
 def worker_command(
@@ -192,7 +143,7 @@ def worker_command(
     profile_mode: str | None = None,
 ) -> list[str]:
     command = [
-        sys.executable,
+        os.environ.get("PYTHON_EXECUTABLE", sys.executable),
         "-m",
         "joule.runtime",
         "--target-json",
@@ -225,56 +176,6 @@ def subprocess_env(project_root: Path, overlay_root: Path | None) -> dict[str, s
         pythonpath.append(existing)
     env["PYTHONPATH"] = ":".join(pythonpath)
     return env
-
-
-def _load_target_callable(target: TargetSpec, project_root: Path, overlay_root: Path | None):
-    if overlay_root:
-        sys.path.insert(0, str(overlay_root))
-    src_path = project_root / "src"
-    if src_path.exists():
-        sys.path.insert(0, str(src_path))
-    sys.path.insert(0, str(project_root))
-    module = importlib.import_module(target.module)
-    current = module
-    for owner in target.owner_path:
-        current = getattr(current, owner)
-    return getattr(current, target.function_name)
-
-
-def _resolve_attr_path(root: object, attribute_path: str):
-    current = root
-    for segment in attribute_path.split("."):
-        current = getattr(current, segment)
-    return current
-
-
-def _call_maybe_async(callback, *args, **kwargs):
-    result = callback(*args, **kwargs)
-    if inspect.isawaitable(result):
-        return asyncio.run(result)
-    return result
-
-
-def _decode_worker_payload(stdout: str, stderr: str, return_code: int, inner_repetitions: int) -> dict:
-    if stdout:
-        try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError:
-            payload = {
-                "success": False,
-                "return_code": return_code or 1,
-                "stdout": stdout,
-                "stderr": stderr.strip(),
-            }
-    else:
-        payload = {"success": False, "return_code": return_code or 1, "stdout": "", "stderr": stderr.strip()}
-    payload["stdout"] = payload.get("stdout", "")
-    payload["stderr"] = payload.get("stderr", "") or stderr.strip()
-    payload["return_code"] = int(payload.get("return_code", return_code or 1))
-    payload["success"] = bool(payload.get("success", False))
-    payload["logical_invocations"] = int(payload.get("logical_invocations", inner_repetitions))
-    payload["inner_repetitions"] = int(payload.get("inner_repetitions", inner_repetitions))
-    return payload
 
 
 def _normalize_pytest_selector(selector: str, project_root: Path) -> str:

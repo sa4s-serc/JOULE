@@ -8,8 +8,9 @@ from joule.transformers.base import BaseOperator
 
 class ContainerMembershipOperator(BaseOperator):
     name = "container_membership"
+    family = "deterministic"
 
-    def generate(self, target: TargetSpec) -> list[TransformationResult]:
+    def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:
         tree = ast.parse(target.source)
         changed = False
 
@@ -42,14 +43,17 @@ class ContainerMembershipOperator(BaseOperator):
                 operator_name=self.name,
                 candidate_source=ast.unparse(new_tree),
                 reasoning="Replaced repeated linear membership checks with a set literal for faster lookups.",
+                operator_family=self.family,
+                proposal_rank=0,
             )
         ]
 
 
 class SumListComprehensionOperator(BaseOperator):
     name = "sum_generator"
+    family = "deterministic"
 
-    def generate(self, target: TargetSpec) -> list[TransformationResult]:
+    def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:
         tree = ast.parse(target.source)
         changed = False
 
@@ -76,14 +80,17 @@ class SumListComprehensionOperator(BaseOperator):
                 operator_name=self.name,
                 candidate_source=ast.unparse(new_tree),
                 reasoning="Converted list materialization inside sum() into a generator to reduce memory pressure.",
+                operator_family=self.family,
+                proposal_rank=0,
             )
         ]
 
 
 class EmptyLiteralOperator(BaseOperator):
     name = "empty_literal"
+    family = "deterministic"
 
-    def generate(self, target: TargetSpec) -> list[TransformationResult]:
+    def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:
         tree = ast.parse(target.source)
         changed = False
 
@@ -109,6 +116,8 @@ class EmptyLiteralOperator(BaseOperator):
                 operator_name=self.name,
                 candidate_source=ast.unparse(new_tree),
                 reasoning="Replaced zero-argument constructor calls with literal forms.",
+                operator_family=self.family,
+                proposal_rank=0,
             )
         ]
 

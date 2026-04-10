@@ -1,21 +1,48 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import perf_counter
+from typing import Any
 import uuid
 
 from joule.config import JouleSettings
 from joule.evaluators.correctness import CorrectnessEngine
 from joule.evaluators.oracle import PerformanceOracle
-from joule.models import CandidateEvaluation, Fidelity, TargetSpec, WorkloadBundle
+from joule.models import (
+    CandidateEvaluation,
+    Fidelity,
+    FrontierState,
+    SearchContext,
+    SearchPhase,
+    TargetSpec,
+    TransformationResult,
+    WorkloadBundle,
+)
 from joule.orchestrator.explainer import synthesize_explanation
+from joule.orchestrator.internal.mfbo_flow import (
+    OptimizationState,
+    build_candidate_metadata,
+    build_correctness_rejection_evaluation,
+    build_parent_context,
+    dependency_policy_metadata,
+    generated_candidate_detail,
+)
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
 from joule.surrogate.gp import GaussianProcessSurrogate
 from joule.transformers.registry import OperatorRegistry
 from joule.utils.analysis import candidate_source_hash
 from joule.utils.db import JouleDB
 from joule.utils.metrics import improvement_ratio, scalar_score
-from joule.utils.reporting import improvement_summary
+
+
+@dataclass(slots=True)
+class _ParentSnapshot:
+    candidate_id: str
+    source: str
+    operator_name: str
+    generation_depth: int
+    rejection_history: list[str] = field(default_factory=list)
 
 
 class OptimizationOrchestrator:
@@ -28,6 +55,7 @@ class OptimizationOrchestrator:
         self.registry = OperatorRegistry(llm_model=settings.llm_model, include_llm=True)
         self.registry.load_stats(self.db.get_operator_stats())
         self.surrogate = GaussianProcessSurrogate()
+        self._warm_start_surrogate()
 
     def baseline(self, run_id: str, target: TargetSpec, bundle: WorkloadBundle, repetitions: int | None = None):
         if self.reporter:
@@ -54,122 +82,222 @@ class OptimizationOrchestrator:
         baseline = self.baseline(run_id, target, bundle)
         baseline_score = scalar_score(baseline.aggregate)
         self.surrogate.record(target.source, baseline_score)
-        pareto = ParetoFront()
-        pareto.add(ParetoPoint(candidate_id="baseline", metrics=baseline.aggregate))
-        best_candidate: CandidateEvaluation | None = None
+        pareto = ParetoFront(
+            weights=(
+                self.settings.pareto_weights.energy,
+                self.settings.pareto_weights.latency,
+                self.settings.pareto_weights.memory,
+            )
+        )
+        pareto.add(
+            ParetoPoint(
+                candidate_id="baseline",
+                metrics=baseline.aggregate,
+                parent_id=None,
+                generation_depth=0,
+                operator_name="baseline",
+                active=True,
+            )
+        )
+        accepted_evaluations: dict[str, CandidateEvaluation] = {}
+        parent_snapshots: dict[str, _ParentSnapshot] = {
+            "baseline": _ParentSnapshot(
+                candidate_id="baseline",
+                source=target.source,
+                operator_name="baseline",
+                generation_depth=0,
+            )
+        }
         seen_sources = {candidate_source_hash(target.source): "baseline"}
 
-        remaining = budget or self.settings.optimization_budget
-        for operator in self.registry.ranked():
-            if remaining <= 0:
+        state = OptimizationState(
+            total_budget=budget or self.settings.optimization_budget,
+            max_parent_expansions=max(1, self.settings.search_branching_factor) * max(1, len(self.registry.operators)),
+        )
+        while state.measured < state.total_budget:
+            phase = self._phase_for_index(state.measured, state.total_budget)
+            parent_id = pareto.sample_active_parent(max_generation=self.settings.search_max_generations)
+            if parent_id is None:
+                self._record_event(
+                    run_id,
+                    event_type="converged",
+                    stage="search",
+                    detail={"reason": "no_active_frontier"},
+                )
                 break
+            parent = parent_snapshots[parent_id]
+            parent_context = build_parent_context(parent, phase=phase, analysis=analysis)
+            operator = self.registry.select_operator(phase=phase, parent_generation=parent.generation_depth)
             if self.reporter:
-                self.reporter.verbose("operator", f"Trying {operator.name}")
-            for result in operator.generate(target):
+                self.reporter.verbose(
+                    "scheduler",
+                    f"phase={phase.value} parent={parent_id} depth={parent.generation_depth} operator={operator.name}",
+                )
+            proposals = operator.generate(target, parent_context)
+            if not proposals:
+                self._record_event(
+                    run_id,
+                    event_type="operator_empty",
+                    stage="generation",
+                    candidate_id=parent_id,
+                    operator_name=operator.name,
+                    detail={"reason": "no_proposals", "phase": phase.value},
+                )
+                self.registry.record_empty_attempt(
+                    operator.name,
+                    phase=phase,
+                    parent_generation=parent.generation_depth,
+                )
+                self.db.bump_operator(operator.name, success=False, reward=0.0)
+                if pareto.expansion_count(parent_id) >= state.max_parent_expansions:
+                    pareto.mark_exhausted(parent_id)
+                continue
+            ranked_proposals = sorted(proposals, key=lambda item: item.proposal_rank)[: self.settings.search_branching_factor]
+            for proposal in ranked_proposals:
+                if state.measured >= state.total_budget:
+                    break
                 candidate_id = uuid.uuid4().hex[:8]
-                source_hash = candidate_source_hash(result.candidate_source)
+                source_hash = candidate_source_hash(proposal.candidate_source)
+                next_depth = parent.generation_depth + 1
                 self._record_event(
                     run_id,
                     event_type="generated",
                     stage="generation",
                     candidate_id=candidate_id,
-                    operator_name=result.operator_name,
-                    detail={"reasoning": result.reasoning, "source_hash": source_hash, "analysis_enabled": analysis},
+                    operator_name=proposal.operator_name,
+                    detail=generated_candidate_detail(
+                        proposal=proposal,
+                        source_hash=source_hash,
+                        analysis=analysis,
+                        parent_id=parent_id,
+                        phase=phase,
+                        generation_depth=next_depth,
+                    ),
                 )
-                if result.candidate_source.strip() == target.source.strip():
-                    self._record_candidate(
+                if proposal.candidate_source.strip() == parent.source.strip():
+                    self._record_screened_candidate(
                         run_id,
-                        CandidateEvaluation(
-                            candidate_id=candidate_id,
-                            operator_name=result.operator_name,
-                            reasoning=result.reasoning,
-                            source=result.candidate_source,
-                            dependencies=result.dependencies,
-                            accepted=False,
-                            score=float("inf"),
-                            metadata={
-                                "rejected": "unchanged_source",
-                                "stage": "generation",
-                                "source_hash": source_hash,
-                                "duplicate_of": "baseline",
-                                "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
-                            },
-                        ),
+                        candidate_id=candidate_id,
+                        proposal=proposal,
+                        parent_id=parent_id,
+                        generation_depth=next_depth,
+                        source_hash=source_hash,
+                        reason="unchanged_source",
                         status="skipped",
+                        stage="generation",
+                        duplicate_of=parent_id,
                     )
                     self._record_event(
                         run_id,
                         event_type="unchanged",
                         stage="generation",
                         candidate_id=candidate_id,
-                        operator_name=result.operator_name,
-                        detail={"reason": "unchanged_source", "source_hash": source_hash, "duplicate_of": "baseline"},
+                        operator_name=proposal.operator_name,
+                        detail={"reason": "unchanged_source", "source_hash": source_hash, "duplicate_of": parent_id},
                     )
+                    self._update_operator(
+                        proposal,
+                        success=False,
+                        reward=0.0,
+                        phase=phase,
+                        parent_generation=parent.generation_depth,
+                        duplicate=True,
+                    )
+                    parent.rejection_history.append("unchanged_source")
                     continue
                 duplicate_of = seen_sources.get(source_hash)
                 if duplicate_of:
-                    self._record_candidate(
+                    self._record_screened_candidate(
                         run_id,
-                        CandidateEvaluation(
-                            candidate_id=candidate_id,
-                            operator_name=result.operator_name,
-                            reasoning=result.reasoning,
-                            source=result.candidate_source,
-                            dependencies=result.dependencies,
-                            accepted=False,
-                            score=float("inf"),
-                            metadata={
-                                "rejected": "duplicate_source",
-                                "stage": "generation",
-                                "source_hash": source_hash,
-                                "duplicate_of": duplicate_of,
-                                "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
-                            },
-                        ),
+                        candidate_id=candidate_id,
+                        proposal=proposal,
+                        parent_id=parent_id,
+                        generation_depth=next_depth,
+                        source_hash=source_hash,
+                        reason="duplicate_source",
                         status="skipped",
+                        stage="generation",
+                        duplicate_of=duplicate_of,
                     )
                     self._record_event(
                         run_id,
                         event_type="duplicate",
                         stage="generation",
                         candidate_id=candidate_id,
-                        operator_name=result.operator_name,
+                        operator_name=proposal.operator_name,
                         detail={"reason": "duplicate_source", "source_hash": source_hash, "duplicate_of": duplicate_of},
                     )
+                    self._update_operator(
+                        proposal,
+                        success=False,
+                        reward=0.0,
+                        phase=phase,
+                        parent_generation=parent.generation_depth,
+                        duplicate=True,
+                    )
+                    parent.rejection_history.append("duplicate_source")
                     continue
+                state.measured += 1
                 seen_sources[source_hash] = candidate_id
-                remaining -= 1
-                if self.reporter:
-                    self.reporter.verbose("candidate", f"{candidate_id} proposed by {result.operator_name}")
+                screening = self.surrogate.screen_candidate(
+                    source=proposal.candidate_source,
+                    best_score=baseline_score,
+                    phase=phase,
+                    min_novelty=self.settings.search_min_novelty,
+                    min_training_points=self.settings.surrogate_min_training_points,
+                    feature_hints=proposal.feature_hints,
+                    context=parent_context,
+                )
+                if screening["decision"] == "reject":
+                    self._record_screened_candidate(
+                        run_id,
+                        candidate_id=candidate_id,
+                        proposal=proposal,
+                        parent_id=parent_id,
+                        generation_depth=next_depth,
+                        source_hash=source_hash,
+                        reason=str(screening["reason"]),
+                        status="rejected",
+                        stage="surrogate",
+                        screening=screening,
+                    )
+                    self._record_event(
+                        run_id,
+                        event_type="surrogate_rejected",
+                        stage="surrogate",
+                        candidate_id=candidate_id,
+                        operator_name=proposal.operator_name,
+                        detail={"reason": screening["reason"], "acquisition_score": screening["acquisition_score"]},
+                    )
+                    self._update_operator(
+                        proposal,
+                        success=False,
+                        reward=0.0,
+                        phase=phase,
+                        parent_generation=parent.generation_depth,
+                        duplicate=str(screening["reason"]) == "low_novelty",
+                    )
+                    parent.rejection_history.append(str(screening["reason"]))
+                    state.no_frontier_gain += 1
+                    continue
                 correctness_started = perf_counter()
                 valid, reasons = self.correctness.verify(
                     target,
                     bundle,
-                    candidate_source=result.candidate_source,
+                    candidate_source=proposal.candidate_source,
                     timeout_s=self.settings.workload_timeout_s,
                 )
                 correctness_duration = perf_counter() - correctness_started
                 if not valid:
-                    evaluation = CandidateEvaluation(
+                    evaluation = build_correctness_rejection_evaluation(
                         candidate_id=candidate_id,
-                        operator_name=result.operator_name,
-                        reasoning="; ".join(reasons) or result.reasoning,
-                        source=result.candidate_source,
-                        dependencies=result.dependencies,
-                        accepted=False,
-                        score=float("inf"),
-                        metadata={
-                            "rejected": "correctness",
-                            "reason": reasons,
-                            "stage": "correctness",
-                            "source_hash": source_hash,
-                            "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
-                            "dependency_policy_reason": (
-                                "candidate proposes additional dependencies and remains review-only"
-                                if result.dependencies
-                                else "candidate uses existing dependencies only"
-                            ),
-                        },
+                        proposal=proposal,
+                        parent_id=parent_id,
+                        generation_depth=next_depth,
+                        reasons=reasons,
+                        phase=phase,
+                        source_hash=source_hash,
+                        screening=screening,
                     )
                     self._record_candidate(run_id, evaluation, status="rejected")
                     self._record_event(
@@ -177,57 +305,30 @@ class OptimizationOrchestrator:
                         event_type="correctness_rejected",
                         stage="correctness",
                         candidate_id=candidate_id,
-                        operator_name=result.operator_name,
+                        operator_name=proposal.operator_name,
                         detail={"reason": "correctness", "details": reasons, "duration_s": correctness_duration},
                     )
-                    self._update_operator(result, success=False, reward=0.0)
-                    if self.reporter:
-                        self.reporter.verbose("correctness", f"{candidate_id} rejected: {evaluation.reasoning}")
-                    continue
-
-                surrogate_started = perf_counter()
-                if not self.surrogate.is_promising(result.candidate_source, baseline_score):
-                    surrogate_duration = perf_counter() - surrogate_started
-                    evaluation = CandidateEvaluation(
-                        candidate_id=candidate_id,
-                        operator_name=result.operator_name,
-                        reasoning=result.reasoning,
-                        source=result.candidate_source,
-                        dependencies=result.dependencies,
-                        accepted=False,
-                        score=float("inf"),
-                        metadata={
-                            "rejected": "surrogate",
-                            "stage": "surrogate",
-                            "source_hash": source_hash,
-                            "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
-                            "dependency_policy_reason": (
-                                "candidate proposes additional dependencies and remains review-only"
-                                if result.dependencies
-                                else "candidate uses existing dependencies only"
-                            ),
-                        },
+                    self._update_operator(
+                        proposal,
+                        success=False,
+                        reward=0.0,
+                        phase=phase,
+                        parent_generation=parent.generation_depth,
+                        correctness_failure=True,
                     )
-                    self._record_candidate(run_id, evaluation, status="rejected")
-                    self._record_event(
-                        run_id,
-                        event_type="surrogate_rejected",
-                        stage="surrogate",
-                        candidate_id=candidate_id,
-                        operator_name=result.operator_name,
-                        detail={"reason": "surrogate", "duration_s": surrogate_duration},
-                    )
-                    self._update_operator(result, success=False, reward=0.0)
-                    if self.reporter:
-                        self.reporter.verbose("surrogate", f"{candidate_id} rejected before measurement")
+                    parent.rejection_history.append("correctness")
+                    state.no_frontier_gain += 1
                     continue
-
+                fidelities = self._fidelities_for_decision(str(screening["decision"]), phase)
                 accepted = False
                 candidate_report = None
-                candidate_score = float("inf")
-                last_stage = "F0"
+                candidate_score = float(screening["predicted_score"])
+                dominance_summary: dict[str, Any] = {}
+                measurement_cost_s = 0.0
                 rejection_reason = ""
-                for fidelity in (Fidelity.F1, Fidelity.F2, Fidelity.F3):
+                frontier_state = FrontierState.MEASURED_PARTIAL
+                last_stage = "surrogate"
+                for fidelity in fidelities:
                     measure_started = perf_counter()
                     report = self.oracle.measure_bundle(
                         run_id=run_id,
@@ -235,100 +336,185 @@ class OptimizationOrchestrator:
                         bundle=bundle,
                         fidelity=fidelity,
                         candidate_id=candidate_id,
-                        candidate_source=result.candidate_source,
+                        candidate_source=proposal.candidate_source,
                     )
                     duration = perf_counter() - measure_started
+                    measurement_cost_s += duration
                     self.db.record_measurement(report, created_at=datetime.now(UTC).isoformat())
                     candidate_report = report
                     last_stage = fidelity.value
                     candidate_score = scalar_score(report.aggregate)
-                    self.surrogate.record(result.candidate_source, candidate_score)
+                    self.surrogate.record(
+                        proposal.candidate_source,
+                        candidate_score,
+                        feature_hints=proposal.feature_hints,
+                        context=parent_context,
+                    )
+                    dominance_summary = pareto.dominance_summary(report.aggregate)
                     self._record_event(
                         run_id,
                         event_type=f"measured_{fidelity.value.lower()}",
                         stage=fidelity.value,
                         candidate_id=candidate_id,
-                        operator_name=result.operator_name,
-                        detail={"duration_s": duration, "score": candidate_score},
+                        operator_name=proposal.operator_name,
+                        detail={
+                            "duration_s": duration,
+                            "score": candidate_score,
+                            "dominance": dominance_summary,
+                            "acquisition_score": screening["acquisition_score"],
+                        },
                     )
                     if fidelity is not Fidelity.F3:
-                        can_promote, rejection_reason = self._should_promote(baseline.aggregate, report.aggregate)
-                        if self.reporter:
-                            self.reporter.verbose(
-                                "promotion",
-                                f"{candidate_id} {fidelity.value} {'promoted' if can_promote else 'rejected'}",
-                            )
+                        can_promote, rejection_reason = self._should_promote(
+                            baseline.aggregate,
+                            report.aggregate,
+                            dominance_summary=dominance_summary,
+                            uncertainty=float(screening["uncertainty"]),
+                            phase=phase,
+                        )
                         if not can_promote:
                             self._record_event(
                                 run_id,
                                 event_type=f"rejected_{fidelity.value.lower()}",
                                 stage=fidelity.value,
                                 candidate_id=candidate_id,
-                                operator_name=result.operator_name,
+                                operator_name=proposal.operator_name,
                                 detail={"reason": rejection_reason},
                             )
+                            frontier_state = FrontierState.MEASURED_PARTIAL
                             break
                         continue
-                    accepted, rejection_reason = self._should_accept_final(baseline.aggregate, report.aggregate)
-                    if self.reporter:
-                        self.reporter.verbose(
-                            "promotion",
-                            f"{candidate_id} F3 {'accepted' if accepted else 'rejected'}",
+                    accepted, rejection_reason = self._should_accept_final(
+                        baseline.aggregate,
+                        report.aggregate,
+                        dominance_summary=dominance_summary,
+                    )
+                    if accepted:
+                        added = pareto.add(
+                            ParetoPoint(
+                                candidate_id=candidate_id,
+                                metrics=report.aggregate,
+                                parent_id=parent_id,
+                                generation_depth=next_depth,
+                                operator_name=proposal.operator_name,
+                                active=True,
+                            )
+                        )
+                        dominance_summary = {**dominance_summary, **added}
+                        if not added["accepted"]:
+                            accepted = False
+                            rejection_reason = "frontier_dominated"
+                            frontier_state = FrontierState.FRONTIER_DOMINATED
+                        else:
+                            frontier_state = FrontierState.FRONTIER_ACTIVE
+                            parent_snapshots[candidate_id] = _ParentSnapshot(
+                                candidate_id=candidate_id,
+                                source=proposal.candidate_source,
+                                operator_name=proposal.operator_name,
+                                generation_depth=next_depth,
+                            )
+                            for dominated_id in added["dominated_ids"]:
+                                self._record_event(
+                                    run_id,
+                                    event_type="frontier_dominated",
+                                    stage="frontier",
+                                    candidate_id=dominated_id,
+                                    operator_name=proposal.operator_name,
+                                    detail={"by": candidate_id},
+                                )
+                    else:
+                        frontier_state = (
+                            FrontierState.FRONTIER_DOMINATED
+                            if dominance_summary.get("dominated")
+                            else FrontierState.MEASURED_PARTIAL
                         )
                     self._record_event(
                         run_id,
                         event_type="accepted" if accepted else "rejected_f3",
                         stage=fidelity.value,
                         candidate_id=candidate_id,
-                        operator_name=result.operator_name,
+                        operator_name=proposal.operator_name,
                         detail={"reason": rejection_reason or ("accepted" if accepted else "threshold")},
                     )
                     break
-
                 evaluation = CandidateEvaluation(
                     candidate_id=candidate_id,
-                    operator_name=result.operator_name,
-                    reasoning=result.reasoning,
-                    source=result.candidate_source,
-                    dependencies=result.dependencies,
+                    operator_name=proposal.operator_name,
+                    reasoning=proposal.reasoning,
+                    source=proposal.candidate_source,
+                    dependencies=proposal.dependencies,
+                    parent_id=parent_id,
+                    generation_depth=next_depth,
+                    frontier_state=frontier_state,
                     accepted=accepted,
                     score=candidate_score,
+                    acquisition_score=float(screening["acquisition_score"]),
+                    dominance_summary=dominance_summary,
                     report=candidate_report,
-                    metadata={
-                        "improvement": improvement_ratio(baseline.aggregate, candidate_report.aggregate) if candidate_report else {},
-                        "improvement_summary": (
-                            improvement_summary(baseline.aggregate, candidate_report.aggregate)
-                            if candidate_report
-                            else {}
-                        ),
-                        "explanation_summary": "",
-                        "stage": last_stage,
-                        "rejected": None if accepted else rejection_reason or "threshold",
-                        "source_hash": source_hash,
-                        "dependency_policy_state": "review_required" if result.dependencies else "no_dependencies",
-                        "dependency_policy_reason": (
-                            "candidate proposes additional dependencies and remains review-only"
-                            if result.dependencies
-                            else "candidate uses existing dependencies only"
-                        ),
-                    },
+                    metadata=build_candidate_metadata(
+                        baseline_aggregate=baseline.aggregate,
+                        candidate_report=candidate_report,
+                        stage=last_stage,
+                        phase=phase,
+                        screening=screening,
+                        measurement_cost_s=measurement_cost_s,
+                        accepted=accepted,
+                        rejection_reason=rejection_reason,
+                        source_hash=source_hash,
+                        parent_id=parent_id,
+                        generation_depth=next_depth,
+                        frontier_state=frontier_state,
+                        proposal=proposal,
+                    ),
                 )
                 if candidate_report:
                     evaluation.metadata["explanation_summary"] = synthesize_explanation(baseline, evaluation)
                 self._record_candidate(run_id, evaluation, status="accepted" if accepted else "rejected")
-                self._update_operator(result, success=accepted, reward=max(0.0, baseline_score - candidate_score))
+                self._update_operator(
+                    proposal,
+                    success=accepted,
+                    reward=max(0.0, baseline_score - candidate_score),
+                    phase=phase,
+                    parent_generation=parent.generation_depth,
+                    frontier_contribution=accepted and frontier_state is FrontierState.FRONTIER_ACTIVE,
+                )
                 if accepted:
-                    assert candidate_report is not None
-                    pareto.add(ParetoPoint(candidate_id=candidate_id, metrics=candidate_report.aggregate))
-                    if best_candidate is None or candidate_score < best_candidate.score:
-                        best_candidate = evaluation
+                    accepted_evaluations[candidate_id] = evaluation
+                    state.no_frontier_gain = 0
+                else:
+                    parent.rejection_history.append(rejection_reason or "threshold")
+                    state.no_frontier_gain += 1
+                if state.no_frontier_gain >= self.settings.search_convergence_patience:
+                    self._record_event(
+                        run_id,
+                        event_type="converged",
+                        stage="search",
+                        detail={
+                            "reason": "frontier_stagnation",
+                            "patience": self.settings.search_convergence_patience,
+                        },
+                    )
+                    state.measured = state.total_budget
+                    break
+            if pareto.expansion_count(parent_id) >= state.max_parent_expansions:
+                pareto.mark_exhausted(parent_id)
+                self._record_event(
+                    run_id,
+                    event_type="frontier_exhausted",
+                    stage="frontier",
+                    candidate_id=parent_id,
+                    detail={"expansions": pareto.expansion_count(parent_id)},
+                )
+
+        best_point = pareto.best(exclude_ids={"baseline"})
+        best_candidate = accepted_evaluations.get(best_point.candidate_id) if best_point else None
         return baseline, pareto, best_candidate
 
     def _record_candidate(self, run_id: str, evaluation: CandidateEvaluation, *, status: str) -> None:
         self.db.record_candidate(
             candidate_id=evaluation.candidate_id,
             run_id=run_id,
-            parent_id="baseline",
+            parent_id=evaluation.parent_id,
             operator_name=evaluation.operator_name,
             reasoning=evaluation.reasoning,
             dependencies=evaluation.dependencies,
@@ -358,28 +544,135 @@ class OptimizationOrchestrator:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-    def _update_operator(self, result, *, success: bool, reward: float) -> None:
-        self.registry.update(result, success=success, reward=reward)
+    def _update_operator(
+        self,
+        result: TransformationResult,
+        *,
+        success: bool,
+        reward: float,
+        phase: SearchPhase,
+        parent_generation: int,
+        duplicate: bool = False,
+        correctness_failure: bool = False,
+        frontier_contribution: bool = False,
+    ) -> None:
+        self.registry.update(
+            result,
+            success=success,
+            reward=reward,
+            phase=phase,
+            parent_generation=parent_generation,
+            duplicate=duplicate,
+            correctness_failure=correctness_failure,
+            frontier_contribution=frontier_contribution,
+        )
         self.db.bump_operator(result.operator_name, success=success, reward=reward)
 
-    def _should_promote(self, baseline, candidate) -> tuple[bool, str]:
+    def _should_promote(
+        self,
+        baseline,
+        candidate,
+        *,
+        dominance_summary: dict[str, Any],
+        uncertainty: float,
+        phase: SearchPhase,
+    ) -> tuple[bool, str]:
         if candidate.success_rate < 1.0:
             return False, "success_rate"
-        score_delta = (scalar_score(baseline) - scalar_score(candidate)) / max(scalar_score(baseline), 1e-9)
-        if score_delta < self.settings.promotion_scalar_min:
-            return False, "promotion_scalar_min"
         memory_delta = improvement_ratio(baseline, candidate)["memory"]
         if memory_delta < -self.settings.candidate_memory_regression_limit:
             return False, "memory_regression"
-        return True, ""
+        if not dominance_summary.get("dominated"):
+            return True, ""
+        uncertainty_factor = {
+            SearchPhase.EXPLORATION: 1.0,
+            SearchPhase.EXPLOITATION: 0.7,
+            SearchPhase.CONFIRMATION: 0.4,
+        }[phase]
+        optimistic_score = scalar_score(candidate) - (uncertainty * uncertainty_factor)
+        if optimistic_score <= scalar_score(baseline):
+            return True, ""
+        return False, "dominated_low_uncertainty"
 
-    def _should_accept_final(self, baseline, candidate) -> tuple[bool, str]:
+    def _should_accept_final(self, baseline, candidate, *, dominance_summary: dict[str, Any]) -> tuple[bool, str]:
         if candidate.success_rate < 1.0:
             return False, "success_rate"
         improvements = improvement_ratio(baseline, candidate)
         memory_delta = improvements["memory"]
         if memory_delta < -self.settings.candidate_memory_regression_limit:
             return False, "memory_regression"
-        if max(improvements["energy"], improvements["latency"]) < self.settings.final_improvement_min:
-            return False, "final_improvement_min"
+        if dominance_summary.get("dominated"):
+            return False, "frontier_dominated"
         return True, ""
+
+    def _phase_for_index(self, index: int, total_budget: int) -> SearchPhase:
+        explore = max(0.0, self.settings.search_exploration_fraction)
+        exploit = max(0.0, self.settings.search_exploitation_fraction)
+        confirm = max(0.0, self.settings.search_confirmation_fraction)
+        total = max(explore + exploit + confirm, 1e-9)
+        exploration_cutoff = int(total_budget * (explore / total))
+        exploitation_cutoff = exploration_cutoff + int(total_budget * (exploit / total))
+        if index < exploration_cutoff:
+            return SearchPhase.EXPLORATION
+        if index < exploitation_cutoff:
+            return SearchPhase.EXPLOITATION
+        return SearchPhase.CONFIRMATION
+
+    def _fidelities_for_decision(self, decision: str, phase: SearchPhase) -> tuple[Fidelity, ...]:
+        if decision == "measure_partial":
+            if phase is SearchPhase.EXPLORATION:
+                return (Fidelity.F1,)
+            return (Fidelity.F1, Fidelity.F2)
+        return (Fidelity.F1, Fidelity.F2, Fidelity.F3)
+
+    def _record_screened_candidate(
+        self,
+        run_id: str,
+        *,
+        candidate_id: str,
+        proposal: TransformationResult,
+        parent_id: str,
+        generation_depth: int,
+        source_hash: str,
+        reason: str,
+        status: str,
+        stage: str,
+        duplicate_of: str | None = None,
+        screening: dict[str, Any] | None = None,
+    ) -> None:
+        evaluation = CandidateEvaluation(
+            candidate_id=candidate_id,
+            operator_name=proposal.operator_name,
+            reasoning=proposal.reasoning,
+            source=proposal.candidate_source,
+            dependencies=proposal.dependencies,
+            parent_id=parent_id,
+            generation_depth=generation_depth,
+            frontier_state=FrontierState.SCREENED_OUT,
+            accepted=False,
+            score=float("inf"),
+            acquisition_score=float(screening["acquisition_score"]) if screening else 0.0,
+            dominance_summary={},
+            metadata={
+                "rejected": reason,
+                "stage": stage,
+                "source_hash": source_hash,
+                "parent_id": parent_id,
+                "generation_depth": generation_depth,
+                "frontier_state": FrontierState.SCREENED_OUT.value,
+                "duplicate_of": duplicate_of,
+                "surrogate": screening or {},
+                "operator_family": proposal.operator_family,
+                "proposal_rank": proposal.proposal_rank,
+                **dependency_policy_metadata(proposal.dependencies),
+            },
+        )
+        self._record_candidate(run_id, evaluation, status=status)
+
+    def _warm_start_surrogate(self) -> None:
+        limit = max(0, self.settings.surrogate_warm_start_limit)
+        if limit == 0:
+            return
+        observations = self.db.get_recent_candidate_observations(limit=limit)
+        for source, score in reversed(observations):
+            self.surrogate.record(source, score)

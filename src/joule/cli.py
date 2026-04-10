@@ -9,9 +9,10 @@ from typing import Any
 import typer
 from rich.console import Console
 
+from joule.cli_helpers.flow import ExecutionContext, create_run_record, resolve_target_and_bundle
 from joule.config import JouleSettings, load_settings
 from joule.dashboard.app import render_dashboard_html, serve_dashboard
-from joule.discovery.resolver import discover_targets, resolve_target, resolve_workload_bundle
+from joule.discovery.resolver import discover_targets
 from joule.evaluators.oracle import PerformanceOracle
 from joule.integrations.git import (
     apply_patch_to_target,
@@ -19,10 +20,9 @@ from joule.integrations.git import (
     create_branch,
     file_sha256,
     preview_patch,
-    source_sha256,
     stage_files,
 )
-from joule.models import RunRecord, RunType
+from joule.models import RunType
 from joule.orchestrator.explainer import synthesize_explanation
 from joule.orchestrator.mfbo import OptimizationOrchestrator
 from joule.utils.analysis import (
@@ -34,7 +34,7 @@ from joule.utils.analysis import (
     json_pretty,
     summarize_hotspots,
 )
-from joule.utils.artifacts import ensure_artifacts, run_directory, seed_random, write_artifact, write_lockfile
+from joule.utils.artifacts import ensure_artifacts, seed_random, write_artifact
 from joule.utils.db import JouleDB
 from joule.utils.reporting import measurement_to_json, workload_provenance_records
 from joule.utils.terminal import TerminalReporter
@@ -58,18 +58,6 @@ def _resolve_verbosity(settings: JouleSettings, *, verbose: bool, quiet: bool) -
     if verbose:
         return "verbose"
     return settings.terminal_verbosity
-
-
-def _run_metadata(target, settings: JouleSettings, bundle, backend_name: str) -> dict:
-    return {
-        "target_qualname": target.qualname,
-        "target_file_hash": file_sha256(target.file_path),
-        "baseline_source_hash": source_sha256(target.source),
-        "default_backend": settings.default_backend,
-        "selected_backend": backend_name,
-        "config_snapshot": settings.to_record(),
-        "workload_provenance": workload_provenance_records(bundle),
-    }
 
 
 def _write_dashboard_snapshot(db: JouleDB, run_dir: Path) -> Path:
@@ -144,6 +132,54 @@ def _artifact_paths_payload(run_dir: Path, names: list[str]) -> dict[str, str]:
     return {name: str(run_dir / name) for name in names if (run_dir / name).exists()}
 
 
+def _build_execution_context(
+    *,
+    path: Path,
+    function: str,
+    tests: list[str] | None,
+    properties: list[str] | None,
+    harness: str | None,
+    backend: str | None,
+    run_type: RunType,
+    verbose: bool,
+    quiet: bool,
+) -> ExecutionContext:
+    settings, db, reporter = _bootstrap(path, verbose=verbose, quiet=quiet)
+    target, bundle = resolve_target_and_bundle(
+        path=path,
+        function=function,
+        settings=settings,
+        reporter=reporter,
+        tests=tests,
+        properties=properties,
+        harness=harness,
+    )
+    chosen_backend = backend or settings.default_backend
+    record, run_id, run_dir = create_run_record(
+        settings=settings,
+        db=db,
+        run_type=run_type,
+        target=target,
+        bundle=bundle,
+        chosen_backend=chosen_backend,
+    )
+    oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
+    orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
+    return ExecutionContext(
+        settings=settings,
+        db=db,
+        reporter=reporter,
+        target=target,
+        bundle=bundle,
+        chosen_backend=chosen_backend,
+        run_id=run_id,
+        run_dir=run_dir,
+        record=record,
+        oracle=oracle,
+        orchestrator=orchestrator,
+    )
+
+
 @app.command()
 def doctor(
     path: Path,
@@ -193,68 +229,49 @@ def baseline(
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
-    settings, db, reporter = _bootstrap(path, verbose=verbose, quiet=quiet)
-    reporter.info("setup", f"Project root: {settings.project_root}")
-    target = resolve_target(path, function, project_root=settings.project_root)
-    reporter.info("target", f"Resolved {target.qualname} at {target.file_path}")
-    bundle = resolve_workload_bundle(settings, target, tests=tests, properties=properties, harness=harness)
-    reporter.info("workloads", f"Using {len(bundle.workloads)} workload(s)")
-    chosen_backend = backend or settings.default_backend
-    run_id = settings.new_run_id()
-    run_dir = run_directory(settings, run_id)
-    record = RunRecord(
-        run_id=run_id,
+    context = _build_execution_context(
+        path=path,
+        function=function,
+        tests=tests,
+        properties=properties,
+        harness=harness,
+        backend=backend,
         run_type=RunType.BASELINE,
-        target=target,
-        bundle=bundle,
-        status="running",
-        created_at=datetime.now(UTC).isoformat(),
-        metadata=_run_metadata(target, settings, bundle, chosen_backend),
+        verbose=verbose,
+        quiet=quiet,
     )
-    lock_path = write_lockfile(
-        settings,
-        run_id=run_id,
-        target=target,
-        backend=chosen_backend,
-        target_file_hash=record.metadata["target_file_hash"],
-        baseline_source_hash=record.metadata["baseline_source_hash"],
-    )
-    record.metadata["lock_path"] = str(lock_path)
-    db.create_run(record)
-    oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
-    orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
-    report = orchestrator.baseline(run_id, target, bundle, repetitions=repetitions)
+    report = context.orchestrator.baseline(context.run_id, context.target, context.bundle, repetitions=repetitions)
     hotspot_summary = _collect_hotspot_analysis(
-        oracle=oracle,
-        db=db,
-        run_id=run_id,
-        target=target,
-        bundle=bundle,
-        run_dir=run_dir,
-        reporter=reporter,
+        oracle=context.oracle,
+        db=context.db,
+        run_id=context.run_id,
+        target=context.target,
+        bundle=context.bundle,
+        run_dir=context.run_dir,
+        reporter=context.reporter,
         enabled=hotspots,
         limit=hotspot_limit,
     )
     baseline_analysis = build_baseline_analysis(
-        run_id=run_id,
-        target_qualname=target.qualname,
+        run_id=context.run_id,
+        target_qualname=context.target.qualname,
         report=report,
         hotspot_summary=hotspot_summary,
     )
-    write_artifact(run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
-    metadata = {**record.metadata, "aggregate": report.aggregate.to_record(), "hotspots_enabled": hotspots}
-    db.update_run_status(run_id, "completed", metadata=metadata)
-    write_artifact(run_dir, "baseline.json", measurement_to_json(report))
-    _write_dashboard_snapshot(db, run_dir)
+    write_artifact(context.run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
+    metadata = {**context.record.metadata, "aggregate": report.aggregate.to_record(), "hotspots_enabled": hotspots}
+    context.db.update_run_status(context.run_id, "completed", metadata=metadata)
+    write_artifact(context.run_dir, "baseline.json", measurement_to_json(report))
+    _write_dashboard_snapshot(context.db, context.run_dir)
     chosen_output = _resolve_output(output=output, json_output=json_output)
     if json_output:
         console.print(measurement_to_json(report))
     elif chosen_output == "json":
         console.print(json_pretty(baseline_analysis))
     else:
-        console.print(human_baseline_summary(report, bundle.notes, hotspot_summary))
+        console.print(human_baseline_summary(report, context.bundle.notes, hotspot_summary))
     if not no_dashboard:
-        reporter.info("dashboard", f"Snapshot written to {run_dir / 'dashboard.html'}")
+        context.reporter.info("dashboard", f"Snapshot written to {context.run_dir / 'dashboard.html'}")
 
 
 @app.command()
@@ -272,67 +289,54 @@ def run(
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
-    settings, db, reporter = _bootstrap(path, verbose=verbose, quiet=quiet)
-    reporter.info("setup", f"Project root: {settings.project_root}")
-    target = resolve_target(path, function, project_root=settings.project_root)
-    reporter.info("target", f"Resolved {target.qualname} at {target.file_path}")
-    bundle = resolve_workload_bundle(settings, target, tests=tests, properties=properties, harness=harness)
-    reporter.info("workloads", f"Using {len(bundle.workloads)} workload(s)")
-    chosen_backend = backend or settings.default_backend
-    run_id = settings.new_run_id()
-    run_dir = run_directory(settings, run_id)
-    record = RunRecord(
-        run_id=run_id,
+    context = _build_execution_context(
+        path=path,
+        function=function,
+        tests=tests,
+        properties=properties,
+        harness=harness,
+        backend=backend,
         run_type=RunType.OPTIMIZE,
-        target=target,
-        bundle=bundle,
-        status="running",
-        created_at=datetime.now(UTC).isoformat(),
-        metadata=_run_metadata(target, settings, bundle, chosen_backend),
+        verbose=verbose,
+        quiet=quiet,
     )
-    lock_path = write_lockfile(
-        settings,
-        run_id=run_id,
-        target=target,
-        backend=chosen_backend,
-        target_file_hash=record.metadata["target_file_hash"],
-        baseline_source_hash=record.metadata["baseline_source_hash"],
+    baseline_report, pareto, best = context.orchestrator.optimize(
+        context.run_id,
+        context.target,
+        context.bundle,
+        budget=budget,
+        analysis=analysis,
     )
-    record.metadata["lock_path"] = str(lock_path)
-    db.create_run(record)
-    oracle = PerformanceOracle(settings, backend_name=backend, reporter=reporter)
-    orchestrator = OptimizationOrchestrator(settings, db, oracle, reporter=reporter)
-    baseline_report, pareto, best = orchestrator.optimize(run_id, target, bundle, budget=budget, analysis=analysis)
     hotspot_summary = _collect_hotspot_analysis(
-        oracle=oracle,
-        db=db,
-        run_id=run_id,
-        target=target,
-        bundle=bundle,
-        run_dir=run_dir,
-        reporter=reporter,
+        oracle=context.oracle,
+        db=context.db,
+        run_id=context.run_id,
+        target=context.target,
+        bundle=context.bundle,
+        run_dir=context.run_dir,
+        reporter=context.reporter,
         enabled=analysis,
         limit=12,
     )
     baseline_analysis = build_baseline_analysis(
-        run_id=run_id,
-        target_qualname=target.qualname,
+        run_id=context.run_id,
+        target_qualname=context.target.qualname,
         report=baseline_report,
         hotspot_summary=hotspot_summary,
     )
-    write_artifact(run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
+    write_artifact(context.run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
     metadata = {
-        **record.metadata,
+        **context.record.metadata,
         "aggregate": baseline_report.aggregate.to_record(),
         "pareto_size": len(pareto.points()),
         "analysis_enabled": analysis,
     }
     best_candidate_payload = None
     if best and best.report:
-        diff = preview_patch(target, best.source)
-        db.record_artifact(run_id, "best.patch", "diff", diff)
-        write_artifact(run_dir, "best.patch", diff)
-        write_artifact(run_dir, "best_candidate.py", best.source)
+        diff = preview_patch(context.target, best.source)
+        context.db.record_artifact(context.run_id, "best.patch", "diff", diff)
+        write_artifact(context.run_dir, "best.patch", diff)
+        write_artifact(context.run_dir, "best_candidate.py", best.source)
         best_candidate_payload = {
             "candidate_id": best.candidate_id,
             "operator_name": best.operator_name,
@@ -344,30 +348,30 @@ def run(
             "explanation_summary": best.metadata.get("explanation_summary") or synthesize_explanation(baseline_report, best),
         }
         metadata["best_candidate"] = best_candidate_payload
-        metadata["patch_path"] = str(run_dir / "best.patch")
-        reporter.info("result", f"Best candidate {best.candidate_id} recorded at {run_dir / 'best.patch'}")
+        metadata["patch_path"] = str(context.run_dir / "best.patch")
+        context.reporter.info("result", f"Best candidate {best.candidate_id} recorded at {context.run_dir / 'best.patch'}")
     else:
-        reporter.info("result", "No candidate cleared the promotion thresholds")
-    db.update_run_status(run_id, "completed", metadata=metadata)
-    candidates = db.get_candidates(run_id)
+        context.reporter.info("result", "No candidate cleared the promotion thresholds")
+    context.db.update_run_status(context.run_id, "completed", metadata=metadata)
+    candidates = context.db.get_candidates(context.run_id)
     if analysis:
-        _write_candidate_artifacts(run_dir, candidates)
-    search_events = db.get_search_events(run_id)
+        _write_candidate_artifacts(context.run_dir, candidates)
+    search_events = context.db.get_search_events(context.run_id)
     optimization_analysis = build_optimization_analysis(
-        run_id=run_id,
-        target_qualname=target.qualname,
+        run_id=context.run_id,
+        target_qualname=context.target.qualname,
         baseline=baseline_report,
         candidates=candidates,
         events=search_events,
         hotspot_summary=hotspot_summary,
     )
-    write_artifact(run_dir, "optimization_analysis.json", json_pretty(optimization_analysis))
+    write_artifact(context.run_dir, "optimization_analysis.json", json_pretty(optimization_analysis))
     summary = {
-        "run_id": run_id,
+        "run_id": context.run_id,
         "baseline": baseline_report.to_record(),
         "best_candidate": best_candidate_payload,
         "pareto": [point.candidate_id for point in pareto.points()],
-        "workload_provenance": workload_provenance_records(bundle),
+        "workload_provenance": workload_provenance_records(context.bundle),
         "analysis": optimization_analysis,
         "candidates": [
             {
@@ -383,7 +387,7 @@ def run(
         ],
     }
     summary["artifact_paths"] = _artifact_paths_payload(
-        run_dir,
+        context.run_dir,
         [
             "run_summary.json",
             "optimization_analysis.json",
@@ -392,13 +396,13 @@ def run(
             "dashboard.html",
         ],
     )
-    _write_run_summary(db, run_dir, "run_summary.json", summary)
+    _write_run_summary(context.db, context.run_dir, "run_summary.json", summary)
     if output == "json":
         console.print(json_pretty(summary))
     else:
         console.print(human_run_summary(summary))
     if not no_dashboard:
-        reporter.info("dashboard", f"Snapshot written to {run_dir / 'dashboard.html'}")
+        context.reporter.info("dashboard", f"Snapshot written to {context.run_dir / 'dashboard.html'}")
 
 
 @app.command()

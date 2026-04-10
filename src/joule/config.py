@@ -22,6 +22,13 @@ class BackendSettings:
 
 
 @dataclass(slots=True)
+class ParetoWeights:
+    energy: float = 0.5
+    latency: float = 0.3
+    memory: float = 0.2
+
+
+@dataclass(slots=True)
 class JouleSettings:
     project_root: Path
     seed: int = 1337
@@ -47,7 +54,17 @@ class JouleSettings:
     inner_repetitions_max: int = 10_000
     adaptive_min_window_s: float = 0.05
     adaptive_probe_samples: int = 1
+    search_max_generations: int = 3
+    search_branching_factor: int = 2
+    search_exploration_fraction: float = 0.45
+    search_exploitation_fraction: float = 0.35
+    search_confirmation_fraction: float = 0.20
+    search_convergence_patience: int = 4
+    search_min_novelty: float = 0.12
+    surrogate_warm_start_limit: int = 50
+    surrogate_min_training_points: int = 3
     backends: BackendSettings = field(default_factory=BackendSettings)
+    pareto_weights: ParetoWeights = field(default_factory=ParetoWeights)
     fidelity: FidelitySettings = field(default_factory=FidelitySettings)
 
     @property
@@ -128,7 +145,21 @@ def load_settings(path: str | Path) -> JouleSettings:
         inner_repetitions_max=int(payload.get("inner_repetitions_max", 10_000)),
         adaptive_min_window_s=float(payload.get("adaptive_min_window_s", 0.05)),
         adaptive_probe_samples=int(payload.get("adaptive_probe_samples", 1)),
+        search_max_generations=int(payload.get("search_max_generations", 3)),
+        search_branching_factor=int(payload.get("search_branching_factor", 2)),
+        search_exploration_fraction=float(payload.get("search_exploration_fraction", 0.45)),
+        search_exploitation_fraction=float(payload.get("search_exploitation_fraction", 0.35)),
+        search_confirmation_fraction=float(payload.get("search_confirmation_fraction", 0.20)),
+        search_convergence_patience=int(payload.get("search_convergence_patience", 4)),
+        search_min_novelty=float(payload.get("search_min_novelty", 0.12)),
+        surrogate_warm_start_limit=int(payload.get("surrogate_warm_start_limit", 50)),
+        surrogate_min_training_points=int(payload.get("surrogate_min_training_points", 3)),
         backends=BackendSettings(options=backend_payload if isinstance(backend_payload, dict) else {}),
+        pareto_weights=ParetoWeights(
+            energy=float(payload.get("pareto_weight_energy", 0.5)),
+            latency=float(payload.get("pareto_weight_latency", 0.3)),
+            memory=float(payload.get("pareto_weight_memory", 0.2)),
+        ),
         fidelity=FidelitySettings(
             f1_repetitions=int(fidelity_payload.get("f1_repetitions", 3)),
             f2_repetitions=int(fidelity_payload.get("f2_repetitions", 7)),

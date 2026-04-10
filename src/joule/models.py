@@ -25,6 +25,20 @@ class Fidelity(str, Enum):
     F3 = "F3"
 
 
+class FrontierState(str, Enum):
+    FRONTIER_ACTIVE = "frontier_active"
+    FRONTIER_DOMINATED = "frontier_dominated"
+    FRONTIER_EXHAUSTED = "frontier_exhausted"
+    SCREENED_OUT = "screened_out"
+    MEASURED_PARTIAL = "measured_partial"
+
+
+class SearchPhase(str, Enum):
+    EXPLORATION = "exploration"
+    EXPLOITATION = "exploitation"
+    CONFIRMATION = "confirmation"
+
+
 @dataclass(slots=True)
 class TargetSpec:
     project_root: Path
@@ -186,11 +200,30 @@ class CalibrationResult:
 
 
 @dataclass(slots=True)
+class SearchContext:
+    parent_id: str
+    parent_source: str
+    parent_operator_name: str
+    generation_depth: int
+    phase: SearchPhase
+    rejection_history: list[str] = field(default_factory=list)
+    search_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_record(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["phase"] = self.phase.value
+        return payload
+
+
+@dataclass(slots=True)
 class TransformationResult:
     operator_name: str
     candidate_source: str
     reasoning: str
     dependencies: list[str] = field(default_factory=list)
+    operator_family: str = "deterministic"
+    proposal_rank: int = 0
+    feature_hints: dict[str, float] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -201,8 +234,13 @@ class CandidateEvaluation:
     reasoning: str
     source: str
     dependencies: list[str]
+    parent_id: str
+    generation_depth: int
+    frontier_state: FrontierState
     accepted: bool
     score: float
+    acquisition_score: float = 0.0
+    dominance_summary: dict[str, Any] = field(default_factory=dict)
     report: MeasurementReport | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
