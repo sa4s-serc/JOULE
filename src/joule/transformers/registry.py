@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib.metadata import entry_points
+import logging
 import math
 from typing import Any
 
@@ -8,6 +9,9 @@ from joule.models import SearchContext, SearchPhase, TargetSpec, TransformationR
 from joule.transformers.base import BaseOperator
 from joule.transformers.deterministic import default_deterministic_operators
 from joule.transformers.generative import default_llm_operators, escape_llm_operators
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class OperatorRegistry:
@@ -212,7 +216,8 @@ class OperatorRegistry:
             try:
                 loaded = point.load()
                 plugin_operators = self._coerce_plugin_operators(point.name, loaded, llm_model=llm_model)
-            except Exception:
+            except Exception as exc:
+                LOGGER.warning("Failed to load operator entry point %s: %s", point.name, exc)
                 continue
             for operator in plugin_operators:
                 if operator.name in known_names:

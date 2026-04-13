@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 from typing import Any
 
+from joule.metadata import parse_candidate_metadata
 from joule.models import MeasurementReport
 from joule.utils.db import CandidateRecord
 from joule.utils.metrics import improvement_ratio
@@ -81,27 +82,26 @@ def summarize_operator_performance(candidates: list[CandidateRecord], baseline_a
             entry["skipped"] += 1
         else:
             entry["rejected"] += 1
-        stage = item.get("metadata", {}).get("stage")
+        metadata = parse_candidate_metadata(item.get("metadata", {}))
+        stage = metadata.stage
         if stage:
             entry["stage_reached"][str(stage)] += 1
-        reason = item.get("metadata", {}).get("rejected")
+        reason = metadata.rejected
         if reason:
             entry["rejection_reasons"][str(reason)] += 1
-        tier = item.get("metadata", {}).get("operator_tier")
+        tier = metadata.operator_tier
         if tier:
             entry["tier_counts"][str(tier)] += 1
-        tier_descriptor = item.get("metadata", {}).get("operator_tier_descriptor")
+        tier_descriptor = metadata.operator_tier_descriptor
         if tier_descriptor:
             entry["tier_descriptors"][str(tier_descriptor)] += 1
-        improvement = item.get("metadata", {}).get("improvement_summary")
-        if isinstance(improvement, dict):
-            entry["improvements"].append(
-                {
-                    "energy": float(improvement.get("energy", 0.0)),
-                    "latency": float(improvement.get("latency", 0.0)),
-                    "memory": float(improvement.get("memory", 0.0)),
-                }
-            )
+        entry["improvements"].append(
+            {
+                "energy": metadata.improvement_summary.energy,
+                "latency": metadata.improvement_summary.latency,
+                "memory": metadata.improvement_summary.memory,
+            }
+        )
     results = []
     for entry in stats.values():
         improvements = entry.pop("improvements")
@@ -378,7 +378,7 @@ def summarize_inspect_payload(
     dependency_review_required = sum(
         1
         for item in candidates
-        if item.get("metadata", {}).get("dependency_policy_state") == "review_required"
+        if parse_candidate_metadata(item.get("metadata", {})).dependency_policy_state == "review_required"
     )
     search_summary = summarize_search_events(search_events)
     return {
@@ -402,19 +402,19 @@ def summarize_inspect_payload(
 def human_candidate_detail_summary(candidate_payload: dict) -> str:
     candidate = candidate_payload["candidate"]
     measurements = candidate_payload.get("measurements", [])
-    metadata = candidate.get("metadata", {})
+    metadata = parse_candidate_metadata(candidate.get("metadata", {}))
     lines = [
         f"Candidate: {candidate['candidate_id']}",
         f"Status: {candidate['status']} via {candidate['operator_name']}",
         f"Parent: {candidate.get('parent_id')}",
-        f"Stage: {metadata.get('stage', 'unknown')} phase={metadata.get('phase', 'unknown')}",
-        f"Dependency policy: {metadata.get('dependency_policy_state', 'unknown')}",
+        f"Stage: {metadata.stage or 'unknown'} phase={metadata.phase or 'unknown'}",
+        f"Dependency policy: {metadata.dependency_policy_state}",
         f"Measurements: {len(measurements)} report(s)",
     ]
-    if metadata.get("improvement_summary", {}).get("summary"):
-        lines.append(f"Improvement: {metadata['improvement_summary']['summary']}")
-    if metadata.get("rejected"):
-        lines.append(f"Rejected: {metadata['rejected']}")
+    if metadata.improvement_summary.summary:
+        lines.append(f"Improvement: {metadata.improvement_summary.summary}")
+    if metadata.rejected:
+        lines.append(f"Rejected: {metadata.rejected}")
     return "\n".join(lines)
 
 

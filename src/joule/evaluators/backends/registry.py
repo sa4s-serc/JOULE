@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib.metadata import entry_points
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
@@ -11,6 +12,7 @@ from joule.evaluators.backends.rapl import RaplEnergyBackend
 
 
 BackendFactory = Callable[[JouleSettings], EnergyBackend]
+LOGGER = logging.getLogger(__name__)
 
 
 class BackendRegistry:
@@ -60,7 +62,8 @@ class BackendRegistry:
                 loaded = point.load()
                 factory = self._coerce_factory(point.name, loaded)
                 self.register(point.name, factory)
-            except Exception:
+            except Exception as exc:
+                LOGGER.warning("Failed to load backend entry point %s: %s", point.name, exc)
                 continue
 
     def _coerce_factory(self, name: str, loaded: Any) -> BackendFactory:

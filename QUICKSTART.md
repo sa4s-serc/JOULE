@@ -1,28 +1,33 @@
 # Quickstart
 
-This quickstart gets JOULE running locally and walks through one complete example flow.
+This guide gets JOULE running locally and walks through a complete baseline-to-run-to-inspect workflow.
 
-## 0. Choose Your Intent
+## Flow
 
-- New user: follow sections 1 through 4, then run section 6 artifact checks.
-- CI or automation: run sections 1, 2, 5, and 7 with `--output json --no-dashboard`.
-- Advanced exploration: include `--analysis` and inspect `events.jsonl` plus candidate packs.
+```mermaid
+flowchart LR
+    A[Install] --> B[Smoke Example]
+    B --> C[Baseline]
+    C --> D[Optimize Run]
+    D --> E[Inspect]
+    E --> F[Dashboard or Apply]
+```
 
-## 1. Install Dev Dependencies
+## 1. Install
 
 ```bash
 make install-dev
 ```
 
-This creates `.venv` and installs the project in editable mode with test tooling.
+This creates `.venv` and installs editable development dependencies.
 
-## 2. Run the Built-In Smoke Example
+## 2. Verify End-To-End Setup
 
 ```bash
 make smoke-example
 ```
 
-This verifies the end-to-end toolchain against [example/mock_repo](example/mock_repo). It runs:
+Smoke test runs:
 
 1. `doctor`
 2. `baseline`
@@ -30,17 +35,7 @@ This verifies the end-to-end toolchain against [example/mock_repo](example/mock_
 4. `inspect`
 5. `dashboard --once`
 
-If that succeeds, your local environment is ready for normal CLI use.
-
-## 3. Inspect the Example Project Manually
-
-Check environment readiness:
-
-```bash
-./joule doctor example/mock_repo
-```
-
-Measure a known test-backed baseline:
+## 3. Run Baseline On The Example Project
 
 ```bash
 ./joule baseline \
@@ -52,19 +47,7 @@ Measure a known test-backed baseline:
   --no-dashboard
 ```
 
-Run optimization on a simple default-arg function:
-
-```bash
-./joule run \
-  example/mock_repo/sample_pkg/algos.py \
-  --function unreferenced_total \
-  --budget 4 \
-  --analysis \
-  --output human \
-  --no-dashboard
-```
-
-Run optimization on a richer function with broader transformation surface:
+## 4. Run Optimization
 
 ```bash
 ./joule run \
@@ -77,67 +60,62 @@ Run optimization on a richer function with broader transformation surface:
   --no-dashboard
 ```
 
-Inspect the registered transformation catalog:
+CI-oriented run:
 
 ```bash
-./joule transformations example/mock_repo --output human
+./joule run \
+  example/mock_repo/sample_pkg/algos.py \
+  --function optimization_surface_demo \
+  --tests tests/test_algos.py::test_optimization_surface_demo \
+  --ci
 ```
 
-Inspect the run:
+## 5. Inspect And Resume
+
+Inspect run details:
 
 ```bash
 ./joule inspect example/mock_repo --run-id <run_id>
 ```
 
-Render the dashboard HTML to stdout:
+Resume an optimize run:
+
+```bash
+./joule resume example/mock_repo --run-id <run_id> --budget 10
+```
+
+## 6. Review Transformations And Config
+
+```bash
+./joule transformations example/mock_repo --output human
+./joule config show example/mock_repo --output json
+```
+
+## 7. Dashboard Snapshot Or Server
+
+Print snapshot once:
 
 ```bash
 ./joule dashboard example/mock_repo --once
 ```
 
-## 4. Understand the Main Commands
+Serve interactive page:
 
-`doctor`
-- Validates the local runtime and separates required checks from optional capabilities.
+```bash
+./joule dashboard example/mock_repo --host 127.0.0.1 --port 8501
+```
 
-`baseline`
-- Measures the selected target against the resolved workloads and writes a baseline report, optional hotspot analysis, and a dashboard snapshot.
+## 8. Apply A Candidate (Optional)
 
-`run`
-- Runs the optimization flow: baseline measurement, candidate generation, correctness checks, surrogate screening, multi-fidelity evaluation, and optional deep analysis artifacts.
+```bash
+./joule apply example/mock_repo --run-id <run_id>
+```
 
-`transformations`
-- Lists deterministic, LLM, and escape transformations with tier and precheck metadata.
+Use `--branch` and `--commit` for SCM workflows.
 
-`inspect`
-- Dumps persisted run state including metadata, candidates, measurements, artifacts, and apply audits.
+Dependency-bearing candidates remain review-only and are intentionally refused by apply.
 
-`dashboard`
-- Serves or prints a guided HTML view backed by SQLite with run navigation, candidate filters, and recommended next actions.
-
-`parse-json`
-- Converts raw JSON command output into concise terminal summaries.
-
-`apply`
-- Applies an accepted candidate back to the source file if the target hash still matches and the candidate does not require new dependencies.
-
-## 5. Choose the Right Workload Strategy
-
-Decision flow:
-
-1. Does the target require async orchestration, class state, fixtures, or realistic external inputs?
-2. If yes, use explicit selectors (`--tests`, `--properties`, `--harness`).
-3. If no, pytest discovery can work when tests are clearly aligned by naming and location.
-4. If no tests are available, use default-arg fallback only for pure, simple targets.
-
-Operational guidance:
-- Explicit selectors are required for reliable claims on async and stateful targets.
-- Default-arg fallback is a convenience path, not a quality path.
-- If results look weak or unstable, revisit workload realism before changing optimizer settings.
-
-## 6. Read the Generated Artifacts
-
-After `baseline` or `run`, look for:
+## 9. Artifact Layout
 
 ```text
 <project>/
@@ -151,64 +129,27 @@ After `baseline` or `run`, look for:
             ├── run_summary.json
             ├── optimization_analysis.json
             ├── hotspots.json
-            ├── dashboard.html
             ├── events.jsonl
-            └── best.patch
+            ├── dashboard.html
+            ├── checkpoint.json
+            ├── best.patch
+            ├── best_candidate.py
             └── candidates/
-                └── <candidate_id>/...
+                └── <candidate_id>/
+                    ├── candidate.json
+                    └── candidate.py
 ```
 
-What matters most:
-- `.joule.lock` records reproducibility metadata and the config snapshot
-- `baseline_analysis.json` captures baseline metrics and optional hotspot profiling
-- `run_summary.json` shows the high-level optimization result
-- `optimization_analysis.json` summarizes the optimization funnel, operator performance, and hotspot data
-- `events.jsonl` stores structured stage-by-stage terminal events for diagnostics and CI scraping
-- `best.patch` contains the candidate diff when a best accepted candidate exists
-- `dashboard.html` provides a human-readable run snapshot
+Artifact lookup by question: [docs/ARTIFACTS.md](docs/ARTIFACTS.md)
 
-Need question-based lookup? See [docs/ARTIFACTS.md](docs/ARTIFACTS.md).
+## 10. Choose The Right Workload
 
-## 7. Try JOULE on Another Project
+- Use explicit selectors for async/stateful targets.
+- Use heuristic discovery for simple conventional pytest layouts.
+- Use default-arg fallback only for safe pure targets.
 
-Basic pattern:
+## 11. Next Docs
 
-```bash
-./joule baseline path/to/file.py --function my_function --tests tests/test_file.py::test_my_function
-./joule run path/to/file.py --function my_function --tests tests/test_file.py::test_my_function --budget 6
-./joule inspect /path/to/project --run-id <run_id>
-
-# Humanized JSON helpers:
-./joule run path/to/file.py --function my_function --output json --no-dashboard | ./joule parse-json
-./joule discover /path/to/project --output human
-```
-
-Use explicit workloads whenever the target needs setup, object state, async orchestration, or meaningful real-world inputs.
-
-## 8. Understand Dependency Policy (v0)
-
-In v0, dependency-bearing candidates are inspectable but not auto-applicable.
-
-- `run` can generate candidates that list new dependencies.
-- `inspect` and candidate artifacts show exactly what those dependencies are.
-- `apply` refuses those candidates until dependency automation and rollback controls are available.
-
-If you hit this policy, continue with manual review using `best.patch` and candidate packs.
-
-## 9. Known v0 Constraints
-
-- No automatic dependency installation or dependency-file modification
-- No background dashboard launch from `run`
-- No nested/local function targeting
-- Dependency-bearing candidates remain review-only and cannot be applied automatically
-- Hotspot profiling and deep optimization analysis are opt-in via `--hotspots` and `--analysis`
-
-## 10. Where to Go Next
-
-Use this map:
-
-- [README.md](README.md): high-level capabilities and command map
-- [docs/ARTIFACTS.md](docs/ARTIFACTS.md): file-by-file troubleshooting and lookup
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): internals and data flow
-- [docs/TRANSFORMATIONS.md](docs/TRANSFORMATIONS.md): full transformation catalog and snapshot contract
-- [GUIDE.md](GUIDE.md): roadmap and deferred scope
+- [README.md](README.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/TRANSFORMATIONS.md](docs/TRANSFORMATIONS.md)

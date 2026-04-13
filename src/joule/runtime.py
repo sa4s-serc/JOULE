@@ -174,7 +174,7 @@ def subprocess_env(project_root: Path, overlay_root: Path | None) -> dict[str, s
     existing = env.get("PYTHONPATH")
     if existing:
         pythonpath.append(existing)
-    env["PYTHONPATH"] = ":".join(pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath)
     return env
 
 

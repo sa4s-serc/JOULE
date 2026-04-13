@@ -1,61 +1,64 @@
 # Artifacts Guide
 
-This guide answers a practical question: which artifact should I inspect first?
+This guide answers: where should I look first when something succeeds, fails, or behaves unexpectedly?
 
-## Quick Lookup
+## Artifact Flow
 
-Question: Did a run complete and which target did it use?
-- Check `.joule.lock` for run id, target, backend, hashes, and config snapshot.
-- Check `.joule/runs/<run_id>/run_summary.json` for final status and selected best candidate.
+```mermaid
+flowchart LR
+    RUN[baseline or run or resume] --> DB[(.joule/joule.db)]
+    RUN --> RUN_DIR[.joule/runs/<run_id>]
+    DB --> INSPECT[inspect command]
+    DB --> DASH[dashboard]
+    RUN_DIR --> DASH
+    RUN_DIR --> REVIEW[human review and CI parsing]
+```
 
-Question: What baseline numbers were measured?
-- Check `.joule/runs/<run_id>/baseline.json` for full samples.
-- Check `.joule/runs/<run_id>/baseline_analysis.json` for summary plus hotspots (if enabled).
+## Quick Lookup By Question
 
-Question: Why was a candidate rejected?
-- Run `./joule inspect <project> --run-id <run_id> --candidate-id <candidate_id>`.
-- Check `metadata.rejected`, `metadata.stage`, and `metadata.surrogate`.
+| Question | First place to check | Follow-up |
+|---|---|---|
+| Did a run initialize correctly? | `.joule.lock` | `.joule/runs/<run_id>/events.jsonl` |
+| What was measured as baseline? | `baseline.json` | `baseline_analysis.json` |
+| Why was a candidate rejected? | `inspect --candidate-id ...` | `events.jsonl` and candidate metadata |
+| What changed for best candidate? | `best.patch` | `best_candidate.py` and `run_summary.json` |
+| What happened in optimization flow? | `optimization_analysis.json` | `events.jsonl` |
+| Can this candidate be applied? | candidate metadata `dependency_policy_state` | `apply` command response |
+| Can I resume safely? | `checkpoint.json` and DB checkpoints | `resume --run-id ...` |
 
-Question: Which candidate is best and what changed?
-- Check `.joule/runs/<run_id>/run_summary.json` -> `best_candidate`.
-- Open `.joule/runs/<run_id>/best.patch` for the diff.
-- Open `.joule/runs/<run_id>/best_candidate.py` for full source.
+## Key Files Per Run
 
-Question: Why did a worker fail or produce noise?
-- Check `.joule/runs/<run_id>/events.jsonl` for structured warning/debug events.
-- Check sample-level `stderr` in `baseline.json` or inspect output.
+- `baseline.json`: full baseline measurement payload
+- `baseline_analysis.json`: baseline summary and optional hotspot summary
+- `run_summary.json`: high-level outcome with CI-oriented fields
+- `optimization_analysis.json`: funnel, operator, and hotspot analysis
+- `events.jsonl`: structured event timeline
+- `dashboard.html`: static dashboard snapshot
+- `checkpoint.json`: latest checkpoint payload for resumed runs
+- `best.patch`: diff for best accepted candidate
+- `best_candidate.py`: source for best accepted candidate
+- `candidates/<candidate_id>/candidate.json`: per-candidate details (analysis mode)
+- `candidates/<candidate_id>/candidate.py`: candidate source snapshot (analysis mode)
 
-Question: What happened during optimization flow?
-- Check `.joule/runs/<run_id>/optimization_analysis.json` for funnel and operator stats.
-- Check `.joule/runs/<run_id>/events.jsonl` for stage-by-stage timeline.
+## Metadata And Schema Versions
 
-Question: Which transformations exist and what do they do?
-- Run `./joule transformations <project> --output human` for the runtime catalog.
-- Read [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md) for tiering, operator intent, and implementation notes.
+Versioned fields to be aware of:
 
-Question: How do I verify deterministic rewrite output shape stability?
-- Check [tests/golden/deterministic_operator_snapshots.json](../tests/golden/deterministic_operator_snapshots.json).
-- Run [tests/test_transformer_golden_snapshots.py](../tests/test_transformer_golden_snapshots.py).
+- candidate metadata includes `schema_version`
+- surrogate decision payload includes `schema_version`
+- search event detail payload includes `schema_version`
 
-Question: Was anything applied to source control?
-- Check `apply_audits` in `inspect` output.
-- Check git history if `apply --branch` or `apply --commit` was used.
+When parsing artifacts programmatically, read schema versions first and treat unknown fields as forward-compatible extensions.
 
-## Persona Views
+## Recommended Inspection Sequence
 
-### New User
-- Start with `run_summary.json`, `dashboard.html`, and `best.patch`.
-- Use `inspect --output human` when you need a readable diagnosis.
+1. Read `run_summary.json`.
+2. If result is unexpected, open `optimization_analysis.json`.
+3. Check `events.jsonl` for stage-level warning and rejection context.
+4. Use `inspect --run-id ... --output json` for complete persisted state.
+5. Review `best.patch` before any apply operation.
 
-### CI User
-- Prefer `--output json --no-dashboard` for machine stability.
-- Parse `run_summary.json` and `events.jsonl` for alerts and thresholds.
-
-### Advanced User
-- Use `optimization_analysis.json`, candidate packs in `candidates/`, and `events.jsonl` together.
-- Compare multiple runs by target and rejection reasons to tune workloads/operators.
-
-## Artifact Structure
+## Artifact Layout
 
 ```text
 <project>/
@@ -69,8 +72,9 @@ Question: Was anything applied to source control?
             ├── run_summary.json
             ├── optimization_analysis.json
             ├── hotspots.json
-            ├── dashboard.html
             ├── events.jsonl
+            ├── dashboard.html
+            ├── checkpoint.json
             ├── best.patch
             ├── best_candidate.py
             └── candidates/

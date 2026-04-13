@@ -8,6 +8,7 @@ from joule.models import TargetSpec, WorkloadSpec
 
 class MockEnergyBackend:
     name = "mock"
+    supports_parallel_measurement = True
 
     def measure(
         self,

@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 
 from joule.config import JouleSettings
+from joule.metadata import parse_candidate_metadata
 from joule.models import (
     AggregateMetrics,
     Fidelity,
@@ -18,7 +19,9 @@ from joule.models import (
     WorkloadKind,
     WorkloadSpec,
 )
+from joule.evaluators.backends.base import BackendMeasurement, EnergyBackend
 from joule.evaluators.correctness import CorrectnessEngine
+from joule.evaluators.oracle import PerformanceOracle
 from joule.orchestrator.mfbo import OptimizationOrchestrator, _ParentSnapshot
 from joule.orchestrator.internal.mfbo_flow import OptimizationState
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
@@ -140,6 +143,46 @@ class _FakeOracle:
             samples=[],
             environment={"backend": "fake"},
         )
+
+
+class _CountingBackend:
+    supports_parallel_measurement = True
+
+    def __init__(self, name: str, *, energy_j: float, peak_memory_bytes: int = 4096) -> None:
+        self.name = name
+        self.energy_j = energy_j
+        self.peak_memory_bytes = peak_memory_bytes
+        self.calls = 0
+
+    def measure(
+        self,
+        target: TargetSpec,
+        workload: WorkloadSpec,
+        *,
+        overlay_root: Path | None = None,
+        inner_repetitions: int = 1,
+        timeout_s: float = 30.0,
+    ) -> BackendMeasurement:
+        del target, workload, overlay_root, timeout_s
+        self.calls += 1
+        logical_invocations = max(1, int(inner_repetitions))
+        return BackendMeasurement(
+            wall_time_s=0.20 * logical_invocations,
+            cpu_time_s=0.10 * logical_invocations,
+            peak_memory_bytes=self.peak_memory_bytes,
+            energy_j=self.energy_j * logical_invocations,
+            return_code=0,
+            success=True,
+            metadata={"logical_invocations": logical_invocations},
+        )
+
+
+class _NonParallelBackend(_CountingBackend):
+    supports_parallel_measurement = False
+
+    def __init__(self, name: str, *, energy_j: float, peak_memory_bytes: int = 4096) -> None:
+        super().__init__(name, energy_j=energy_j, peak_memory_bytes=peak_memory_bytes)
+        self._non_picklable = lambda value: value
 
 
 def _target_and_bundle(project_root: Path) -> tuple[TargetSpec, WorkloadBundle]:
@@ -440,3 +483,210 @@ def test_operator_composition_generates_chained_metadata(tmp_path: Path):
     assert composed
     assert any(item["metadata"].get("generation_depth") == 2 for item in composed)
     assert any(len(item["metadata"].get("composed_operator_chain", [])) == 2 for item in composed)
+
+
+def test_oracle_cache_isolated_by_backend(tmp_path: Path):
+    settings = JouleSettings(project_root=tmp_path, inner_repetitions_mode="fixed")
+    target, bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+
+    mock_backend = _CountingBackend("mock", energy_j=1.0)
+    mock_oracle = PerformanceOracle(settings=settings, backend=cast(Any, mock_backend), db=db)
+    first = mock_oracle.measure_bundle(
+        run_id="run-mock",
+        target=target,
+        bundle=bundle,
+        fidelity=Fidelity.F1,
+        repetitions=1,
+        use_cache=True,
+    )
+
+    rapl_backend = _CountingBackend("rapl", energy_j=2.5)
+    rapl_oracle = PerformanceOracle(settings=settings, backend=cast(Any, rapl_backend), db=db)
+    second = rapl_oracle.measure_bundle(
+        run_id="run-rapl",
+        target=target,
+        bundle=bundle,
+        fidelity=Fidelity.F1,
+        repetitions=1,
+        use_cache=True,
+    )
+
+    assert first.environment["backend"] == "mock"
+    assert second.environment["backend"] == "rapl"
+    assert rapl_backend.calls == 1
+    assert second.aggregate.mean_energy_j == pytest.approx(2.5)
+
+
+def test_oracle_cached_report_uses_current_run_id(tmp_path: Path):
+    settings = JouleSettings(project_root=tmp_path, inner_repetitions_mode="fixed")
+    target, bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+    backend = _CountingBackend("mock", energy_j=1.0)
+    oracle = PerformanceOracle(settings=settings, backend=cast(Any, backend), db=db)
+
+    first = oracle.measure_bundle(
+        run_id="run-1",
+        target=target,
+        bundle=bundle,
+        fidelity=Fidelity.F1,
+        repetitions=1,
+        use_cache=True,
+    )
+    second = oracle.measure_bundle(
+        run_id="run-2",
+        target=target,
+        bundle=bundle,
+        fidelity=Fidelity.F1,
+        repetitions=1,
+        use_cache=True,
+    )
+
+    assert first.run_id == "run-1"
+    assert second.run_id == "run-2"
+    assert backend.calls == 1
+    assert second.metadata.get("cache_hit") is True
+
+
+def test_oracle_peak_memory_not_divided_by_inner_repetitions(tmp_path: Path):
+    settings = JouleSettings(
+        project_root=tmp_path,
+        inner_repetitions_mode="fixed",
+        inner_repetitions_fixed=4,
+    )
+    target, bundle = _target_and_bundle(tmp_path)
+    backend = _CountingBackend("mock", energy_j=1.5, peak_memory_bytes=32_768)
+    oracle = PerformanceOracle(settings=settings, backend=cast(Any, backend), db=JouleDB(settings.db_path))
+
+    report = oracle.measure_bundle(
+        run_id="run-memory",
+        target=target,
+        bundle=bundle,
+        fidelity=Fidelity.F1,
+        repetitions=1,
+        use_cache=False,
+    )
+
+    sample = report.samples[0]
+    assert sample.metadata["inner_repetitions"] == 4
+    assert sample.peak_memory_bytes == 32_768
+
+
+def test_oracle_disables_parallel_for_non_parallel_backends(tmp_path: Path):
+    settings = JouleSettings(
+        project_root=tmp_path,
+        inner_repetitions_mode="fixed",
+        max_parallel_workers=2,
+    )
+    target, bundle = _target_and_bundle(tmp_path)
+    bundle = WorkloadBundle(
+        target=target,
+        workloads=[
+            *bundle.workloads,
+            WorkloadSpec(
+                kind=WorkloadKind.HARNESS,
+                identifier="harness::target-secondary",
+                label="target harness secondary",
+                selector="module:target",
+            ),
+        ],
+    )
+    backend = _NonParallelBackend("rapl", energy_j=1.0)
+    oracle = PerformanceOracle(settings=settings, backend=cast(Any, backend), db=JouleDB(settings.db_path))
+
+    report = oracle.measure_bundle(
+        run_id="run-sequential",
+        target=target,
+        bundle=bundle,
+        fidelity=Fidelity.F1,
+        repetitions=1,
+        use_cache=False,
+    )
+
+    assert backend.calls == 2
+    assert report.aggregate.repetitions == 2
+
+
+def test_measurement_report_round_trips_from_record():
+    report = MeasurementReport(
+        run_id="run-roundtrip",
+        candidate_id="cand-1",
+        fidelity=Fidelity.F2,
+        aggregate=AggregateMetrics(
+            workload_id="all",
+            repetitions=2,
+            success_rate=1.0,
+            mean_wall_time_s=0.12,
+            mean_cpu_time_s=0.10,
+            mean_peak_memory_bytes=1024.0,
+            mean_energy_j=0.9,
+            wall_time_ci95=0.01,
+            cpu_time_ci95=0.01,
+            peak_memory_ci95=4.0,
+            energy_ci95=0.02,
+        ),
+        per_workload=[],
+        samples=[],
+        environment={"backend": "mock"},
+        metadata={"cache_hit": False},
+    )
+
+    restored = MeasurementReport.from_record(report.to_record())
+    assert restored.run_id == report.run_id
+    assert restored.candidate_id == report.candidate_id
+    assert restored.fidelity is report.fidelity
+    assert restored.environment == report.environment
+
+
+def test_candidate_metadata_is_versioned_and_typed(tmp_path: Path):
+    settings = JouleSettings(
+        project_root=tmp_path,
+        search_min_novelty=0.0,
+        surrogate_min_training_points=1,
+        search_branching_factor=1,
+        search_max_generations=2,
+    )
+    target, bundle = _target_and_bundle(tmp_path)
+    source_metrics = {
+        target.source: (10.0, 10.0, 1_000.0),
+        "def target(limit):\n    return sum(value for value in range(limit))\n": (9.0, 9.0, 1_000.0),
+    }
+    db = JouleDB(settings.db_path)
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle(source_metrics)),
+        correctness=cast(Any, _AlwaysCorrect()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=GaussianProcessSurrogate(),
+    )
+
+    orchestrator.optimize("run-metadata", target, bundle, budget=1)
+
+    candidates = db.get_candidates("run-metadata")
+    assert candidates
+    parsed = parse_candidate_metadata(candidates[0].get("metadata", {}))
+    assert parsed.schema_version >= 1
+    assert parsed.surrogate.schema_version >= 1
+
+    events = db.get_search_events("run-metadata")
+    assert events
+    assert all(int(event["detail"].get("schema_version", 0)) >= 1 for event in events)
+
+
+def test_energy_backend_protocol_requires_parallel_capability_flag():
+    class MissingCapabilityBackend:
+        name = "missing"
+
+        def measure(self, *args, **kwargs):
+            del args, kwargs
+            return BackendMeasurement(
+                wall_time_s=0.0,
+                cpu_time_s=0.0,
+                peak_memory_bytes=0,
+                energy_j=0.0,
+                return_code=0,
+                success=True,
+            )
+
+    assert not isinstance(MissingCapabilityBackend(), EnergyBackend)

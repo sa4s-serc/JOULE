@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from joule.metadata import parse_candidate_metadata
 from joule.utils.db import JouleDB
 from joule.utils.analysis import cross_run_trends
 from joule.utils.reporting import workload_provenance_records
@@ -150,18 +151,21 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     accepted_count = sum(1 for item in candidates if item.get("status") == "accepted")
     rejected_count = sum(1 for item in candidates if item.get("status") == "rejected")
     skipped_count = sum(1 for item in candidates if item.get("status") == "skipped")
-    candidate_rows = "".join(
-        f"<tr class='candidate-row' data-status='{escape(item['status'])}' data-score='{item['score']:.12f}' "
-        f"data-stage='{escape(str(item['metadata'].get('stage', '-')))}' "
-        f"data-tier='{escape(str(item['metadata'].get('operator_tier', '-')))}'>"
-        f"<td>{escape(item['candidate_id'])}</td><td>{escape(item['operator_name'])}</td>"
-        f"<td>{escape(str(item['metadata'].get('operator_tier', '-')))}</td>"
-        f"<td>{escape(item['status'])}</td><td>{item['score']:.6f}</td>"
-        f"<td>{escape(str(item['metadata'].get('stage', '-')))}</td>"
-        f"<td>{escape(str(item['metadata'].get('rejected', '-')))}</td>"
-        f"<td>{escape(_candidate_detail(item['metadata']))}</td></tr>"
-        for item in candidates
-    )
+    candidate_rows_parts: list[str] = []
+    for item in candidates:
+        metadata = parse_candidate_metadata(item.get("metadata", {}))
+        candidate_rows_parts.append(
+            f"<tr class='candidate-row' data-status='{escape(item['status'])}' data-score='{item['score']:.12f}' "
+            f"data-stage='{escape(metadata.stage or '-')}' "
+            f"data-tier='{escape(metadata.operator_tier or '-')}'>"
+            f"<td>{escape(item['candidate_id'])}</td><td>{escape(item['operator_name'])}</td>"
+            f"<td>{escape(metadata.operator_tier or '-')}</td>"
+            f"<td>{escape(item['status'])}</td><td>{item['score']:.6f}</td>"
+            f"<td>{escape(metadata.stage or '-')}</td>"
+            f"<td>{escape(metadata.rejected or '-')}</td>"
+            f"<td>{escape(_candidate_detail(item.get('metadata', {})))}</td></tr>"
+        )
+    candidate_rows = "".join(candidate_rows_parts)
     if not candidate_rows:
         candidate_rows = "<tr><td colspan='8'>No candidates yet</td></tr>"
     artifact_items = "".join(
@@ -337,22 +341,22 @@ def _hotspot_section(records: list[dict]) -> str:
 
 
 def _candidate_detail(metadata: dict) -> str:
+    parsed = parse_candidate_metadata(metadata)
     parts = []
-    tier = metadata.get("operator_tier")
-    descriptor = metadata.get("operator_tier_descriptor")
+    tier = parsed.operator_tier
+    descriptor = parsed.operator_tier_descriptor
     if tier:
         if descriptor:
             parts.append(f"tier={tier} ({descriptor})")
         else:
             parts.append(f"tier={tier}")
-    improvement = metadata.get("improvement_summary", {})
-    summary = improvement.get("summary") if isinstance(improvement, dict) else None
+    summary = parsed.improvement_summary.summary
     if summary:
         parts.append(summary)
-    dependency_state = metadata.get("dependency_policy_state")
+    dependency_state = parsed.dependency_policy_state
     if dependency_state:
         parts.append(f"deps={dependency_state}")
-    explanation = metadata.get("explanation_summary")
+    explanation = parsed.explanation_summary
     if explanation:
         parts.append(str(explanation).splitlines()[0])
     return " | ".join(parts) if parts else "-"

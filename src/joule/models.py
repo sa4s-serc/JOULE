@@ -166,6 +166,23 @@ class MetricSample:
         payload["fidelity"] = self.fidelity.value
         return payload
 
+    @classmethod
+    def from_record(cls, payload: dict[str, Any]) -> "MetricSample":
+        return cls(
+            workload_id=str(payload["workload_id"]),
+            fidelity=Fidelity(str(payload["fidelity"])),
+            repetition=int(payload["repetition"]),
+            success=bool(payload["success"]),
+            wall_time_s=float(payload["wall_time_s"]),
+            cpu_time_s=float(payload["cpu_time_s"]),
+            peak_memory_bytes=int(payload["peak_memory_bytes"]),
+            energy_j=float(payload["energy_j"]),
+            return_code=int(payload["return_code"]),
+            stdout=str(payload.get("stdout", "")),
+            stderr=str(payload.get("stderr", "")),
+            metadata=dict(payload.get("metadata", {})),
+        )
+
 
 @dataclass(slots=True)
 class AggregateMetrics:
@@ -183,6 +200,22 @@ class AggregateMetrics:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_record(cls, payload: dict[str, Any]) -> "AggregateMetrics":
+        return cls(
+            workload_id=str(payload["workload_id"]),
+            repetitions=int(payload["repetitions"]),
+            success_rate=float(payload["success_rate"]),
+            mean_wall_time_s=float(payload["mean_wall_time_s"]),
+            mean_cpu_time_s=float(payload["mean_cpu_time_s"]),
+            mean_peak_memory_bytes=float(payload["mean_peak_memory_bytes"]),
+            mean_energy_j=float(payload["mean_energy_j"]),
+            wall_time_ci95=float(payload["wall_time_ci95"]),
+            cpu_time_ci95=float(payload["cpu_time_ci95"]),
+            peak_memory_ci95=float(payload["peak_memory_ci95"]),
+            energy_ci95=float(payload["energy_ci95"]),
+        )
 
 
 @dataclass(slots=True)
@@ -207,6 +240,19 @@ class MeasurementReport:
             "environment": self.environment,
             "metadata": self.metadata,
         }
+
+    @classmethod
+    def from_record(cls, payload: dict[str, Any]) -> "MeasurementReport":
+        return cls(
+            run_id=str(payload["run_id"]),
+            candidate_id=payload.get("candidate_id"),
+            fidelity=Fidelity(str(payload["fidelity"])),
+            aggregate=AggregateMetrics.from_record(payload["aggregate"]),
+            per_workload=[AggregateMetrics.from_record(item) for item in payload.get("per_workload", [])],
+            samples=[MetricSample.from_record(item) for item in payload.get("samples", [])],
+            environment=dict(payload.get("environment", {})),
+            metadata=dict(payload.get("metadata", {})),
+        )
 
 
 @dataclass(slots=True)

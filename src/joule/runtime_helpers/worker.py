@@ -6,6 +6,7 @@ import importlib.util
 import inspect
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
@@ -29,7 +30,7 @@ def load_module_for_file_selector(selector: str, project_root: Path) -> tuple[ob
     file_path = Path(module_path)
     if not file_path.is_absolute():
         file_path = project_root / file_path
-    module_name = file_path.with_suffix("").name
+    module_name = _module_name_for_file(file_path, project_root)
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Unable to import {selector}")
@@ -37,6 +38,28 @@ def load_module_for_file_selector(selector: str, project_root: Path) -> tuple[ob
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module, object_name
+
+
+def _module_name_for_file(file_path: Path, project_root: Path) -> str:
+    src_root = project_root / "src"
+    if file_path.is_relative_to(src_root):
+        relative = file_path.relative_to(src_root).with_suffix("")
+    elif file_path.is_relative_to(project_root):
+        relative = file_path.relative_to(project_root).with_suffix("")
+    else:
+        return _sanitize_module_segment(file_path.stem)
+
+    segments = [_sanitize_module_segment(segment) for segment in relative.parts if segment]
+    return ".".join(segments) if segments else _sanitize_module_segment(file_path.stem)
+
+
+def _sanitize_module_segment(segment: str) -> str:
+    sanitized = re.sub(r"[^0-9a-zA-Z_]", "_", segment)
+    if not sanitized:
+        return "_"
+    if sanitized[0].isdigit():
+        return f"_{sanitized}"
+    return sanitized
 
 
 def load_target_callable(target: TargetSpec, project_root: Path, overlay_root: Path | None) -> Any:

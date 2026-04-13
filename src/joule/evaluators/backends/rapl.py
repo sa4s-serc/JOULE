@@ -8,6 +8,7 @@ from joule.models import TargetSpec, WorkloadSpec
 
 class RaplEnergyBackend:
     name = "rapl"
+    supports_parallel_measurement = False
 
     def __init__(self, rapl_path: Path | None = None) -> None:
         self.rapl_path = rapl_path or Path("/sys/class/powercap/intel-rapl:0/energy_uj")

@@ -13,7 +13,6 @@ from joule.evaluators.backends.base import BackendMeasurement, EnergyBackend
 from joule.evaluators.backends.registry import BackendRegistry
 from joule.evaluators.correctness import _materialize_overlay
 from joule.integrations.git import source_sha256
-from joule.models import AggregateMetrics
 from joule.runtime import invoke_profile_worker
 from joule.models import CalibrationResult, Fidelity, MeasurementReport, MetricSample, TargetSpec, WorkloadBundle, WorkloadSpec
 from joule.utils.metrics import aggregate_samples
@@ -46,33 +45,13 @@ def _bundle_cache_key(bundle: WorkloadBundle) -> str:
     return "bundle::" + "|".join(ids)
 
 
-def _report_from_record(payload: dict[str, Any]) -> MeasurementReport:
-    return MeasurementReport(
-        run_id=str(payload["run_id"]),
-        candidate_id=payload.get("candidate_id"),
-        fidelity=Fidelity(str(payload["fidelity"])),
-        aggregate=AggregateMetrics(**payload["aggregate"]),
-        per_workload=[AggregateMetrics(**item) for item in payload.get("per_workload", [])],
-        samples=[
-            MetricSample(
-                workload_id=str(item["workload_id"]),
-                fidelity=Fidelity(str(item["fidelity"])),
-                repetition=int(item["repetition"]),
-                success=bool(item["success"]),
-                wall_time_s=float(item["wall_time_s"]),
-                cpu_time_s=float(item["cpu_time_s"]),
-                peak_memory_bytes=int(item["peak_memory_bytes"]),
-                energy_j=float(item["energy_j"]),
-                return_code=int(item["return_code"]),
-                stdout=str(item.get("stdout", "")),
-                stderr=str(item.get("stderr", "")),
-                metadata=dict(item.get("metadata", {})),
-            )
-            for item in payload.get("samples", [])
-        ],
-        environment=dict(payload.get("environment", {})),
-        metadata=dict(payload.get("metadata", {})),
-    )
+def _backend_cache_namespace(backend: EnergyBackend) -> str:
+    name = str(getattr(backend, "name", type(backend).__name__)).strip().lower()
+    return name or type(backend).__name__.lower()
+
+
+def _measurement_cache_key(bundle: WorkloadBundle, backend: EnergyBackend) -> str:
+    return f"backend::{_backend_cache_namespace(backend)}::{_bundle_cache_key(bundle)}"
 
 
 class PerformanceOracle:
@@ -113,22 +92,44 @@ class PerformanceOracle:
         if overlay_root and candidate_source:
             _materialize_overlay(target, overlay_root, candidate_source)
         try:
+            backend_name = _backend_cache_namespace(self.backend)
             source = candidate_source or target.source
             source_hash = source_sha256(source)
             file_mtime = target.file_path.stat().st_mtime if target.file_path.exists() else 0.0
-            cache_key = _bundle_cache_key(bundle)
+            cache_key = _measurement_cache_key(bundle, self.backend)
 
             if use_cache and self.db and candidate_id is None:
                 cached = self.db.get_cached_measurement(source_hash, cache_key, fidelity.value, file_mtime)
                 if cached:
                     if self.reporter:
-                        self.reporter.info("cache", f"Cache hit for {cache_key} at {fidelity.value}")
-                    return _report_from_record(cached)
+                        self.reporter.info(
+                            "cache",
+                            f"Cache hit for {cache_key} at {fidelity.value}",
+                        )
+                    report = MeasurementReport.from_record(cached)
+                    report.run_id = run_id
+                    report.candidate_id = candidate_id
+                    report.metadata = {
+                        **report.metadata,
+                        "cache_hit": True,
+                        "cache_key": cache_key,
+                    }
+                    return report
 
             all_samples: list[MetricSample] = []
             calibration_records: list[dict] = []
             reps = self.repetitions_for(fidelity, explicit=repetitions)
-            use_parallel = self.settings.max_parallel_workers > 1 and len(bundle.workloads) > 1
+            backend_supports_parallel = self.backend.supports_parallel_measurement
+            use_parallel = (
+                backend_supports_parallel and self.settings.max_parallel_workers > 1 and len(bundle.workloads) > 1
+            )
+
+            if self.settings.max_parallel_workers > 1 and len(bundle.workloads) > 1 and not backend_supports_parallel:
+                if self.reporter:
+                    self.reporter.info(
+                        "backend",
+                        f"Backend {backend_name} does not support parallel measurement; using sequential mode",
+                    )
 
             if use_parallel:
                 calibrations = []
@@ -238,7 +239,7 @@ class PerformanceOracle:
                 per_workload=per_workload,
                 samples=all_samples,
                 environment={
-                    "backend": getattr(self.backend, "name", type(self.backend).__name__),
+                    "backend": backend_name,
                     "timestamp": datetime.now(UTC).isoformat(),
                     "overlay": str(overlay_root) if overlay_root else None,
                 },
@@ -341,7 +342,7 @@ class PerformanceOracle:
             success=measurement.success,
             wall_time_s=measurement.wall_time_s / divisor,
             cpu_time_s=measurement.cpu_time_s / divisor,
-            peak_memory_bytes=max(1, int(measurement.peak_memory_bytes / divisor)) if measurement.peak_memory_bytes else 0,
+            peak_memory_bytes=max(0, int(measurement.peak_memory_bytes)),
             energy_j=measurement.energy_j / divisor,
             return_code=measurement.return_code,
             stdout=measurement.stdout,

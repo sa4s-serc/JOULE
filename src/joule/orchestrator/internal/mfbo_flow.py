@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from joule.metadata import CandidateMetadata, ImprovementSummary, SurrogateDecision
 from joule.models import CandidateEvaluation, FrontierState, SearchContext, SearchPhase, TransformationResult
 from joule.utils.metrics import improvement_ratio
 from joule.utils.reporting import improvement_summary
@@ -77,6 +78,27 @@ def build_correctness_rejection_evaluation(
     source_hash: str,
     screening: dict[str, Any],
 ) -> CandidateEvaluation:
+    dependency_policy = dependency_policy_metadata(proposal.dependencies)
+    metadata = CandidateMetadata(
+        rejected="correctness",
+        reason=[str(item) for item in reasons],
+        stage="correctness",
+        phase=phase.value,
+        source_hash=source_hash,
+        parent_id=parent_id,
+        generation_depth=generation_depth,
+        frontier_state=FrontierState.SCREENED_OUT.value,
+        surrogate=SurrogateDecision.from_record(screening),
+        operator_family=proposal.operator_family,
+        operator_tier=proposal.operator_tier.value,
+        operator_tier_descriptor=proposal.metadata.get("operator_tier_descriptor", ""),
+        proposal_rank=proposal.proposal_rank,
+        generation_delta=int(proposal.metadata.get("generation_delta", 1) or 1),
+        composed_operator_chain=list(proposal.metadata.get("composed_operator_chain", [])),
+        composition_hops=int(proposal.metadata.get("composition_hops", 0) or 0),
+        dependency_policy_state=dependency_policy["dependency_policy_state"],
+        dependency_policy_reason=dependency_policy["dependency_policy_reason"],
+    ).to_record()
     return CandidateEvaluation(
         candidate_id=candidate_id,
         operator_name=proposal.operator_name,
@@ -90,21 +112,7 @@ def build_correctness_rejection_evaluation(
         score=float("inf"),
         acquisition_score=float(screening["acquisition_score"]),
         dominance_summary={},
-        metadata={
-            "rejected": "correctness",
-            "reason": reasons,
-            "stage": "correctness",
-            "phase": phase.value,
-            "source_hash": source_hash,
-            "surrogate": screening,
-            "operator_family": proposal.operator_family,
-            "operator_tier": proposal.operator_tier.value,
-            "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
-            "generation_delta": int(proposal.metadata.get("generation_delta", 1) or 1),
-            "composed_operator_chain": list(proposal.metadata.get("composed_operator_chain", [])),
-            "composition_hops": int(proposal.metadata.get("composition_hops", 0) or 0),
-            **dependency_policy_metadata(proposal.dependencies),
-        },
+        metadata=metadata,
     )
 
 
@@ -126,26 +134,29 @@ def build_candidate_metadata(
 ) -> dict[str, Any]:
     improvement = improvement_ratio(baseline_aggregate, candidate_report.aggregate) if candidate_report else {}
     improvement_notes = improvement_summary(baseline_aggregate, candidate_report.aggregate) if candidate_report else {}
-    return {
-        "improvement": improvement,
-        "improvement_summary": improvement_notes,
-        "explanation_summary": "",
-        "stage": stage,
-        "phase": phase.value,
-        "measurement_decision": screening["decision"],
-        "measurement_cost_s": measurement_cost_s,
-        "rejected": None if accepted else (rejection_reason or "threshold"),
-        "source_hash": source_hash,
-        "parent_id": parent_id,
-        "generation_depth": generation_depth,
-        "frontier_state": frontier_state.value,
-        "surrogate": screening,
-        "operator_family": proposal.operator_family,
-        "operator_tier": proposal.operator_tier.value,
-        "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
-        "proposal_rank": proposal.proposal_rank,
-        "generation_delta": int(proposal.metadata.get("generation_delta", 1) or 1),
-        "composed_operator_chain": list(proposal.metadata.get("composed_operator_chain", [])),
-        "composition_hops": int(proposal.metadata.get("composition_hops", 0) or 0),
-        **dependency_policy_metadata(proposal.dependencies),
-    }
+    dependency_policy = dependency_policy_metadata(proposal.dependencies)
+    metadata = CandidateMetadata(
+        improvement={str(key): float(value) for key, value in improvement.items()},
+        improvement_summary=ImprovementSummary.from_record(improvement_notes),
+        explanation_summary="",
+        stage=stage,
+        phase=phase.value,
+        measurement_decision=str(screening.get("decision", "")),
+        measurement_cost_s=measurement_cost_s,
+        rejected=None if accepted else (rejection_reason or "threshold"),
+        source_hash=source_hash,
+        parent_id=parent_id,
+        generation_depth=generation_depth,
+        frontier_state=frontier_state.value,
+        surrogate=SurrogateDecision.from_record(screening),
+        operator_family=proposal.operator_family,
+        operator_tier=proposal.operator_tier.value,
+        operator_tier_descriptor=proposal.metadata.get("operator_tier_descriptor", ""),
+        proposal_rank=proposal.proposal_rank,
+        generation_delta=int(proposal.metadata.get("generation_delta", 1) or 1),
+        composed_operator_chain=list(proposal.metadata.get("composed_operator_chain", [])),
+        composition_hops=int(proposal.metadata.get("composition_hops", 0) or 0),
+        dependency_policy_state=dependency_policy["dependency_policy_state"],
+        dependency_policy_reason=dependency_policy["dependency_policy_reason"],
+    )
+    return metadata.to_record()

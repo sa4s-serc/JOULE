@@ -11,13 +11,13 @@ import uuid
 from joule.config import JouleSettings
 from joule.evaluators.correctness import CorrectnessEngine
 from joule.evaluators.oracle import PerformanceOracle
+from joule.metadata import CandidateMetadata, parse_candidate_metadata, SurrogateDecision, versioned_event_detail
 from joule.models import (
     AggregateMetrics,
     CandidateEvaluation,
     Fidelity,
     FrontierState,
     MeasurementReport,
-    MetricSample,
     SearchContext,
     SearchPhase,
     TargetSpec,
@@ -813,7 +813,7 @@ class OptimizationOrchestrator:
         baseline_payload = metadata.get("baseline_report") if isinstance(metadata, dict) else None
         if not isinstance(baseline_payload, dict):
             return None
-        baseline = self._measurement_report_from_record(baseline_payload)
+        baseline = MeasurementReport.from_record(baseline_payload)
 
         pareto = ParetoFront(
             weights=(
@@ -835,7 +835,7 @@ class OptimizationOrchestrator:
             pareto.add(
                 ParetoPoint(
                     candidate_id=str(point.get("candidate_id", "")),
-                    metrics=AggregateMetrics(**metrics_payload),
+                    metrics=AggregateMetrics.from_record(metrics_payload),
                     parent_id=point.get("parent_id"),
                     generation_depth=int(point.get("generation_depth", 0)),
                     operator_name=str(point.get("operator_name", "baseline")),
@@ -927,7 +927,7 @@ class OptimizationOrchestrator:
             candidate_id = payload.get("candidate_id")
             if not candidate_id:
                 continue
-            report = self._measurement_report_from_record(payload)
+            report = MeasurementReport.from_record(payload)
             existing = reports_by_candidate.get(candidate_id)
             if existing is None or fidelity_rank[report.fidelity] >= fidelity_rank[existing.fidelity]:
                 reports_by_candidate[candidate_id] = report
@@ -935,15 +935,13 @@ class OptimizationOrchestrator:
         evaluations: dict[str, CandidateEvaluation] = {}
         for item in candidates:
             metadata = dict(item.get("metadata", {}))
-            frontier_raw = str(metadata.get("frontier_state", FrontierState.FRONTIER_ACTIVE.value))
+            parsed_metadata = parse_candidate_metadata(metadata)
+            frontier_raw = parsed_metadata.frontier_state or FrontierState.FRONTIER_ACTIVE.value
             try:
                 frontier_state = FrontierState(frontier_raw)
             except ValueError:
                 frontier_state = FrontierState.FRONTIER_ACTIVE
-            surrogate_payload = metadata.get("surrogate", {})
-            acquisition_score = 0.0
-            if isinstance(surrogate_payload, dict):
-                acquisition_score = float(surrogate_payload.get("acquisition_score", 0.0))
+            acquisition_score = float(parsed_metadata.surrogate.acquisition_score)
 
             evaluations[item["candidate_id"]] = CandidateEvaluation(
                 candidate_id=item["candidate_id"],
@@ -952,44 +950,16 @@ class OptimizationOrchestrator:
                 source=item["source_code"],
                 dependencies=item["dependencies"],
                 parent_id=item["parent_id"] or "baseline",
-                generation_depth=int(metadata.get("generation_depth", 0)),
+                generation_depth=int(parsed_metadata.generation_depth),
                 frontier_state=frontier_state,
                 accepted=True,
                 score=float(item["score"]),
                 acquisition_score=acquisition_score,
-                dominance_summary=dict(metadata.get("dominance_summary", {})),
+                dominance_summary=dict(parsed_metadata.extra.get("dominance_summary", {})),
                 report=reports_by_candidate.get(item["candidate_id"]),
                 metadata=metadata,
             )
         return evaluations
-
-    def _measurement_report_from_record(self, payload: dict[str, Any]) -> MeasurementReport:
-        return MeasurementReport(
-            run_id=str(payload["run_id"]),
-            candidate_id=payload.get("candidate_id"),
-            fidelity=Fidelity(str(payload["fidelity"])),
-            aggregate=AggregateMetrics(**payload["aggregate"]),
-            per_workload=[AggregateMetrics(**item) for item in payload.get("per_workload", [])],
-            samples=[
-                MetricSample(
-                    workload_id=str(item["workload_id"]),
-                    fidelity=Fidelity(str(item["fidelity"])),
-                    repetition=int(item["repetition"]),
-                    success=bool(item["success"]),
-                    wall_time_s=float(item["wall_time_s"]),
-                    cpu_time_s=float(item["cpu_time_s"]),
-                    peak_memory_bytes=int(item["peak_memory_bytes"]),
-                    energy_j=float(item["energy_j"]),
-                    return_code=int(item["return_code"]),
-                    stdout=str(item.get("stdout", "")),
-                    stderr=str(item.get("stderr", "")),
-                    metadata=dict(item.get("metadata", {})),
-                )
-                for item in payload.get("samples", [])
-            ],
-            environment=dict(payload.get("environment", {})),
-            metadata=dict(payload.get("metadata", {})),
-        )
 
     def _record_candidate(self, run_id: str, evaluation: CandidateEvaluation, *, status: str) -> None:
         self.db.record_candidate(
@@ -1011,7 +981,7 @@ class OptimizationOrchestrator:
         *,
         event_type: str,
         stage: str,
-        detail: dict,
+        detail: dict[str, Any],
         candidate_id: str | None = None,
         operator_name: str | None = None,
     ) -> None:
@@ -1019,7 +989,7 @@ class OptimizationOrchestrator:
             run_id=run_id,
             event_type=event_type,
             stage=stage,
-            detail=detail,
+            detail=versioned_event_detail(detail),
             candidate_id=candidate_id,
             operator_name=operator_name,
             created_at=datetime.now(UTC).isoformat(),
@@ -1121,6 +1091,26 @@ class OptimizationOrchestrator:
         duplicate_of: str | None = None,
         screening: dict[str, Any] | None = None,
     ) -> None:
+        dependency_policy = dependency_policy_metadata(proposal.dependencies)
+        metadata = CandidateMetadata(
+            rejected=reason,
+            stage=stage,
+            source_hash=source_hash,
+            parent_id=parent_id,
+            generation_depth=generation_depth,
+            frontier_state=FrontierState.SCREENED_OUT.value,
+            duplicate_of=duplicate_of,
+            surrogate=SurrogateDecision.from_record(screening or {}),
+            operator_family=proposal.operator_family,
+            operator_tier=proposal.operator_tier.value,
+            operator_tier_descriptor=proposal.metadata.get("operator_tier_descriptor", ""),
+            proposal_rank=proposal.proposal_rank,
+            generation_delta=self._proposal_generation_delta(proposal),
+            composed_operator_chain=list(proposal.metadata.get("composed_operator_chain", [])),
+            composition_hops=int(proposal.metadata.get("composition_hops", 0) or 0),
+            dependency_policy_state=dependency_policy["dependency_policy_state"],
+            dependency_policy_reason=dependency_policy["dependency_policy_reason"],
+        ).to_record()
         evaluation = CandidateEvaluation(
             candidate_id=candidate_id,
             operator_name=proposal.operator_name,
@@ -1134,24 +1124,7 @@ class OptimizationOrchestrator:
             score=float("inf"),
             acquisition_score=float(screening["acquisition_score"]) if screening else 0.0,
             dominance_summary={},
-            metadata={
-                "rejected": reason,
-                "stage": stage,
-                "source_hash": source_hash,
-                "parent_id": parent_id,
-                "generation_depth": generation_depth,
-                "frontier_state": FrontierState.SCREENED_OUT.value,
-                "duplicate_of": duplicate_of,
-                "surrogate": screening or {},
-                "operator_family": proposal.operator_family,
-                "operator_tier": proposal.operator_tier.value,
-                "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
-                "proposal_rank": proposal.proposal_rank,
-                "generation_delta": self._proposal_generation_delta(proposal),
-                "composed_operator_chain": list(proposal.metadata.get("composed_operator_chain", [])),
-                "composition_hops": int(proposal.metadata.get("composition_hops", 0) or 0),
-                **dependency_policy_metadata(proposal.dependencies),
-            },
+            metadata=metadata,
         )
         self._record_candidate(run_id, evaluation, status=status)
 

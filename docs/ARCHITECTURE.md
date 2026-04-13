@@ -1,57 +1,66 @@
-# Architecture and Design
+# Architecture And Design
 
-This document explains how JOULE is structured today, how a run moves through the system, and which design decisions define the current v0.
+This document describes JOULE architecture as implemented in the current codebase.
 
-## Experience Paths and Doc Map
+## 1. System View
 
-- New user: [QUICKSTART.md](../QUICKSTART.md)
-- CI or automation: [README.md](../README.md) + [docs/ARTIFACTS.md](ARTIFACTS.md)
-- Advanced architecture and roadmap: [GUIDE.md](../GUIDE.md), [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md), and this document
+```mermaid
+flowchart LR
+    CLI[CLI Layer] --> DISC[Discovery and Workload Resolution]
+    DISC --> ORACLE[Measurement Oracle]
+    ORACLE --> ORCH[Optimization Orchestrator]
+    ORCH --> DB[(SQLite State)]
+    ORCH --> ART[Run Artifacts]
+    ORACLE --> DB
+    DB --> DASH[Dashboard and Inspect]
+    ART --> DASH
+    DB --> APPLY[Apply Audit and Source Apply]
+```
 
-## 1. System Overview
+Core principle: local-first, artifact-driven, and inspectable.
 
-JOULE treats Python optimization as a measured search problem:
+## 2. End-To-End Run Sequence
 
-1. Resolve a target function or method
-2. Resolve workloads that can exercise that target
-3. Measure the baseline
-4. Generate candidate refactors
-5. Reject invalid candidates early through correctness and surrogate checks
-6. Measure promising candidates through increasing fidelity
-7. Persist everything to SQLite and artifact files
-8. Optionally profile hotspot behavior and optimization-process metrics
-9. Optionally apply an accepted candidate back to source
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as CLI
+    participant D as Discovery
+    participant O as Oracle
+    participant S as Orchestrator
+    participant DB as SQLite
+    participant A as Artifacts
 
-The system is intentionally local-first and artifact-driven. The database is the durable state store, while run directories hold human-facing outputs and snapshots.
+    U->>C: joule run ...
+    C->>D: resolve target and workloads
+    D-->>C: TargetSpec + WorkloadBundle
+    C->>DB: create run record
+    C->>O: baseline measurement
+    O->>DB: persist measurements
+    C->>S: optimize(run_id, target, bundle)
+    S->>DB: persist events, candidates, checkpoints
+    S->>O: fidelity measurements (F1/F2/F3)
+    O->>DB: persist candidate measurements
+    C->>A: write run summary and analysis artifacts
+    C-->>U: final summary/json output
+```
 
-## 2. Main Subsystems
+## 3. Subsystems
 
-### CLI layer
+### CLI and Command Orchestration
 
 Primary entrypoint: [src/joule/cli.py](../src/joule/cli.py)
 
 Responsibilities:
-- bootstrap settings, artifact directories, database, and terminal reporting
-- expose end-user commands: `doctor`, `baseline`, `run`, `apply`, `discover`, `dashboard`, `inspect`
-- emit `.joule.lock` and run artifact files
-- gate optional `--hotspots` and `--analysis` workflows for deeper reporting
-- enforce v0 policies such as dependency-bearing candidates being review-only
 
-### Config and artifact layer
+- bootstrap settings, DB, and reporting
+- expose command surface (`doctor`, `baseline`, `run`, `resume`, `inspect`, `apply`, `discover`, `dashboard`, `transformations`, `config show`, `parse-json`)
+- coordinate output mode and CI semantics
 
-Primary files:
-- [src/joule/config.py](../src/joule/config.py)
-- [src/joule/utils/artifacts.py](../src/joule/utils/artifacts.py)
-
-Responsibilities:
-- load `tool.joule` settings from project `pyproject.toml`
-- derive artifact and database paths
-- generate run ids
-- write `.joule.lock` with reproducibility and configuration metadata
-
-### Discovery and workload resolution
+### Discovery and Targeting
 
 Primary files:
+
 - [src/joule/discovery/resolver.py](../src/joule/discovery/resolver.py)
 - [src/joule/discovery/workloads.py](../src/joule/discovery/workloads.py)
 - [src/joule/discovery/profiler.py](../src/joule/discovery/profiler.py)
@@ -59,289 +68,141 @@ Primary files:
 - [src/joule/discovery/purity.py](../src/joule/discovery/purity.py)
 
 Responsibilities:
-- resolve supported targets: top-level sync functions, top-level async functions, class methods
-- reject impure or unsupported targets early
-- prefer explicit workload selectors
-- heuristically discover pytest workloads
-- fall back to safe default-argument invocation when appropriate
 
-Design notes:
-- Nested/local functions are intentionally out of scope for v0.
-- Async targets are supported, but meaningful evaluation is usually strongest with explicit workloads.
-- Purity analysis is heuristic and conservative.
+- resolve supported targets (top-level functions, async functions, class methods)
+- enforce purity and scope guards
+- resolve explicit workloads first, then heuristic alignment, then safe fallback
 
-### Runtime and correctness
+### Runtime and Correctness
 
 Primary files:
+
 - [src/joule/runtime.py](../src/joule/runtime.py)
+- [src/joule/runtime_helpers/worker.py](../src/joule/runtime_helpers/worker.py)
 - [src/joule/evaluators/correctness.py](../src/joule/evaluators/correctness.py)
-- [src/joule/integrations/libcst_tools.py](../src/joule/integrations/libcst_tools.py)
 
 Responsibilities:
-- execute workloads in subprocesses
-- normalize imports and overlay paths for candidate execution
-- support sync and async callables
-- patch only the target function or method while preserving the rest of the module
 
-Design notes:
-- Candidate correctness uses overlay materialization instead of editing the original project during evaluation.
-- LibCST-based replacement preserves the surrounding module better than raw string editing.
+- subprocess workload execution
+- overlay materialization for candidate correctness checks
+- profile payload extraction for hotspot analysis
 
-### Measurement backends
+### Measurement and Backends
 
 Primary files:
+
 - [src/joule/evaluators/oracle.py](../src/joule/evaluators/oracle.py)
+- [src/joule/evaluators/backends/base.py](../src/joule/evaluators/backends/base.py)
 - [src/joule/evaluators/backends/mock.py](../src/joule/evaluators/backends/mock.py)
 - [src/joule/evaluators/backends/rapl.py](../src/joule/evaluators/backends/rapl.py)
 
 Responsibilities:
-- calibrate inner repetitions
-- measure workloads across fidelity stages
-- aggregate per-sample metrics into run-level reports
-- abstract energy measurements behind backend interfaces
 
-Current backend behavior:
-- `mock`: derives an energy estimate from CPU time, wall time, and memory
-- `rapl`: reads Intel RAPL counters when available
+- calibration and repeated sampling
+- fidelity-stage measurement orchestration
+- backend abstraction and capability-aware execution strategy
 
-Design notes:
-- The adaptive repetition logic is meant to stabilize fast workloads without requiring massive outer repetition counts.
-- Backend abstraction is intentionally small so new backends can slot in later.
-
-### Hotspot profiling
+### Optimization Engine
 
 Primary files:
-- [src/joule/runtime.py](../src/joule/runtime.py)
-- [src/joule/evaluators/oracle.py](../src/joule/evaluators/oracle.py)
-- [src/joule/utils/analysis.py](../src/joule/utils/analysis.py)
 
-Responsibilities:
-- run an opt-in profiling pass after baseline measurement
-- capture cumulative-time and ownership summaries from the worker subprocess
-- persist hotspot payloads per workload and as a merged run summary
-
-Design notes:
-- Hotspot profiling is separated from measurement so it does not distort baseline latency or energy results.
-- v1 focuses on function-level and ownership-level hotspots, not a full trace UI or flamegraph server.
-
-### Optimization engine
-
-Primary files:
 - [src/joule/orchestrator/mfbo.py](../src/joule/orchestrator/mfbo.py)
+- [src/joule/orchestrator/internal/mfbo_flow.py](../src/joule/orchestrator/internal/mfbo_flow.py)
 - [src/joule/orchestrator/pareto.py](../src/joule/orchestrator/pareto.py)
-- [src/joule/orchestrator/explainer.py](../src/joule/orchestrator/explainer.py)
 - [src/joule/surrogate/gp.py](../src/joule/surrogate/gp.py)
 - [src/joule/transformers/registry.py](../src/joule/transformers/registry.py)
-- [src/joule/transformers/deterministic/](../src/joule/transformers/deterministic)
-- [src/joule/transformers/generative/](../src/joule/transformers/generative)
 
 Responsibilities:
-- run the optimization loop
-- rank operators
-- deterministically precheck operator applicability via AST pattern matching before generation
-- generate candidate source variants
-- lock deterministic source-to-source rewrite shape through golden snapshot tests
-- screen candidates using correctness and surrogate logic
-- promote or reject candidates across `F1`, `F2`, and `F3`
-- summarize accepted or rejected outcomes
-- persist search events and per-candidate analysis metadata for optional deep analysis
 
-Current design limitations:
-- Search still expands from the baseline instead of true iterative parent selection from the Pareto front.
-- The surrogate is lightweight and feature-based, not a fully modeled GP stack.
-- Dependency-bearing candidates are visible but not automatically actionable.
+- iterative Pareto-parent expansion
+- operator ranking and generation
+- correctness and surrogate gating
+- multi-fidelity promotion and acceptance logic
+- checkpointing and resume support
 
-### Persistence and reporting
+### Persistence and Reporting
 
 Primary files:
+
 - [src/joule/utils/db.py](../src/joule/utils/db.py)
-- [src/joule/utils/reporting.py](../src/joule/utils/reporting.py)
+- [src/joule/utils/analysis.py](../src/joule/utils/analysis.py)
 - [src/joule/dashboard/app.py](../src/joule/dashboard/app.py)
 
 Responsibilities:
-- persist runs, workloads, candidates, measurements, artifacts, apply audits, and operator stats
-- persist search events and hotspot profiles
-- shape textual and JSON reports
-- serve a simple HTML dashboard backed by SQLite
 
-Design notes:
-- SQLite is the system of record for run state.
-- Run directories are convenience artifacts for operator workflows and debugging.
-- The dashboard remains artifact-backed, but now includes guided run navigation, candidate filter/sort controls, and recommended next-step cues.
+- durable run-state storage in SQLite
+- analysis summarization and report shaping
+- dashboard rendering from persisted state
 
-## 3. End-to-End Command Flows
+## 4. Typed Contracts And Schema Boundaries
 
-### `baseline`
+### Backend capability contract
 
-1. Load settings and initialize artifacts
-2. Resolve target and workloads
-3. Write `.joule.lock`
-4. Create a run record in SQLite
-5. Measure the baseline at `F3`
-6. Optionally profile hotspots from the resolved workloads
-7. Persist results and render a dashboard snapshot
+`EnergyBackend` is explicit and typed:
 
-### `run`
+- `name: str`
+- `supports_parallel_measurement: bool`
+- `measure(...) -> BackendMeasurement`
 
-1. Do the same setup and target/workload resolution as `baseline`
-2. Measure the baseline
-3. Rank operators and generate candidate sources
-4. Run syntax and correctness checks in an overlay
-5. Run surrogate screening
-6. Measure promising candidates through `F1`, `F2`, `F3`
-7. Persist candidate metadata, measurements, provenance, explanations, and search events
-8. Optionally persist deeper per-candidate artifacts and hotspot summaries
-9. Write run summary and dashboard snapshot
+This makes parallel scheduling semantics predictable for built-in and plugin backends.
 
-### `transformations`
+### Metadata contract
 
-1. Load project settings
-2. Enumerate deterministic, generative, and escape transformation operators
-3. Show operator family, tier, precheck AST pattern nodes, and activation status
-4. Provide an inspectable runtime view aligned with [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md)
+Versioned metadata models are centralized in [src/joule/metadata.py](../src/joule/metadata.py):
 
-### `apply`
+- `CandidateMetadata`
+- `SurrogateDecision`
+- `versioned_event_detail(...)`
 
-1. Load the run and candidate from SQLite
-2. Verify the current target file hash matches the measured run
-3. Refuse candidates with dependency requirements
-4. Patch the target in place using LibCST-guided replacement
-5. Optionally create a branch and commit the result
-6. Persist an apply audit
+Schema versions:
 
-## 4. Data Model
+- `CANDIDATE_METADATA_SCHEMA_VERSION`
+- `SURROGATE_DECISION_SCHEMA_VERSION`
+- `SEARCH_EVENT_DETAIL_SCHEMA_VERSION`
 
-### TargetSpec
+### Measurement serialization contract
 
-Key fields:
-- `module`
-- `file_path`
-- `function_name`
-- `qualname`
-- `owner_path`
-- `is_async`
-- `metadata`
+`MeasurementReport` has canonical serialization/deserialization in [src/joule/models.py](../src/joule/models.py):
 
-Why it matters:
-- `owner_path` allows class methods to be patched and imported correctly
-- `qualname` improves clarity in inspection and diagnostics
-- `metadata` carries purity and target-kind annotations
+- `to_record()`
+- `from_record(...)`
 
-### WorkloadSpec and WorkloadBundle
+This removes duplicate deserialization logic across subsystems.
 
-Each workload includes:
-- kind: `pytest`, `property`, `harness`, or `golden_trace`
-- selector
-- provenance metadata
+## 5. Data And Artifact Model
 
-The bundle adds:
-- notes about how resolution happened
-- workload ordering already reflecting JOULE’s preference rules
+Persistent state in SQLite includes:
 
-### Run metadata
+- runs, workloads, candidates, measurements
+- search events, hotspot profiles, checkpoints
+- surrogate observations, apply audits, operator stats
 
-Run metadata includes:
-- source and file hashes
-- selected backend
-- config snapshot
-- workload provenance
-- lockfile path
+Human-facing artifacts include:
 
-This is what makes runs reproducible and inspectable after the fact.
+- run summary and analysis files
+- events timeline (`events.jsonl`)
+- dashboard snapshot (`dashboard.html`)
+- patch and candidate packs
 
-## 5. Artifact Model
+See [docs/ARTIFACTS.md](ARTIFACTS.md) for artifact triage guidance.
 
-JOULE writes two kinds of output:
+## 6. Design Tradeoffs
 
-### Persistent state
+- Local-first execution improves reproducibility and debuggability but limits horizontal scalability.
+- Explicit workloads improve validity of optimization claims but increase setup burden.
+- Review-first dependency policy improves safety but blocks fully automatic apply for dependency-bearing candidates.
+- Lightweight dashboard favors portability over richer interaction.
 
-Stored in SQLite:
-- runs
-- workloads
-- candidates
-- measurements
-- artifacts
-- apply audits
-- operator statistics
+## 7. Known Constraints
 
-### Human-facing artifacts
+- Heuristic test alignment is useful but imperfect.
+- Purity checks are static and conservative.
+- Search depth and composition breadth are intentionally bounded.
+- Persistence writes are still mostly per-operation rather than transaction-grouped per full candidate lifecycle.
 
-Stored in `.joule/`:
-- `.joule.lock`
-- `baseline.json`
-- `baseline_analysis.json`
-- `run_summary.json`
-- `optimization_analysis.json`
-- `hotspots.json`
-- `dashboard.html`
-- `events.jsonl`
-- `best.patch`
-- `best_candidate.py`
-- `candidates/<candidate_id>/...` when `--analysis` is enabled
-
-Use [docs/ARTIFACTS.md](ARTIFACTS.md) for question-based artifact lookup.
-
-## 6. Design Decisions
-
-### Local-first execution
-
-Why:
-- easier debugging
-- no service dependency
-- easier reproducibility for operators
-
-Tradeoff:
-- less centralized coordination and fewer multi-user workflows
-
-### Explicit workloads over inference
-
-Why:
-- performance claims are only meaningful when the workload is meaningful
-- async and stateful targets are hard to infer safely
-
-Tradeoff:
-- more manual input for complex cases
-
-### Review-only dependency policy
-
-Why:
-- automatic dependency edits are high-risk without rollback and audit support
-
-Tradeoff:
-- some promising candidates cannot be auto-applied yet
-
-### SQLite as the primary state store
-
-Why:
-- simple deployment model
-- easy local querying and dashboard integration
-- good enough for current v0 scale
-
-Tradeoff:
-- not built for distributed scheduling or high-concurrency orchestration
-
-## 7. Known Limitations
-
-- Heuristic pytest alignment can miss meaningful tests or rank them imperfectly
-- Purity checks are static and incomplete
-- The dashboard is a snapshot/table view rather than a full visual explorer
-- Search depth is still shallow compared with the longer-term roadmap
-- The `mock` backend is useful for development, not for hardware-truth claims
-
-## 8. Near-Term Evolution
-
-Expected next architecture steps:
-
-1. True iterative search from accepted Pareto parents
-2. Better lineage tracking between candidates
-3. Stronger surrogate features and operator analytics
-4. Richer dashboard exploration
-5. Safer dependency automation once rollback and policy handling exist
-
-## 9. Related Docs
+## 8. Related Docs
 
 - [README.md](../README.md)
 - [QUICKSTART.md](../QUICKSTART.md)
-- [GUIDE.md](../GUIDE.md)
-- [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md)
 - [docs/ARTIFACTS.md](ARTIFACTS.md)
+- [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md)

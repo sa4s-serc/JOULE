@@ -73,12 +73,14 @@ class StaticProfiler:
 
 
 def _module_name(project_root: Path, file_path: Path) -> str:
-    if "src" in file_path.parts:
-        index = file_path.parts.index("src") + 1
-        relative_parts = file_path.parts[index:]
+    src_root = project_root / "src"
+    if file_path.is_relative_to(src_root):
+        relative = file_path.relative_to(src_root).with_suffix("")
+    elif file_path.is_relative_to(project_root):
+        relative = file_path.relative_to(project_root).with_suffix("")
     else:
-        relative_parts = file_path.relative_to(project_root).parts
-    return ".".join(Path(*relative_parts).with_suffix("").parts)
+        relative = Path(file_path.stem)
+    return ".".join(relative.parts)
 
 
 def _iter_supported_nodes(tree: ast.Module) -> list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, list[str]]]:

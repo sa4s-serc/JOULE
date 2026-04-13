@@ -38,6 +38,7 @@ class WorkerExecution:
 @runtime_checkable
 class EnergyBackend(Protocol):
     name: str
+    supports_parallel_measurement: bool
 
     def measure(
         self,

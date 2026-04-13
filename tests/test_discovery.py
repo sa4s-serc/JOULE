@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+import joule.discovery.profiler as profiler_module
+import joule.discovery.resolver as resolver_module
 from joule.cli import app
 from joule.config import load_settings
 from joule.discovery.resolver import discover_targets, resolve_target, resolve_workload_bundle
@@ -105,3 +108,13 @@ def test_discover_cli_returns_json_payload_with_provenance(sample_project):
         assert "identifier" in item
         assert "provenance" in item
         assert "resolution_strategy" in item
+
+
+def test_module_name_resolution_prefers_project_src_root(tmp_path: Path):
+    project_root = tmp_path / "src" / "project_root"
+    file_path = project_root / "src" / "sample_pkg" / "algos.py"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text("def total(values):\n    return sum(values)\n", encoding="utf-8")
+
+    assert resolver_module._module_name(project_root, file_path) == "sample_pkg.algos"
+    assert profiler_module._module_name(project_root, file_path) == "sample_pkg.algos"

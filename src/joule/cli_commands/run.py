@@ -9,6 +9,7 @@ from joule.cli_helpers.artifacts import (
 from joule.cli_helpers.flow import ExecutionContext
 from joule.cli_helpers.output import resolve_output_mode
 from joule.integrations.git import preview_patch
+from joule.metadata import parse_candidate_metadata
 from joule.orchestrator.explainer import synthesize_explanation
 from joule.utils.analysis import (
     build_baseline_analysis,
@@ -78,6 +79,7 @@ def run_optimize(
     }
     best_candidate_payload = None
     if best and best.report:
+        best_metadata = parse_candidate_metadata(best.metadata)
         diff = preview_patch(context.target, best.source)
         context.db.record_artifact(context.run_id, "best.patch", "diff", diff)
         write_artifact(context.run_dir, "best.patch", diff)
@@ -85,14 +87,14 @@ def run_optimize(
         best_candidate_payload = {
             "candidate_id": best.candidate_id,
             "operator_name": best.operator_name,
-            "operator_tier": best.metadata.get("operator_tier"),
-            "operator_tier_descriptor": best.metadata.get("operator_tier_descriptor"),
+            "operator_tier": best_metadata.operator_tier,
+            "operator_tier_descriptor": best_metadata.operator_tier_descriptor,
             "score": best.score,
             "aggregate": best.report.aggregate.to_record(),
             "dependencies": best.dependencies,
-            "dependency_policy_state": best.metadata.get("dependency_policy_state"),
-            "improvement_summary": best.metadata.get("improvement_summary"),
-            "explanation_summary": best.metadata.get("explanation_summary") or synthesize_explanation(baseline_report, best),
+            "dependency_policy_state": best_metadata.dependency_policy_state,
+            "improvement_summary": best_metadata.improvement_summary.to_record(),
+            "explanation_summary": best_metadata.explanation_summary or synthesize_explanation(baseline_report, best),
         }
         metadata["best_candidate"] = best_candidate_payload
         metadata["patch_path"] = str(context.run_dir / "best.patch")
@@ -113,6 +115,23 @@ def run_optimize(
         hotspot_summary=hotspot_summary,
     )
     write_artifact(context.run_dir, "optimization_analysis.json", json_pretty(optimization_analysis))
+    summary_candidates = []
+    for item in candidates:
+        candidate_metadata = parse_candidate_metadata(item.get("metadata", {}))
+        summary_candidates.append(
+            {
+                "candidate_id": item["candidate_id"],
+                "operator_name": item["operator_name"],
+                "operator_tier": candidate_metadata.operator_tier,
+                "operator_tier_descriptor": candidate_metadata.operator_tier_descriptor,
+                "status": item["status"],
+                "rejected": candidate_metadata.rejected,
+                "dependency_policy_state": candidate_metadata.dependency_policy_state,
+                "improvement_summary": candidate_metadata.improvement_summary.to_record(),
+                "explanation_summary": candidate_metadata.explanation_summary,
+            }
+        )
+
     summary = {
         "run_id": context.run_id,
         "baseline": baseline_report.to_record(),
@@ -120,20 +139,7 @@ def run_optimize(
         "pareto": [point.candidate_id for point in pareto.points()],
         "workload_provenance": workload_provenance_records(context.bundle),
         "analysis": optimization_analysis,
-        "candidates": [
-            {
-                "candidate_id": item["candidate_id"],
-                "operator_name": item["operator_name"],
-                "operator_tier": item["metadata"].get("operator_tier"),
-                "operator_tier_descriptor": item["metadata"].get("operator_tier_descriptor"),
-                "status": item["status"],
-                "rejected": item["metadata"].get("rejected"),
-                "dependency_policy_state": item["metadata"].get("dependency_policy_state"),
-                "improvement_summary": item["metadata"].get("improvement_summary"),
-                "explanation_summary": item["metadata"].get("explanation_summary"),
-            }
-            for item in candidates
-        ],
+        "candidates": summary_candidates,
     }
     threshold = improvement_threshold if improvement_threshold is not None else context.settings.final_improvement_min
     baseline_failed = baseline_report.aggregate.success_rate < 1.0

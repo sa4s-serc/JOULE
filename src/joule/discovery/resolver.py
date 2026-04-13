@@ -88,11 +88,13 @@ def _find_root(path: Path) -> Path:
 
 
 def _module_name(project_root: Path, file_path: Path) -> str:
-    if "src" in file_path.parts:
-        index = file_path.parts.index("src") + 1
-        relative = Path(*file_path.parts[index:]).with_suffix("")
-    else:
+    src_root = project_root / "src"
+    if file_path.is_relative_to(src_root):
+        relative = file_path.relative_to(src_root).with_suffix("")
+    elif file_path.is_relative_to(project_root):
         relative = file_path.relative_to(project_root).with_suffix("")
+    else:
+        relative = Path(file_path.stem)
     return ".".join(relative.parts)
 
 
