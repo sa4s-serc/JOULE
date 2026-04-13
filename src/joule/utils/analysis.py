@@ -444,6 +444,15 @@ def human_inspect_summary(payload: dict) -> str:
         reason, count = summary["top_rejection"]
         lines.append(f"Top rejection: {reason} ({count})")
     issues = summary.get("measurement_issues") or []
+    surrogate = summary.get("surrogate_learning") or {}
+    if surrogate:
+        lines.append(
+            "Surrogate learning: "
+            f"stored={surrogate.get('stored_observations', 0)} "
+            f"preview={surrogate.get('preview_count', 0)} "
+            f"reuse={surrogate.get('reuse_enabled', False)} "
+            f"warm_start_limit={surrogate.get('warm_start_limit', 0)}"
+        )
     if issues:
         first = issues[0]
         lines.append(

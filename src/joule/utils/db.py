@@ -406,6 +406,18 @@ class JouleDB:
             for row in rows
         ]
 
+    def count_surrogate_observations(self, *, target_key: str | None = None) -> int:
+        if target_key is None:
+            row = self._fetchone("SELECT COUNT(1) FROM surrogate_observations")
+        else:
+            row = self._fetchone(
+                "SELECT COUNT(1) FROM surrogate_observations WHERE target_key = ?",
+                (target_key,),
+            )
+        if row is None:
+            return 0
+        return int(row[0])
+
     def list_runs(self) -> list[dict]:
         rows = self._fetchall(
             "SELECT run_id, run_type, status, created_at, metadata_json FROM runs ORDER BY created_at DESC"

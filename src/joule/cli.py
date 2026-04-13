@@ -353,10 +353,13 @@ def inspect(
     run_id: str = typer.Option(..., "--run-id", help="Run identifier produced by baseline or run"),
     candidate_id: str | None = typer.Option(None, "--candidate-id", help="Inspect a specific candidate"),
     output: str = typer.Option("json", "--output", help="Output format: human or json"),
+    surrogate_limit: int = typer.Option(5, "--surrogate-limit", help="Number of surrogate history rows to include"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed inspection events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
-    run_inspect(path, run_id, candidate_id, output, verbose, quiet, bootstrap_fn=_bootstrap)
+    if surrogate_limit < 0:
+        raise typer.BadParameter("--surrogate-limit must be >= 0")
+    run_inspect(path, run_id, candidate_id, output, verbose, quiet, surrogate_limit, bootstrap_fn=_bootstrap)
 
 
 @app.command("parse-json")

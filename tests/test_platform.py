@@ -133,6 +133,9 @@ def test_discover_and_inspect_expose_workload_provenance(sample_project):
     assert inspect_result.exit_code == 0, inspect_result.output
     assert "workload_provenance" in inspect_result.output
     assert '"summary"' in inspect_result.output
+    payload = json.loads(inspect_result.output)
+    assert "surrogate_learning" in payload
+    assert payload["summary"]["surrogate_learning"]["stored_observations"] >= 0
 
 
 def test_inspect_human_output_is_readable(sample_project):
@@ -159,6 +162,7 @@ def test_inspect_human_output_is_readable(sample_project):
     assert "Run:" in inspect_result.output
     assert "Candidates:" in inspect_result.output
     assert "Diagnostics:" in inspect_result.output
+    assert "Surrogate learning:" in inspect_result.output
 
 
 def test_discover_human_output_is_human_readable(sample_project):
@@ -227,6 +231,13 @@ def test_run_help_exposes_budget_and_path_guidance():
     assert result.exit_code == 0, result.output
     assert "Path to a target .py file or project root" in result.output
     assert "--budget" in result.output
+    assert "--fresh-surrogate" in result.output
+
+
+def test_resume_help_exposes_fresh_surrogate_option():
+    result = runner.invoke(app, ["resume", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--fresh-surrogate" in result.output
 
 
 def test_transformations_command_lists_registered_operators(sample_project):
