@@ -16,15 +16,15 @@ def run_config_show(path: Path, output: str, *, console) -> None:
         settings = load_settings(path)
     except ValueError as exc:
         raise BadParameter(str(exc)) from exc
+    record = settings.to_record()
     payload = {
         "project_root": str(settings.project_root),
-        "resolved": settings.to_record(),
+        "resolved": record,
     }
     if output_mode == "json":
         echo(json_pretty(payload))
         return
 
-    record = payload["resolved"]
     table = Table(title="Resolved JOULE Configuration")
     table.add_column("Key", no_wrap=True)
     table.add_column("Value", overflow="fold")

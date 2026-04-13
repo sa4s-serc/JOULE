@@ -69,7 +69,6 @@ class OptimizationOrchestrator:
         self.registry = registry
         self.surrogate = surrogate
         self.reporter = reporter
-        self._warm_start_surrogate()
 
     @classmethod
     def create(
@@ -82,7 +81,13 @@ class OptimizationOrchestrator:
         correctness = CorrectnessEngine()
         registry = OperatorRegistry(llm_model=settings.llm_model, include_llm=True)
         registry.load_stats(db.get_operator_stats())
-        surrogate = GaussianProcessSurrogate()
+        surrogate = GaussianProcessSurrogate(
+            acquisition=settings.surrogate_acquisition,
+            gp_noise=settings.surrogate_gp_noise,
+            gp_length_scale=settings.surrogate_gp_length_scale,
+            gp_nu=settings.surrogate_gp_nu,
+            gp_ucb_beta=settings.surrogate_gp_ucb_beta,
+        )
         return cls(
             settings=settings,
             db=db,
@@ -120,9 +125,13 @@ class OptimizationOrchestrator:
         resume: str | None = None,
         use_cache: bool = True,
         checkpoint_path: Path | None = None,
+        fresh_surrogate: bool = False,
     ) -> tuple:
         if resume and resume != run_id:
             raise ValueError("Run IDs must match when resuming. Use `joule resume --run-id <id>` to continue an existing run.")
+
+        target_key = self._target_key(target)
+        self._warm_start_surrogate(target_key=target_key, fresh_start=fresh_surrogate)
 
         restored = self._restore_checkpoint(run_id=resume or run_id)
         if restored:
@@ -177,7 +186,12 @@ class OptimizationOrchestrator:
             escape_used = False
 
         baseline_score = scalar_score(baseline.aggregate)
-        self.surrogate.record(target.source, baseline_score)
+        self._record_surrogate_observation(
+            run_id=run_id,
+            target_key=target_key,
+            source=target.source,
+            score=baseline_score,
+        )
         accepted_candidate_ids = {candidate_id for candidate_id in accepted_evaluations}
         if self.reporter:
             self.reporter.info("progress", f"Optimization budget: {state.total_budget} measured candidate(s)")
@@ -521,9 +535,11 @@ class OptimizationOrchestrator:
                     candidate_report = report
                     last_stage = fidelity.value
                     candidate_score = scalar_score(report.aggregate)
-                    self.surrogate.record(
-                        proposal.candidate_source,
-                        candidate_score,
+                    self._record_surrogate_observation(
+                        run_id=run_id,
+                        target_key=target_key,
+                        source=proposal.candidate_source,
+                        score=candidate_score,
                         feature_hints=proposal.feature_hints,
                         context=parent_context,
                     )
@@ -1118,13 +1134,53 @@ class OptimizationOrchestrator:
         )
         self._record_candidate(run_id, evaluation, status=status)
 
-    def _warm_start_surrogate(self) -> None:
+    def _target_key(self, target: TargetSpec) -> str:
+        return f"{target.module}:{target.qualname}"
+
+    def _surrogate_hints(
+        self,
+        *,
+        source: str,
+        feature_hints: dict[str, float] | None,
+        context: SearchContext | None,
+    ) -> dict[str, float]:
+        hints = dict(feature_hints or {})
+        if context is not None:
+            hints.setdefault("parent_len_delta", float(abs(len(source) - len(context.parent_source))))
+            hints.setdefault("generation_depth", float(context.generation_depth))
+        return hints
+
+    def _record_surrogate_observation(
+        self,
+        *,
+        run_id: str,
+        target_key: str,
+        source: str,
+        score: float,
+        feature_hints: dict[str, float] | None = None,
+        context: SearchContext | None = None,
+    ) -> None:
+        hints = self._surrogate_hints(source=source, feature_hints=feature_hints, context=context)
+        self.surrogate.record(source, score, feature_hints=hints, context=context)
+        self.db.save_surrogate_observation(
+            run_id=run_id,
+            target_key=target_key,
+            source_code=source,
+            score=score,
+            feature_hints=hints,
+        )
+
+    def _warm_start_surrogate(self, *, target_key: str, fresh_start: bool) -> None:
         limit = max(0, self.settings.surrogate_warm_start_limit)
-        if limit == 0:
+        if limit == 0 or fresh_start or not self.settings.surrogate_reuse_observations:
             return
-        observations = self.db.get_recent_candidate_observations(limit=limit)
-        for source, score in reversed(observations):
-            self.surrogate.record(source, score)
+        observations = self.db.get_surrogate_observations(limit=limit, target_key=target_key)
+        for item in reversed(observations):
+            self.surrogate.record(
+                str(item.get("source", "")),
+                float(item.get("score", 0.0)),
+                feature_hints=dict(item.get("feature_hints", {})),
+            )
 
     def _target_with_source(self, target: TargetSpec, source: str, *, parent_id: str) -> TargetSpec:
         metadata = dict(target.metadata)

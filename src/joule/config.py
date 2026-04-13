@@ -48,6 +48,20 @@ PROFILE_FIDELITY_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
 @dataclass(slots=True)
 class FidelitySettings:
     f1_repetitions: int = 3
@@ -104,7 +118,13 @@ class JouleSettings:
     search_convergence_patience: int = 4
     search_min_novelty: float = 0.12
     surrogate_warm_start_limit: int = 50
+    surrogate_reuse_observations: bool = True
     surrogate_min_training_points: int = 3
+    surrogate_acquisition: str = "ei"
+    surrogate_gp_noise: float = 1e-6
+    surrogate_gp_length_scale: float = 1.0
+    surrogate_gp_nu: float = 1.5
+    surrogate_gp_ucb_beta: float = 1.0
     backends: BackendSettings = field(default_factory=BackendSettings)
     pareto_weights: ParetoWeights = field(default_factory=ParetoWeights)
     fidelity: FidelitySettings = field(default_factory=FidelitySettings)
@@ -201,7 +221,16 @@ def load_settings(path: str | Path) -> JouleSettings:
         search_convergence_patience=int(resolved_payload.get("search_convergence_patience", 4)),
         search_min_novelty=float(resolved_payload.get("search_min_novelty", 0.12)),
         surrogate_warm_start_limit=int(resolved_payload.get("surrogate_warm_start_limit", 50)),
+        surrogate_reuse_observations=_coerce_bool(
+            resolved_payload.get("surrogate_reuse_observations", True),
+            default=True,
+        ),
         surrogate_min_training_points=int(resolved_payload.get("surrogate_min_training_points", 3)),
+        surrogate_acquisition=str(resolved_payload.get("surrogate_acquisition", "ei")),
+        surrogate_gp_noise=float(resolved_payload.get("surrogate_gp_noise", 1e-6)),
+        surrogate_gp_length_scale=float(resolved_payload.get("surrogate_gp_length_scale", 1.0)),
+        surrogate_gp_nu=float(resolved_payload.get("surrogate_gp_nu", 1.5)),
+        surrogate_gp_ucb_beta=float(resolved_payload.get("surrogate_gp_ucb_beta", 1.0)),
         backends=BackendSettings(options=backend_payload if isinstance(backend_payload, dict) else {}),
         pareto_weights=ParetoWeights(
             energy=float(resolved_payload.get("pareto_weight_energy", 0.5)),

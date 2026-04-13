@@ -217,6 +217,11 @@ def run(
         help="Minimum scalar improvement ratio required for CI success",
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable measurement cache"),
+    fresh_surrogate: bool = typer.Option(
+        False,
+        "--fresh-surrogate",
+        help="Start without loading persisted surrogate observations",
+    ),
     parallel: int | None = typer.Option(None, "--parallel", help="Override max parallel workers"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
@@ -248,6 +253,7 @@ def run(
         no_cache=no_cache,
         ci=ci,
         improvement_threshold=improvement_threshold,
+        fresh_surrogate=fresh_surrogate,
     )
 
 
@@ -266,6 +272,11 @@ def resume(
         help="Minimum scalar improvement ratio required for CI success",
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable measurement cache"),
+    fresh_surrogate: bool = typer.Option(
+        False,
+        "--fresh-surrogate",
+        help="Start without loading persisted surrogate observations",
+    ),
     parallel: int | None = typer.Option(None, "--parallel", help="Override max parallel workers"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
@@ -283,6 +294,7 @@ def resume(
         ci=ci,
         improvement_threshold=improvement_threshold,
         no_cache=no_cache,
+        fresh_surrogate=fresh_surrogate,
         parallel=parallel,
         verbose=verbose,
         quiet=quiet,

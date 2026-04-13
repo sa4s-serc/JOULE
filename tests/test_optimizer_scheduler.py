@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, cast
 
@@ -238,18 +239,14 @@ def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
     assert screened["reason"] == "low_novelty"
 
     settings = JouleSettings(project_root=tmp_path, surrogate_warm_start_limit=5)
+    target, _bundle = _target_and_bundle(tmp_path)
+    target_key = f"{target.module}:{target.qualname}"
     db = JouleDB(settings.db_path)
-    db.record_candidate(
-        candidate_id="hist-1",
+    db.save_surrogate_observation(
         run_id="hist-run",
-        parent_id="baseline",
-        operator_name="hist-op",
-        reasoning="history",
-        dependencies=[],
+        target_key=target_key,
         source_code=source,
-        status="accepted",
         score=2.5,
-        metadata={},
     )
     orchestrator = OptimizationOrchestrator(
         settings=settings,
@@ -259,5 +256,65 @@ def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
         surrogate=GaussianProcessSurrogate(),
     )
+    orchestrator._warm_start_surrogate(target_key=target_key, fresh_start=False)
     mean, _uncertainty = orchestrator.surrogate.predict(source)
     assert mean == 2.5
+
+    fresh_orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle({source: (1.0, 1.0, 1.0)})),
+        correctness=cast(Any, CorrectnessEngine()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=GaussianProcessSurrogate(),
+    )
+    fresh_orchestrator._warm_start_surrogate(target_key=target_key, fresh_start=True)
+    fresh_mean, _fresh_uncertainty = fresh_orchestrator.surrogate.predict(source)
+    assert fresh_mean == 0.0
+
+
+def test_surrogate_predicts_and_exposes_acquisition_metadata():
+    surrogate = GaussianProcessSurrogate(acquisition="ei")
+    training = [
+        ("def f(x):\n    return x + 1\n", 1.2),
+        ("def f(x):\n    return x + 2\n", 1.1),
+        ("def f(x):\n    return (x + 3)\n", 1.0),
+    ]
+    for source, score in training:
+        surrogate.record(source, score)
+
+    query = "def f(x):\n    y = x + 1\n    return y\n"
+    mean, uncertainty = surrogate.predict(query)
+    assert math.isfinite(mean)
+    assert math.isfinite(uncertainty)
+    assert uncertainty >= 0.0
+
+    screened = surrogate.screen_candidate(
+        source=query,
+        best_score=0.9,
+        phase=SearchPhase.EXPLOITATION,
+        min_novelty=0.0,
+        min_training_points=3,
+    )
+    assert screened["model_mode"] == "gp"
+    assert screened["acquisition"] == "ei"
+    assert math.isfinite(float(screened["acquisition_score"]))
+
+
+def test_orchestrator_create_uses_configured_surrogate_settings(tmp_path: Path):
+    settings = JouleSettings(
+        project_root=tmp_path,
+        surrogate_acquisition="ucb",
+        surrogate_gp_noise=1e-5,
+        surrogate_gp_length_scale=2.0,
+        surrogate_gp_nu=2.5,
+        surrogate_gp_ucb_beta=1.8,
+    )
+    target, _bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+    oracle = cast(Any, _FakeOracle({target.source: (1.0, 1.0, 1.0)}))
+
+    orchestrator = OptimizationOrchestrator.create(settings, db, oracle)
+
+    assert orchestrator.surrogate.mode == "gp"
+    assert orchestrator.surrogate.acquisition == "ucb"

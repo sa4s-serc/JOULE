@@ -23,6 +23,7 @@ def run_resume(
     ci: bool,
     improvement_threshold: float | None,
     no_cache: bool,
+    fresh_surrogate: bool,
     parallel: int | None,
     verbose: bool,
     quiet: bool,
@@ -87,4 +88,5 @@ def run_resume(
         no_cache=no_cache,
         ci=ci,
         improvement_threshold=improvement_threshold,
+        fresh_surrogate=fresh_surrogate,
     )

@@ -32,6 +32,7 @@ def run_optimize(
     no_cache: bool = False,
     ci: bool = False,
     improvement_threshold: float | None = None,
+    fresh_surrogate: bool = False,
 ) -> None:
     from typer import BadParameter, Exit, echo
 
@@ -49,6 +50,7 @@ def run_optimize(
         resume=resume,
         use_cache=not no_cache,
         checkpoint_path=context.run_dir / "checkpoint.json",
+        fresh_surrogate=fresh_surrogate,
     )
     hotspot_summary = collect_hotspot_analysis(
         oracle=context.oracle,

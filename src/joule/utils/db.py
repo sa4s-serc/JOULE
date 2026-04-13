@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+import hashlib
 from pathlib import Path
 import json
 import sqlite3
@@ -143,6 +144,23 @@ CREATE TABLE IF NOT EXISTS measurements_cache (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cache_lookup ON measurements_cache(source_hash, workload_id, fidelity);
+""",
+    ),
+    (
+        3,
+        """
+CREATE TABLE IF NOT EXISTS surrogate_observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  target_key TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  source_code TEXT NOT NULL,
+  score REAL NOT NULL,
+  feature_hints_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(target_key, source_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_surrogate_obs_target_recent ON surrogate_observations(target_key, id DESC);
 """,
     ),
 ]
@@ -314,18 +332,79 @@ class JouleDB:
             for row in rows
         }
 
-    def get_recent_candidate_observations(self, *, limit: int) -> list[tuple[str, float]]:
-        rows = self._fetchall(
-            """
-            SELECT source_code, score
-            FROM candidates
-            WHERE score < 1e308
-            ORDER BY rowid DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        return [(str(row[0]), float(row[1])) for row in rows]
+    def save_surrogate_observation(
+        self,
+        *,
+        run_id: str,
+        target_key: str,
+        source_code: str,
+        score: float,
+        feature_hints: dict[str, float] | None = None,
+    ) -> None:
+        created_at = datetime.now(UTC).isoformat()
+        source_hash = hashlib.sha256(source_code.encode("utf-8")).hexdigest()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO surrogate_observations(
+                    run_id,
+                    target_key,
+                    source_hash,
+                    source_code,
+                    score,
+                    feature_hints_json,
+                    created_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(target_key, source_hash)
+                DO UPDATE SET
+                    run_id=excluded.run_id,
+                    source_code=excluded.source_code,
+                    score=excluded.score,
+                    feature_hints_json=excluded.feature_hints_json,
+                    created_at=excluded.created_at
+                """,
+                (
+                    run_id,
+                    target_key,
+                    source_hash,
+                    source_code,
+                    float(score),
+                    json.dumps(feature_hints or {}),
+                    created_at,
+                ),
+            )
+
+    def get_surrogate_observations(self, *, limit: int, target_key: str | None = None) -> list[dict[str, Any]]:
+        if target_key is None:
+            rows = self._fetchall(
+                """
+                SELECT source_code, score, feature_hints_json
+                FROM surrogate_observations
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        else:
+            rows = self._fetchall(
+                """
+                SELECT source_code, score, feature_hints_json
+                FROM surrogate_observations
+                WHERE target_key = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (target_key, limit),
+            )
+        return [
+            {
+                "source": str(row[0]),
+                "score": float(row[1]),
+                "feature_hints": json.loads(str(row[2])) if row[2] else {},
+            }
+            for row in rows
+        ]
 
     def list_runs(self) -> list[dict]:
         rows = self._fetchall(
