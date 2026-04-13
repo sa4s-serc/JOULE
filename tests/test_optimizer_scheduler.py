@@ -224,6 +224,21 @@ def test_pareto_front_rejects_dominated_candidates_and_keeps_tradeoffs():
     assert {item.candidate_id for item in front.points()} == {"baseline", "a", "b"}
 
 
+def test_pareto_parent_sampling_can_prefer_deeper_points():
+    baseline_metrics = AggregateMetrics("all", 1, 1.0, 10.0, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0)
+    deeper_metrics = AggregateMetrics("all", 1, 1.0, 11.0, 11.0, 10.0, 9.0, 0.0, 0.0, 0.0, 0.0)
+
+    shallow_first = ParetoFront(weights=(0.5, 0.3, 0.2))
+    shallow_first.add(ParetoPoint(candidate_id="baseline", metrics=baseline_metrics, generation_depth=0))
+    shallow_first.add(ParetoPoint(candidate_id="deep", metrics=deeper_metrics, generation_depth=2))
+    assert shallow_first.sample_active_parent(max_generation=4, prefer_deeper=False) == "baseline"
+
+    deep_first = ParetoFront(weights=(0.5, 0.3, 0.2))
+    deep_first.add(ParetoPoint(candidate_id="baseline", metrics=baseline_metrics, generation_depth=0))
+    deep_first.add(ParetoPoint(candidate_id="deep", metrics=deeper_metrics, generation_depth=2))
+    assert deep_first.sample_active_parent(max_generation=4, prefer_deeper=True) == "deep"
+
+
 def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
     surrogate = GaussianProcessSurrogate()
     source = "def f(x):\n    return x + 1\n"
@@ -318,3 +333,44 @@ def test_orchestrator_create_uses_configured_surrogate_settings(tmp_path: Path):
 
     assert orchestrator.surrogate.mode == "gp"
     assert orchestrator.surrogate.acquisition == "ucb"
+
+
+def test_operator_composition_generates_chained_metadata(tmp_path: Path):
+    settings = JouleSettings(
+        project_root=tmp_path,
+        search_min_novelty=0.0,
+        surrogate_min_training_points=1,
+        search_branching_factor=2,
+        search_composition_enabled=True,
+        search_composition_width=1,
+        search_max_generations=4,
+    )
+    target, bundle = _target_and_bundle(tmp_path)
+    source_metrics = {
+        target.source: (10.0, 10.0, 1_000.0),
+        "def target(limit):\n    return sum(value for value in range(limit))\n": (11.0, 9.0, 1_000.0),
+        (
+            "def target(limit):\n"
+            "    total = 0\n"
+            "    for value in range(limit):\n"
+            "        total += value\n"
+            "    return total\n"
+        ): (12.0, 8.0, 1_000.0),
+    }
+    db = JouleDB(settings.db_path)
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle(source_metrics)),
+        correctness=cast(Any, _AlwaysCorrect()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=GaussianProcessSurrogate(),
+    )
+
+    orchestrator.optimize("run-compose", target, bundle, budget=2)
+
+    candidates = db.get_candidates("run-compose")
+    composed = [item for item in candidates if int(item["metadata"].get("composition_hops", 0)) > 0]
+    assert composed
+    assert any(item["metadata"].get("generation_depth") == 2 for item in composed)
+    assert any(len(item["metadata"].get("composed_operator_chain", [])) == 2 for item in composed)

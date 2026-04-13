@@ -48,6 +48,9 @@ def generated_candidate_detail(
         "operator_family": proposal.operator_family,
         "operator_tier": proposal.operator_tier.value,
         "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
+        "generation_delta": int(proposal.metadata.get("generation_delta", 1) or 1),
+        "composed_operator_chain": list(proposal.metadata.get("composed_operator_chain", [])),
+        "composition_hops": int(proposal.metadata.get("composition_hops", 0) or 0),
     }
 
 
@@ -97,6 +100,9 @@ def build_correctness_rejection_evaluation(
             "operator_family": proposal.operator_family,
             "operator_tier": proposal.operator_tier.value,
             "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
+            "generation_delta": int(proposal.metadata.get("generation_delta", 1) or 1),
+            "composed_operator_chain": list(proposal.metadata.get("composed_operator_chain", [])),
+            "composition_hops": int(proposal.metadata.get("composition_hops", 0) or 0),
             **dependency_policy_metadata(proposal.dependencies),
         },
     )
@@ -138,5 +144,8 @@ def build_candidate_metadata(
         "operator_tier": proposal.operator_tier.value,
         "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
         "proposal_rank": proposal.proposal_rank,
+        "generation_delta": int(proposal.metadata.get("generation_delta", 1) or 1),
+        "composed_operator_chain": list(proposal.metadata.get("composed_operator_chain", [])),
+        "composition_hops": int(proposal.metadata.get("composition_hops", 0) or 0),
         **dependency_policy_metadata(proposal.dependencies),
     }

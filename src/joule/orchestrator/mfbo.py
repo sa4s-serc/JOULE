@@ -197,7 +197,11 @@ class OptimizationOrchestrator:
             self.reporter.info("progress", f"Optimization budget: {state.total_budget} measured candidate(s)")
         while state.measured < state.total_budget:
             phase = self._phase_for_index(state.measured, state.total_budget)
-            parent_id = pareto.sample_active_parent(max_generation=self.settings.search_max_generations)
+            prefer_deeper_parent = phase is not SearchPhase.EXPLORATION or state.no_frontier_gain > 0
+            parent_id = pareto.sample_active_parent(
+                max_generation=self.settings.search_max_generations,
+                prefer_deeper=prefer_deeper_parent,
+            )
             if parent_id is None:
                 if self.reporter:
                     self.reporter.info("progress", "Stopping early: no active frontier candidates left")
@@ -307,13 +311,22 @@ class OptimizationOrchestrator:
                 if pareto.expansion_count(parent_id) >= state.max_parent_expansions:
                     pareto.mark_exhausted(parent_id)
                 continue
+            proposals = self._augment_with_compositions(
+                proposals=proposals,
+                target=target,
+                parent_id=parent_id,
+                parent=parent,
+                parent_context=parent_context,
+                phase=phase,
+            )
             ranked_proposals = sorted(proposals, key=lambda item: item.proposal_rank)[: self.settings.search_branching_factor]
             for proposal in ranked_proposals:
                 if state.measured >= state.total_budget:
                     break
                 candidate_id = uuid.uuid4().hex[:8]
                 source_hash = candidate_source_hash(proposal.candidate_source)
-                next_depth = parent.generation_depth + 1
+                generation_delta = self._proposal_generation_delta(proposal)
+                next_depth = min(self.settings.search_max_generations, parent.generation_depth + generation_delta)
                 self._record_event(
                     run_id,
                     event_type="generated",
@@ -1129,10 +1142,120 @@ class OptimizationOrchestrator:
                 "operator_tier": proposal.operator_tier.value,
                 "operator_tier_descriptor": proposal.metadata.get("operator_tier_descriptor", ""),
                 "proposal_rank": proposal.proposal_rank,
+                "generation_delta": self._proposal_generation_delta(proposal),
+                "composed_operator_chain": list(proposal.metadata.get("composed_operator_chain", [])),
+                "composition_hops": int(proposal.metadata.get("composition_hops", 0) or 0),
                 **dependency_policy_metadata(proposal.dependencies),
             },
         )
         self._record_candidate(run_id, evaluation, status=status)
+
+    def _proposal_generation_delta(self, proposal: TransformationResult) -> int:
+        raw = proposal.metadata.get("generation_delta", 1)
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            return 1
+
+    def _merge_feature_hints(
+        self,
+        first: dict[str, float],
+        second: dict[str, float],
+    ) -> dict[str, float]:
+        merged: dict[str, float] = {}
+        for payload in (first, second):
+            for key, value in payload.items():
+                try:
+                    merged[key] = float(merged.get(key, 0.0)) + float(value)
+                except (TypeError, ValueError):
+                    continue
+        return merged
+
+    def _augment_with_compositions(
+        self,
+        *,
+        proposals: list[TransformationResult],
+        target: TargetSpec,
+        parent_id: str,
+        parent: _ParentSnapshot,
+        parent_context: SearchContext,
+        phase: SearchPhase,
+    ) -> list[TransformationResult]:
+        if not self.settings.search_composition_enabled:
+            return proposals
+
+        width = max(1, int(self.settings.search_composition_width))
+        ranked = sorted(proposals, key=lambda item: item.proposal_rank)[:width]
+        composed: list[TransformationResult] = []
+
+        for primary in ranked:
+            primary_delta = self._proposal_generation_delta(primary)
+            intermediate_depth = parent.generation_depth + primary_delta
+            if intermediate_depth >= self.settings.search_max_generations:
+                continue
+            intermediate_target = self._target_with_source(target, primary.candidate_source, parent_id=parent_id)
+            intermediate_context = SearchContext(
+                parent_id=parent_id,
+                parent_source=primary.candidate_source,
+                parent_operator_name=primary.operator_name,
+                generation_depth=intermediate_depth,
+                phase=phase,
+                rejection_history=parent_context.rejection_history[-5:],
+                search_metadata={
+                    **dict(parent_context.search_metadata),
+                    "composition_hops": 1,
+                    "composed_from_operator": primary.operator_name,
+                },
+            )
+            select_for_candidate = getattr(self.registry, "select_operator_for_candidate", None)
+            if callable(select_for_candidate):
+                secondary_operator = select_for_candidate(
+                    target=intermediate_target,
+                    context=intermediate_context,
+                    phase=phase,
+                    parent_generation=intermediate_depth,
+                )
+            else:
+                secondary_operator = self.registry.select_operator(
+                    phase=phase,
+                    parent_generation=intermediate_depth,
+                )
+            if secondary_operator is None:
+                continue
+            secondary_proposals = secondary_operator.generate(intermediate_target, intermediate_context)
+            if not secondary_proposals:
+                continue
+            secondary = sorted(secondary_proposals, key=lambda item: item.proposal_rank)[0]
+            secondary_delta = self._proposal_generation_delta(secondary)
+            merged_hints = self._merge_feature_hints(primary.feature_hints, secondary.feature_hints)
+            composed_metadata = {
+                **dict(secondary.metadata),
+                "composed_operator_chain": [primary.operator_name, secondary.operator_name],
+                "composition_hops": 1,
+                "generation_delta": primary_delta + secondary_delta,
+                "composed_from_operator": primary.operator_name,
+                "composed_from_reasoning": primary.reasoning,
+            }
+            composed.append(
+                TransformationResult(
+                    operator_name=secondary.operator_name,
+                    candidate_source=secondary.candidate_source,
+                    reasoning=f"{primary.reasoning} -> {secondary.reasoning}".strip(),
+                    dependencies=sorted(set([*primary.dependencies, *secondary.dependencies])),
+                    operator_family=secondary.operator_family,
+                    operator_tier=secondary.operator_tier,
+                    proposal_rank=(primary.proposal_rank * 1000) + secondary.proposal_rank + 500,
+                    feature_hints=merged_hints,
+                    metadata=composed_metadata,
+                )
+            )
+
+        if not composed:
+            return proposals
+        merged: dict[str, TransformationResult] = {}
+        for proposal in [*proposals, *composed]:
+            merged.setdefault(proposal.candidate_source, proposal)
+        return list(merged.values())
 
     def _target_key(self, target: TargetSpec) -> str:
         return f"{target.module}:{target.qualname}"

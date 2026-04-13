@@ -64,7 +64,7 @@ class ParetoFront:
             "frontier_size": len(self._points),
         }
 
-    def sample_active_parent(self, *, max_generation: int) -> str | None:
+    def sample_active_parent(self, *, max_generation: int, prefer_deeper: bool = False) -> str | None:
         choices = [item for item in self._points if item.active and item.generation_depth < max_generation]
         if not choices:
             return None
@@ -72,7 +72,7 @@ class ParetoFront:
             choices,
             key=lambda item: (
                 self._expansions.get(item.candidate_id, 0),
-                item.generation_depth,
+                -item.generation_depth if prefer_deeper else item.generation_depth,
                 self.weighted_score(item.metrics),
                 item.candidate_id,
             ),

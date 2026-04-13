@@ -117,6 +117,8 @@ class JouleSettings:
     search_confirmation_fraction: float = 0.20
     search_convergence_patience: int = 4
     search_min_novelty: float = 0.12
+    search_composition_enabled: bool = False
+    search_composition_width: int = 1
     surrogate_warm_start_limit: int = 50
     surrogate_reuse_observations: bool = True
     surrogate_min_training_points: int = 3
@@ -220,6 +222,11 @@ def load_settings(path: str | Path) -> JouleSettings:
         search_confirmation_fraction=float(resolved_payload.get("search_confirmation_fraction", 0.20)),
         search_convergence_patience=int(resolved_payload.get("search_convergence_patience", 4)),
         search_min_novelty=float(resolved_payload.get("search_min_novelty", 0.12)),
+        search_composition_enabled=_coerce_bool(
+            resolved_payload.get("search_composition_enabled", False),
+            default=False,
+        ),
+        search_composition_width=max(1, int(resolved_payload.get("search_composition_width", 1))),
         surrogate_warm_start_limit=int(resolved_payload.get("surrogate_warm_start_limit", 50)),
         surrogate_reuse_observations=_coerce_bool(
             resolved_payload.get("surrogate_reuse_observations", True),
