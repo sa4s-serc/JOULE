@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from joule.models import AggregateMetrics
+from joule.utils.metrics import weighted_score
 
 
 @dataclass(slots=True)
@@ -48,11 +49,15 @@ class ParetoFront:
         return min(points, key=lambda item: self.weighted_score(item.metrics))
 
     def weighted_score(self, metrics: AggregateMetrics) -> float:
-        return (
-            metrics.mean_energy_j * self._weights[0]
-            + metrics.mean_wall_time_s * self._weights[1]
-            + metrics.mean_peak_memory_bytes * self._weights[2]
-        )
+        return weighted_score(metrics, self._weights)
+
+    def expansion_counts(self) -> dict[str, int]:
+        return dict(self._expansions)
+
+    def load_expansion_counts(self, counts: dict[str, int]) -> None:
+        self._expansions = {candidate_id: max(0, int(count)) for candidate_id, count in counts.items()}
+        for point in self._points:
+            self._expansions.setdefault(point.candidate_id, 0)
 
     def dominance_summary(self, metrics: AggregateMetrics) -> dict[str, Any]:
         dominated_by = [item.candidate_id for item in self._points if _dominates(item.metrics, metrics)]

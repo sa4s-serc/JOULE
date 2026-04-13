@@ -779,6 +779,7 @@ class OptimizationOrchestrator:
             },
             "accepted_candidate_ids": sorted(accepted_candidate_ids),
             "escape_used": escape_used,
+            "expansion_counts": pareto.expansion_counts(),
         }
         self.db.save_checkpoint(
             run_id=run_id,
@@ -852,6 +853,10 @@ class OptimizationOrchestrator:
                     active=True,
                 )
             )
+
+        expansion_counts = metadata.get("expansion_counts", {}) if isinstance(metadata, dict) else {}
+        if isinstance(expansion_counts, dict):
+            pareto.load_expansion_counts({str(key): int(value) for key, value in expansion_counts.items()})
 
         parent_payload = metadata.get("parent_snapshots", {}) if isinstance(metadata, dict) else {}
         parent_snapshots: dict[str, _ParentSnapshot] = {}

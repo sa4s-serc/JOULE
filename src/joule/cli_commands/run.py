@@ -135,18 +135,6 @@ def run_optimize(
             for item in candidates
         ],
     }
-    summary["artifact_paths"] = artifact_paths_payload(
-        context.run_dir,
-        [
-            "run_summary.json",
-            "optimization_analysis.json",
-            "hotspots.json",
-            "best.patch",
-            "dashboard.html",
-            "events.jsonl",
-        ],
-    )
-
     threshold = improvement_threshold if improvement_threshold is not None else context.settings.final_improvement_min
     baseline_failed = baseline_report.aggregate.success_rate < 1.0
     accepted_exists = any(item["status"] == "accepted" for item in candidates)
@@ -171,6 +159,18 @@ def run_optimize(
         }
 
     write_run_summary(context.db, context.run_dir, "run_summary.json", summary)
+    summary["artifact_paths"] = artifact_paths_payload(
+        context.run_dir,
+        [
+            "run_summary.json",
+            "optimization_analysis.json",
+            "hotspots.json",
+            "best.patch",
+            "dashboard.html",
+            "events.jsonl",
+        ],
+    )
+    write_artifact(context.run_dir, "run_summary.json", json_pretty(summary))
     context.reporter.info("artifacts", f"Run artifacts written to {context.run_dir}")
     if output_mode == "json":
         echo(json_pretty(summary))

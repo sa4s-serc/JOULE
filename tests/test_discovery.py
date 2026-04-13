@@ -66,6 +66,23 @@ def test_workload_bundle_prefers_explicit_selectors(sample_project):
     assert "using explicit workload selectors" in bundle.notes
 
 
+def test_heuristic_discovery_preserves_class_based_pytest_selectors(sample_project):
+    test_file = sample_project / "tests" / "test_class_based.py"
+    test_file.write_text(
+        "from sample_pkg.algos import membership_total\n\n"
+        "class TestMembershipTotal:\n"
+        "    def test_membership_total(self):\n"
+        "        assert membership_total(1) == 2\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(sample_project)
+    target = resolve_target(sample_project / "sample_pkg" / "algos.py", "membership_total", project_root=sample_project)
+    bundle = resolve_workload_bundle(settings, target, tests=None, properties=None, harness=None)
+
+    assert any("::TestMembershipTotal::test_membership_total" in workload.selector for workload in bundle.workloads)
+
+
 def test_async_target_without_aligned_workloads_requires_explicit_selectors(sample_project):
     settings = load_settings(sample_project)
     target = resolve_target(sample_project / "sample_pkg" / "algos.py", "async_orphan_total", project_root=sample_project)

@@ -51,12 +51,17 @@ def aggregate_samples(samples: list[MetricSample]) -> tuple[AggregateMetrics, li
     return overall, per_workload
 
 
-def scalar_score(metrics: AggregateMetrics) -> float:
+def weighted_score(metrics: AggregateMetrics, weights: tuple[float, float, float]) -> float:
+    memory_mib = metrics.mean_peak_memory_bytes / (1024 * 1024)
     return (
-        (metrics.mean_energy_j * 0.5)
-        + (metrics.mean_wall_time_s * 0.3)
-        + ((metrics.mean_peak_memory_bytes / (1024 * 1024)) * 0.2)
+        (metrics.mean_energy_j * weights[0])
+        + (metrics.mean_wall_time_s * weights[1])
+        + (memory_mib * weights[2])
     )
+
+
+def scalar_score(metrics: AggregateMetrics) -> float:
+    return weighted_score(metrics, (0.5, 0.3, 0.2))
 
 
 def improvement_ratio(baseline: AggregateMetrics, candidate: AggregateMetrics) -> dict[str, float]:

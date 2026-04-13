@@ -56,31 +56,53 @@ def discover_pytest_workloads(project_root: Path, target: TargetSpec, limit: int
             tree = ast.parse(file_path.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
-                score = _test_relevance_score(node, target)
-                if score <= 0:
-                    continue
-                selector = f"{file_path.relative_to(project_root)}::{node.name}"
-                workloads.append(
-                    WorkloadSpec(
-                        kind=WorkloadKind.PYTEST,
-                        identifier=f"pytest::{selector}",
-                        label=selector,
-                        selector=selector,
-                        metadata={
-                            "alignment_score": score,
-                            "provenance": "heuristic-pytest",
-                            "resolution_strategy": "heuristic-alignment",
-                        },
-                    )
-                )
+        workloads.extend(_discover_pytest_workloads_in_tree(file_path, project_root, tree, target))
     workloads.sort(key=lambda item: item.metadata.get("alignment_score", 0), reverse=True)
     return workloads[:limit]
 
 
 def build_bundle(target: TargetSpec, workloads: list[WorkloadSpec], notes: Iterable[str] = ()) -> WorkloadBundle:
     return WorkloadBundle(target=target, workloads=workloads, notes=list(notes))
+
+
+def _discover_pytest_workloads_in_tree(
+    file_path: Path,
+    project_root: Path,
+    tree: ast.Module,
+    target: TargetSpec,
+) -> list[WorkloadSpec]:
+    workloads: list[WorkloadSpec] = []
+
+    def visit(nodes: list[ast.stmt], class_path: list[str]) -> None:
+        for node in nodes:
+            if isinstance(node, ast.ClassDef):
+                visit(node.body, [*class_path, node.name])
+                continue
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
+                continue
+            if class_path and not all(name.startswith("Test") for name in class_path):
+                continue
+            score = _test_relevance_score(node, target)
+            if score <= 0:
+                continue
+            selector_name = "::".join([*class_path, node.name]) if class_path else node.name
+            selector = f"{file_path.relative_to(project_root)}::{selector_name}"
+            workloads.append(
+                WorkloadSpec(
+                    kind=WorkloadKind.PYTEST,
+                    identifier=f"pytest::{selector}",
+                    label=selector,
+                    selector=selector,
+                    metadata={
+                        "alignment_score": score,
+                        "provenance": "heuristic-pytest",
+                        "resolution_strategy": "heuristic-alignment",
+                    },
+                )
+            )
+
+    visit(tree.body, [])
+    return workloads
 
 
 def _iter_test_files(project_root: Path):

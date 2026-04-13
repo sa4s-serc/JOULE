@@ -199,6 +199,8 @@ def test_run_writes_structured_events_and_summary_path(sample_project):
     assert events_path.exists()
     assert events_path.read_text(encoding="utf-8").strip()
     assert payload["artifact_paths"].get("events.jsonl") == str(events_path)
+    assert payload["artifact_paths"].get("run_summary.json") == str(run_dir / "run_summary.json")
+    assert payload["artifact_paths"].get("dashboard.html") == str(run_dir / "dashboard.html")
 
 
 def test_apply_commit_requires_branch(sample_project):

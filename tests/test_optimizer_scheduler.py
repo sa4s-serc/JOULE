@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 from joule.config import JouleSettings
 from joule.models import (
     AggregateMetrics,
@@ -17,9 +19,11 @@ from joule.models import (
     WorkloadSpec,
 )
 from joule.evaluators.correctness import CorrectnessEngine
-from joule.orchestrator.mfbo import OptimizationOrchestrator
+from joule.orchestrator.mfbo import OptimizationOrchestrator, _ParentSnapshot
+from joule.orchestrator.internal.mfbo_flow import OptimizationState
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
 from joule.surrogate.gp import GaussianProcessSurrogate
+from joule.utils.analysis import candidate_source_hash
 from joule.utils.db import JouleDB
 
 
@@ -222,6 +226,68 @@ def test_pareto_front_rejects_dominated_candidates_and_keeps_tradeoffs():
     assert rejected["accepted"] is False
     assert "a" in rejected["dominated_by"]
     assert {item.candidate_id for item in front.points()} == {"baseline", "a", "b"}
+
+
+def test_pareto_weighted_score_normalizes_memory_bytes():
+    front = ParetoFront(weights=(0.0, 0.0, 1.0))
+    metrics = AggregateMetrics("all", 1, 1.0, 0.0, 0.0, 1024 * 1024, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    assert front.weighted_score(metrics) == pytest.approx(1.0)
+
+
+def test_checkpoint_restore_recovers_pareto_expansion_counts(tmp_path: Path):
+    settings = JouleSettings(project_root=tmp_path)
+    target, _bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle({target.source: (1.0, 1.0, 1.0)})),
+        correctness=cast(Any, _AlwaysCorrect()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=GaussianProcessSurrogate(),
+    )
+
+    baseline = AggregateMetrics("all", 1, 1.0, 10.0, 10.0, 1_000.0, 10.0, 0.0, 0.0, 0.0, 0.0)
+    report = MeasurementReport(
+        run_id="run-checkpoint",
+        candidate_id=None,
+        fidelity=Fidelity.F3,
+        aggregate=baseline,
+        per_workload=[],
+        samples=[],
+        environment={"backend": "fake"},
+    )
+    pareto = ParetoFront(weights=(0.5, 0.3, 0.2))
+    pareto.add(ParetoPoint(candidate_id="baseline", metrics=baseline))
+    assert pareto.sample_active_parent(max_generation=4) == "baseline"
+    assert pareto.expansion_count("baseline") == 1
+
+    state = OptimizationState(total_budget=1, max_parent_expansions=2, measured=1, no_frontier_gain=0)
+    parent_snapshots = {
+        "baseline": _ParentSnapshot(
+            candidate_id="baseline",
+            source=target.source,
+            operator_name="baseline",
+            generation_depth=0,
+        )
+    }
+    orchestrator._save_checkpoint(
+        run_id="run-checkpoint",
+        candidate_id="baseline",
+        baseline=report,
+        pareto=pareto,
+        parent_snapshots=parent_snapshots,
+        seen_sources={candidate_source_hash(target.source): "baseline"},
+        state=state,
+        escape_used=False,
+        accepted_candidate_ids={"baseline"},
+        checkpoint_path=tmp_path / "checkpoint.json",
+    )
+
+    restored = orchestrator._restore_checkpoint(run_id="run-checkpoint")
+    assert restored is not None
+    assert restored["pareto"].expansion_count("baseline") == 1
 
 
 def test_pareto_parent_sampling_can_prefer_deeper_points():
