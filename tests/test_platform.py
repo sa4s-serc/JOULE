@@ -244,3 +244,38 @@ def test_transformations_command_json_output(sample_project):
     names = {item["name"] for item in payload["transformations"]}
     assert "ForLoopToComprehension" in names
     assert "GenericSemanticRewriteLLM" in names
+
+
+def test_config_show_resolves_profile_defaults_and_overrides(sample_project):
+    pyproject = sample_project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + "\n[tool.joule]\nprofile = \"quick\"\noptimization_budget = 9\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["config", "show", str(sample_project), "--output", "json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    resolved = payload["resolved"]
+    assert resolved["profile"] == "quick"
+    assert resolved["baseline_repetitions"] == 3
+    assert resolved["optimization_budget"] == 9
+
+
+def test_config_show_human_output(sample_project):
+    result = runner.invoke(app, ["config", "show", str(sample_project)])
+    assert result.exit_code == 0, result.output
+    assert "Resolved JOULE Configuration" in result.output
+    assert "optimization_budget" in result.output
+
+
+def test_config_show_rejects_unknown_profile(sample_project):
+    pyproject = sample_project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + "\n[tool.joule]\nprofile = \"unknown\"\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["config", "show", str(sample_project), "--output", "json"])
+    assert result.exit_code != 0
+    assert "Unknown JOULE profile" in result.output

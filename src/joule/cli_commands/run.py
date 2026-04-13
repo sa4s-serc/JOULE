@@ -17,11 +17,23 @@ from joule.utils.analysis import (
     json_pretty,
 )
 from joule.utils.artifacts import write_artifact
+from joule.utils.metrics import scalar_score
 from joule.utils.reporting import workload_provenance_records
 
 
-def run_optimize(context: ExecutionContext, *, budget: int | None, analysis: bool, no_dashboard: bool, output: str, resume: str | None = None, no_cache: bool = False) -> None:
-    from typer import BadParameter, echo
+def run_optimize(
+    context: ExecutionContext,
+    *,
+    budget: int | None,
+    analysis: bool,
+    no_dashboard: bool,
+    output: str,
+    resume: str | None = None,
+    no_cache: bool = False,
+    ci: bool = False,
+    improvement_threshold: float | None = None,
+) -> None:
+    from typer import BadParameter, Exit, echo
 
     output_mode = resolve_output_mode(output)
     if resume and resume != context.run_id:
@@ -132,6 +144,30 @@ def run_optimize(context: ExecutionContext, *, budget: int | None, analysis: boo
             "events.jsonl",
         ],
     )
+
+    threshold = improvement_threshold if improvement_threshold is not None else context.settings.final_improvement_min
+    baseline_failed = baseline_report.aggregate.success_rate < 1.0
+    accepted_exists = any(item["status"] == "accepted" for item in candidates)
+    baseline_score = scalar_score(baseline_report.aggregate)
+    best_scalar_improvement = 0.0
+    if best and best.report and baseline_score > 0:
+        best_scalar_improvement = max(0.0, (baseline_score - scalar_score(best.report.aggregate)) / baseline_score)
+
+    ci_exit_code = 0
+    if ci:
+        if baseline_failed:
+            ci_exit_code = 2
+        elif (not accepted_exists) or (best_scalar_improvement < threshold):
+            ci_exit_code = 1
+        summary["ci_result"] = {
+            "enabled": True,
+            "exit_code": ci_exit_code,
+            "improvement_threshold": threshold,
+            "best_scalar_improvement": best_scalar_improvement,
+            "accepted_candidate": accepted_exists,
+            "baseline_success_rate": baseline_report.aggregate.success_rate,
+        }
+
     write_run_summary(context.db, context.run_dir, "run_summary.json", summary)
     context.reporter.info("artifacts", f"Run artifacts written to {context.run_dir}")
     if output_mode == "json":
@@ -140,3 +176,5 @@ def run_optimize(context: ExecutionContext, *, budget: int | None, analysis: boo
         context.reporter.console.print(human_run_summary(summary))
     if not no_dashboard:
         context.reporter.info("dashboard", f"Snapshot written to {context.run_dir / 'dashboard.html'}")
+    if ci and ci_exit_code != 0:
+        raise Exit(code=ci_exit_code)

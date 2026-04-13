@@ -20,13 +20,16 @@ def run_resume(
     budget: int | None,
     analysis: bool,
     no_dashboard: bool,
+    ci: bool,
+    improvement_threshold: float | None,
     no_cache: bool,
     parallel: int | None,
     verbose: bool,
     quiet: bool,
     bootstrap_fn,
 ) -> None:
-    output_mode = output.strip().lower()
+    output_mode = "json" if ci else output.strip().lower()
+    no_dashboard = no_dashboard or ci
     effective_quiet = quiet or (output_mode == "json" and not verbose)
     settings, db, reporter = bootstrap_fn(path, verbose=verbose, quiet=effective_quiet)
 
@@ -79,7 +82,9 @@ def run_resume(
         budget=budget,
         analysis=analysis,
         no_dashboard=no_dashboard,
-        output=output,
+        output=output_mode,
         resume=run_id,
         no_cache=no_cache,
+        ci=ci,
+        improvement_threshold=improvement_threshold,
     )

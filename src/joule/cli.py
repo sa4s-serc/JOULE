@@ -9,6 +9,7 @@ from joule.cli_helpers.flow import ExecutionContext, JouleContainer, create_run_
 from joule.cli_helpers.output import resolve_output_mode
 from joule.cli_commands.apply import run_apply
 from joule.cli_commands.baseline import run_baseline
+from joule.cli_commands.config_show import run_config_show
 from joule.cli_commands.run import run_optimize
 from joule.cli_commands.dashboard import run_dashboard
 from joule.cli_commands.discover import run_discover
@@ -26,6 +27,8 @@ from joule.utils.db import JouleDB
 from joule.utils.terminal import TerminalReporter
 
 app = typer.Typer(help="JOULE optimization toolkit")
+config_app = typer.Typer(help="Configuration commands")
+app.add_typer(config_app, name="config")
 console = Console()
 
 PATH_HELP = "Path to a target .py file or project root with pyproject.toml"
@@ -35,8 +38,16 @@ def _validate_positive(value: int | None, *, option_name: str) -> None:
     if value is not None and value < 1:
         raise typer.BadParameter(f"{option_name} must be >= 1")
 
+
+def _validate_non_negative(value: float | None, *, option_name: str) -> None:
+    if value is not None and value < 0:
+        raise typer.BadParameter(f"{option_name} must be >= 0")
+
 def _bootstrap(path: Path, *, verbose: bool = False, quiet: bool = False):
-    settings = load_settings(path)
+    try:
+        settings = load_settings(path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     ensure_artifacts(settings)
     seed_random(settings.seed)
     reporter = TerminalReporter(console, _resolve_verbosity(settings, verbose=verbose, quiet=quiet))
@@ -199,6 +210,12 @@ def run(
     output: str = typer.Option("human", "--output", help="Output format: human or json"),
     analysis: bool = typer.Option(False, "--analysis", help="Persist deep optimization analysis artifacts"),
     no_dashboard: bool = typer.Option(False, "--no-dashboard", help="Skip dashboard hint output"),
+    ci: bool = typer.Option(False, "--ci", help="CI mode: force JSON output, disable dashboard, and use thresholded exit codes"),
+    improvement_threshold: float | None = typer.Option(
+        None,
+        "--improvement-threshold",
+        help="Minimum scalar improvement ratio required for CI success",
+    ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable measurement cache"),
     parallel: int | None = typer.Option(None, "--parallel", help="Override max parallel workers"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
@@ -206,7 +223,9 @@ def run(
 ):
     _validate_positive(budget, option_name="--budget")
     _validate_positive(parallel, option_name="--parallel")
-    output_mode = resolve_output_mode(output)
+    _validate_non_negative(improvement_threshold, option_name="--improvement-threshold")
+    output_mode = "json" if ci else resolve_output_mode(output)
+    no_dashboard = no_dashboard or ci
     effective_quiet = quiet or (output_mode == "json" and not verbose)
     context = _build_execution_context(
         path=path,
@@ -220,7 +239,16 @@ def run(
         verbose=verbose,
         quiet=effective_quiet,
     )
-    run_optimize(context, budget=budget, analysis=analysis, no_dashboard=no_dashboard, output=output_mode, no_cache=no_cache)
+    run_optimize(
+        context,
+        budget=budget,
+        analysis=analysis,
+        no_dashboard=no_dashboard,
+        output=output_mode,
+        no_cache=no_cache,
+        ci=ci,
+        improvement_threshold=improvement_threshold,
+    )
 
 
 @app.command()
@@ -231,6 +259,12 @@ def resume(
     output: str = typer.Option("human", "--output", help="Output format: human or json"),
     analysis: bool = typer.Option(False, "--analysis", help="Persist deep optimization analysis artifacts"),
     no_dashboard: bool = typer.Option(False, "--no-dashboard", help="Skip dashboard hint output"),
+    ci: bool = typer.Option(False, "--ci", help="CI mode: force JSON output, disable dashboard, and use thresholded exit codes"),
+    improvement_threshold: float | None = typer.Option(
+        None,
+        "--improvement-threshold",
+        help="Minimum scalar improvement ratio required for CI success",
+    ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable measurement cache"),
     parallel: int | None = typer.Option(None, "--parallel", help="Override max parallel workers"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
@@ -238,6 +272,7 @@ def resume(
 ):
     _validate_positive(budget, option_name="--budget")
     _validate_positive(parallel, option_name="--parallel")
+    _validate_non_negative(improvement_threshold, option_name="--improvement-threshold")
     run_resume(
         path,
         run_id,
@@ -245,12 +280,22 @@ def resume(
         budget=budget,
         analysis=analysis,
         no_dashboard=no_dashboard,
+        ci=ci,
+        improvement_threshold=improvement_threshold,
         no_cache=no_cache,
         parallel=parallel,
         verbose=verbose,
         quiet=quiet,
         bootstrap_fn=_bootstrap,
     )
+
+
+@config_app.command("show")
+def config_show(
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    output: str = typer.Option("human", "--output", help="Output format: human or json"),
+):
+    run_config_show(path, output, console=console)
 
 
 @app.command()

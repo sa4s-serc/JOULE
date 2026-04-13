@@ -9,6 +9,45 @@ import uuid
 from typing import Any
 
 
+SUPPORTED_PROFILES = {"quick", "standard", "thorough", "ci"}
+
+PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
+    "quick": {
+        "baseline_repetitions": 3,
+        "optimization_budget": 3,
+        "workload_discovery_limit": 5,
+        "hotspot_limit": 8,
+        "search_branching_factor": 1,
+        "search_convergence_patience": 2,
+    },
+    "standard": {},
+    "thorough": {
+        "baseline_repetitions": 8,
+        "optimization_budget": 10,
+        "workload_discovery_limit": 12,
+        "hotspot_limit": 20,
+        "search_branching_factor": 3,
+        "search_convergence_patience": 6,
+    },
+    "ci": {
+        "baseline_repetitions": 4,
+        "optimization_budget": 4,
+        "workload_discovery_limit": 6,
+        "hotspot_limit": 6,
+        "terminal_verbosity": "quiet",
+        "search_branching_factor": 1,
+        "search_convergence_patience": 2,
+    },
+}
+
+PROFILE_FIDELITY_DEFAULTS: dict[str, dict[str, Any]] = {
+    "quick": {"f1_repetitions": 1, "f2_repetitions": 3, "f3_repetitions": 5},
+    "standard": {"f1_repetitions": 3, "f2_repetitions": 7, "f3_repetitions": 12},
+    "thorough": {"f1_repetitions": 5, "f2_repetitions": 10, "f3_repetitions": 16},
+    "ci": {"f1_repetitions": 2, "f2_repetitions": 4, "f3_repetitions": 6},
+}
+
+
 @dataclass(slots=True)
 class FidelitySettings:
     f1_repetitions: int = 3
@@ -31,6 +70,7 @@ class ParetoWeights:
 @dataclass(slots=True)
 class JouleSettings:
     project_root: Path
+    profile: str = "standard"
     seed: int = 1337
     artifact_dir: Path = field(default_factory=lambda: Path(".joule"))
     db_name: str = "joule.db"
@@ -110,49 +150,63 @@ def load_settings(path: str | Path) -> JouleSettings:
             raw = tomllib.load(handle)
         payload = raw.get("tool", {}).get("joule", {})
 
-    fidelity_payload = payload.get("fidelity", {}) if isinstance(payload, dict) else {}
-    backend_payload = payload.get("backends", {}) if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    profile = str(payload.get("profile", os.getenv("JOULE_PROFILE", "standard"))).strip().lower()
+    if profile not in SUPPORTED_PROFILES:
+        supported = ", ".join(sorted(SUPPORTED_PROFILES))
+        raise ValueError(f"Unknown JOULE profile {profile!r}. Supported profiles: {supported}")
+
+    resolved_payload = {**PROFILE_DEFAULTS.get(profile, {}), **payload}
+    fidelity_payload = {
+        **PROFILE_FIDELITY_DEFAULTS.get(profile, {}),
+        **(resolved_payload.get("fidelity", {}) if isinstance(resolved_payload.get("fidelity", {}), dict) else {}),
+    }
+    backend_payload = resolved_payload.get("backends", {}) if isinstance(resolved_payload, dict) else {}
+
     settings = JouleSettings(
         project_root=project_root,
-        seed=int(payload.get("seed", 1337)),
-        artifact_dir=Path(payload.get("artifact_dir", ".joule")),
-        db_name=str(payload.get("db_name", "joule.db")),
-        default_backend=str(payload.get("default_backend", os.getenv("JOULE_BACKEND", "mock"))),
-        llm_model=str(payload.get("llm_model", os.getenv("JOULE_LLM_MODEL", ""))),
-        baseline_repetitions=int(payload.get("baseline_repetitions", 5)),
-        optimization_budget=int(payload.get("optimization_budget", 6)),
-        workload_discovery_limit=int(payload.get("workload_discovery_limit", 8)),
-        hotspot_limit=int(payload.get("hotspot_limit", 12)),
-        dashboard_port=int(payload.get("dashboard_port", 8501)),
-        dependency_energy_threshold=float(payload.get("dependency_energy_threshold", 0.15)),
-        dependency_latency_threshold=float(payload.get("dependency_latency_threshold", 0.20)),
-        memory_regression_limit=float(payload.get("memory_regression_limit", 0.10)),
-        terminal_verbosity=str(payload.get("terminal_verbosity", "normal")),
-        promotion_scalar_min=float(payload.get("promotion_scalar_min", 0.03)),
-        final_improvement_min=float(payload.get("final_improvement_min", 0.05)),
-        candidate_memory_regression_limit=float(payload.get("candidate_memory_regression_limit", 0.10)),
-        workload_timeout_s=float(payload.get("workload_timeout_s", 30.0)),
-        inner_repetitions_mode=str(payload.get("inner_repetitions_mode", "adaptive")),
-        inner_repetitions_fixed=int(payload.get("inner_repetitions_fixed", 1)),
-        inner_repetitions_min=int(payload.get("inner_repetitions_min", 1)),
-        inner_repetitions_max=int(payload.get("inner_repetitions_max", 10_000)),
-        adaptive_min_window_s=float(payload.get("adaptive_min_window_s", 0.05)),
-        adaptive_probe_samples=int(payload.get("adaptive_probe_samples", 1)),
-        max_parallel_workers=int(payload.get("max_parallel_workers", 1)),
-        search_max_generations=int(payload.get("search_max_generations", 3)),
-        search_branching_factor=int(payload.get("search_branching_factor", 2)),
-        search_exploration_fraction=float(payload.get("search_exploration_fraction", 0.45)),
-        search_exploitation_fraction=float(payload.get("search_exploitation_fraction", 0.35)),
-        search_confirmation_fraction=float(payload.get("search_confirmation_fraction", 0.20)),
-        search_convergence_patience=int(payload.get("search_convergence_patience", 4)),
-        search_min_novelty=float(payload.get("search_min_novelty", 0.12)),
-        surrogate_warm_start_limit=int(payload.get("surrogate_warm_start_limit", 50)),
-        surrogate_min_training_points=int(payload.get("surrogate_min_training_points", 3)),
+        profile=profile,
+        seed=int(resolved_payload.get("seed", 1337)),
+        artifact_dir=Path(resolved_payload.get("artifact_dir", ".joule")),
+        db_name=str(resolved_payload.get("db_name", "joule.db")),
+        default_backend=str(resolved_payload.get("default_backend", os.getenv("JOULE_BACKEND", "mock"))),
+        llm_model=str(resolved_payload.get("llm_model", os.getenv("JOULE_LLM_MODEL", ""))),
+        baseline_repetitions=int(resolved_payload.get("baseline_repetitions", 5)),
+        optimization_budget=int(resolved_payload.get("optimization_budget", 6)),
+        workload_discovery_limit=int(resolved_payload.get("workload_discovery_limit", 8)),
+        hotspot_limit=int(resolved_payload.get("hotspot_limit", 12)),
+        dashboard_port=int(resolved_payload.get("dashboard_port", 8501)),
+        dependency_energy_threshold=float(resolved_payload.get("dependency_energy_threshold", 0.15)),
+        dependency_latency_threshold=float(resolved_payload.get("dependency_latency_threshold", 0.20)),
+        memory_regression_limit=float(resolved_payload.get("memory_regression_limit", 0.10)),
+        terminal_verbosity=str(resolved_payload.get("terminal_verbosity", "normal")),
+        promotion_scalar_min=float(resolved_payload.get("promotion_scalar_min", 0.03)),
+        final_improvement_min=float(resolved_payload.get("final_improvement_min", 0.05)),
+        candidate_memory_regression_limit=float(resolved_payload.get("candidate_memory_regression_limit", 0.10)),
+        workload_timeout_s=float(resolved_payload.get("workload_timeout_s", 30.0)),
+        inner_repetitions_mode=str(resolved_payload.get("inner_repetitions_mode", "adaptive")),
+        inner_repetitions_fixed=int(resolved_payload.get("inner_repetitions_fixed", 1)),
+        inner_repetitions_min=int(resolved_payload.get("inner_repetitions_min", 1)),
+        inner_repetitions_max=int(resolved_payload.get("inner_repetitions_max", 10_000)),
+        adaptive_min_window_s=float(resolved_payload.get("adaptive_min_window_s", 0.05)),
+        adaptive_probe_samples=int(resolved_payload.get("adaptive_probe_samples", 1)),
+        max_parallel_workers=int(resolved_payload.get("max_parallel_workers", 1)),
+        search_max_generations=int(resolved_payload.get("search_max_generations", 3)),
+        search_branching_factor=int(resolved_payload.get("search_branching_factor", 2)),
+        search_exploration_fraction=float(resolved_payload.get("search_exploration_fraction", 0.45)),
+        search_exploitation_fraction=float(resolved_payload.get("search_exploitation_fraction", 0.35)),
+        search_confirmation_fraction=float(resolved_payload.get("search_confirmation_fraction", 0.20)),
+        search_convergence_patience=int(resolved_payload.get("search_convergence_patience", 4)),
+        search_min_novelty=float(resolved_payload.get("search_min_novelty", 0.12)),
+        surrogate_warm_start_limit=int(resolved_payload.get("surrogate_warm_start_limit", 50)),
+        surrogate_min_training_points=int(resolved_payload.get("surrogate_min_training_points", 3)),
         backends=BackendSettings(options=backend_payload if isinstance(backend_payload, dict) else {}),
         pareto_weights=ParetoWeights(
-            energy=float(payload.get("pareto_weight_energy", 0.5)),
-            latency=float(payload.get("pareto_weight_latency", 0.3)),
-            memory=float(payload.get("pareto_weight_memory", 0.2)),
+            energy=float(resolved_payload.get("pareto_weight_energy", 0.5)),
+            latency=float(resolved_payload.get("pareto_weight_latency", 0.3)),
+            memory=float(resolved_payload.get("pareto_weight_memory", 0.2)),
         ),
         fidelity=FidelitySettings(
             f1_repetitions=int(fidelity_payload.get("f1_repetitions", 3)),

@@ -259,3 +259,51 @@ def test_resume_command_continues_existing_run(sample_project):
 
     after = len(db.get_candidates(run_id))
     assert after >= before
+
+
+def test_run_ci_mode_threshold_failure_returns_exit_1(sample_project):
+    _loosen_thresholds(sample_project)
+    target_file = sample_project / "sample_pkg" / "algos.py"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "4",
+            "--ci",
+            "--improvement-threshold",
+            "1.0",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["ci_result"]["enabled"] is True
+    assert payload["ci_result"]["exit_code"] == 1
+
+
+def test_run_ci_mode_baseline_failure_returns_exit_2(sample_project):
+    failing_test = sample_project / "tests" / "test_forced_failure.py"
+    failing_test.write_text(
+        "def test_forced_failure():\n"
+        "    assert False\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "membership_total",
+            "--tests",
+            "tests/test_forced_failure.py::test_forced_failure",
+            "--ci",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.output)
+    assert payload["ci_result"]["enabled"] is True
+    assert payload["ci_result"]["exit_code"] == 2
