@@ -37,9 +37,11 @@ class IteratorSubstitution(BaseOperator):
             def visit_For(self, node: ast.For):
                 nonlocal changed
                 self.generic_visit(node)
-                if _iter_call(node.iter):
+                iter_call = node.iter
+                if _iter_call(iter_call):
+                    assert isinstance(iter_call, ast.Call)
                     changed = True
-                    node.iter = node.iter.args[0]
+                    node.iter = iter_call.args[0]
                 return node
 
         new_tree = Rewriter().visit(tree)

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from joule.models import MeasurementReport
+from joule.utils.db import CandidateRecord
 from joule.utils.metrics import improvement_ratio
 
 
@@ -53,7 +54,7 @@ def summarize_search_events(events: list[dict]) -> dict:
     }
 
 
-def summarize_operator_performance(candidates: list[dict], baseline_aggregate: dict | None = None) -> list[dict]:
+def summarize_operator_performance(candidates: list[CandidateRecord], baseline_aggregate: dict | None = None) -> list[dict]:
     stats: dict[str, dict] = {}
     for item in candidates:
         operator = item["operator_name"]
@@ -176,7 +177,7 @@ def build_optimization_analysis(
     run_id: str,
     target_qualname: str,
     baseline: MeasurementReport,
-    candidates: list[dict],
+    candidates: list[CandidateRecord],
     events: list[dict],
     hotspot_summary: dict | None = None,
 ) -> dict:
@@ -313,7 +314,7 @@ def human_discover_summary(payload: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def json_pretty(payload: dict) -> str:
+def json_pretty(payload: Any) -> str:
     return json.dumps(payload, indent=2)
 
 

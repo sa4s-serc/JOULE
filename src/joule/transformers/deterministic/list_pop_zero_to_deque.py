@@ -42,6 +42,7 @@ def _rewrite_pop_zero(stmt: ast.stmt, queue_name: str) -> bool:
             nonlocal changed
             self.generic_visit(node)
             if _is_pop_zero_call(node, queue_name):
+                assert isinstance(node.func, ast.Attribute)
                 changed = True
                 node.func.attr = "popleft"
                 node.args = []

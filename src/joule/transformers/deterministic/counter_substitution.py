@@ -100,9 +100,14 @@ class CounterSubstitution(BaseOperator):
                 if counter_name and isinstance(second, ast.For) and second.body:
                     key_expr = _counter_branch_key(second.body[0], counter_name)
                     if key_expr is not None:
+                        assign = first if isinstance(first, ast.Assign) else None
+                        if assign is None:
+                            rewritten.append(first)
+                            index += 1
+                            continue
                         changed = True
                         needs_counter_import = True
-                        first.value = ast.Call(func=ast.Name(id="Counter", ctx=ast.Load()), args=[], keywords=[])
+                        assign.value = ast.Call(func=ast.Name(id="Counter", ctx=ast.Load()), args=[], keywords=[])
                         second.body[0] = ast.AugAssign(
                             target=ast.Subscript(
                                 value=ast.Name(id=counter_name, ctx=ast.Load()),
@@ -112,7 +117,7 @@ class CounterSubstitution(BaseOperator):
                             op=ast.Add(),
                             value=ast.Constant(value=1),
                         )
-                        rewritten.append(first)
+                        rewritten.append(assign)
                         rewritten.append(second)
                         index += 2
                         continue

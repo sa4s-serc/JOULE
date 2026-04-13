@@ -15,6 +15,7 @@ from joule.models import (
     WorkloadKind,
     WorkloadSpec,
 )
+from joule.evaluators.correctness import CorrectnessEngine
 from joule.orchestrator.mfbo import OptimizationOrchestrator
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
 from joule.surrogate.gp import GaussianProcessSurrogate
@@ -93,6 +94,7 @@ class _FakeOracle:
         candidate_id: str | None = None,
         candidate_source: str | None = None,
         repetitions: int | None = None,
+        use_cache: bool = True,
     ) -> MeasurementReport:
         del repetitions
         source = candidate_source or target.source
@@ -186,9 +188,14 @@ def test_optimizer_expands_non_baseline_parent_and_persists_lineage(tmp_path: Pa
         ): (11.0, 8.0, 1_000.0),
     }
     db = JouleDB(settings.db_path)
-    orchestrator = OptimizationOrchestrator(settings, db, cast(Any, _FakeOracle(source_metrics)))
-    orchestrator.correctness = cast(Any, _AlwaysCorrect())
-    orchestrator.registry = cast(Any, _SingleRegistry(_ChainOperator()))
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle(source_metrics)),
+        correctness=cast(Any, _AlwaysCorrect()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=GaussianProcessSurrogate(),
+    )
 
     _baseline, _pareto, best = orchestrator.optimize("run-chain", target, bundle, budget=2)
 
@@ -244,6 +251,13 @@ def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
         score=2.5,
         metadata={},
     )
-    orchestrator = OptimizationOrchestrator(settings, db, cast(Any, _FakeOracle({source: (1.0, 1.0, 1.0)})))
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle({source: (1.0, 1.0, 1.0)})),
+        correctness=cast(Any, CorrectnessEngine()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=GaussianProcessSurrogate(),
+    )
     mean, _uncertainty = orchestrator.surrogate.predict(source)
     assert mean == 2.5

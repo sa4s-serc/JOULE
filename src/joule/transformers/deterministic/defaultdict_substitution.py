@@ -101,15 +101,20 @@ class DefaultDictSubstitution(BaseOperator):
                 if mapping_name and isinstance(second, ast.For) and len(second.body) >= 2:
                     key_expr = _defaultdict_guard_key(second.body[0], mapping_name)
                     if key_expr is not None and _append_call(second.body[1], mapping_name, key_expr):
+                        assign = first if isinstance(first, ast.Assign) else None
+                        if assign is None:
+                            rewritten.append(first)
+                            index += 1
+                            continue
                         changed = True
                         needs_import = True
-                        first.value = ast.Call(
+                        assign.value = ast.Call(
                             func=ast.Name(id="defaultdict", ctx=ast.Load()),
                             args=[ast.Lambda(args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]), body=ast.List(elts=[], ctx=ast.Load()))],
                             keywords=[],
                         )
                         second.body = [second.body[1], *second.body[2:]]
-                        rewritten.append(first)
+                        rewritten.append(assign)
                         rewritten.append(second)
                         index += 2
                         continue

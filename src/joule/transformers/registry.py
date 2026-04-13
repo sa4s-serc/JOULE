@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib.metadata import entry_points
 import math
 from typing import Any
 
@@ -20,6 +21,7 @@ class OperatorRegistry:
             self.escape_operators.extend(escape_llm_operators(llm_model))
             for operator in [*llm_ops, *self.escape_operators]:
                 self.stats.setdefault(operator.name, self._empty_stat())
+        self._discover_entry_points(llm_model=llm_model)
 
     def ranked(self, *, phase: SearchPhase | None = None, parent_generation: int = 0) -> list[BaseOperator]:
         total_attempts = sum(max(1.0, stat["attempts"]) for stat in self.stats.values())
@@ -201,3 +203,75 @@ class OperatorRegistry:
             stat = self.stats.setdefault(operator.name, self._empty_stat())
             stat["precheck_failures"] += 1.0
             return False
+
+    def _discover_entry_points(self, *, llm_model: str) -> None:
+        discovered = entry_points()
+        operator_points = list(discovered.select(group="joule.operators"))
+        known_names = {operator.name for operator in [*self.operators, *self.escape_operators]}
+        for point in operator_points:
+            try:
+                loaded = point.load()
+                plugin_operators = self._coerce_plugin_operators(point.name, loaded, llm_model=llm_model)
+            except Exception:
+                continue
+            for operator in plugin_operators:
+                if operator.name in known_names:
+                    continue
+                known_names.add(operator.name)
+                if operator.escape_only:
+                    self.escape_operators.append(operator)
+                else:
+                    self.operators.append(operator)
+                self.stats.setdefault(operator.name, self._empty_stat())
+
+    def _coerce_plugin_operators(self, name: str, loaded: Any, *, llm_model: str) -> list[BaseOperator]:
+        if isinstance(loaded, BaseOperator):
+            return [loaded]
+        if isinstance(loaded, type):
+            if not issubclass(loaded, BaseOperator):
+                raise TypeError(f"Entry point {name!r} is not a BaseOperator subclass")
+            return [self._instantiate_operator_class(name, loaded, llm_model=llm_model)]
+        if callable(loaded):
+            produced = self._call_operator_factory(name, loaded, llm_model=llm_model)
+            return self._normalize_operator_payload(name, produced, llm_model=llm_model)
+        return self._normalize_operator_payload(name, loaded, llm_model=llm_model)
+
+    def _normalize_operator_payload(self, name: str, payload: Any, *, llm_model: str) -> list[BaseOperator]:
+        if isinstance(payload, BaseOperator):
+            return [payload]
+        if isinstance(payload, (list, tuple, set)):
+            operators: list[BaseOperator] = []
+            for item in payload:
+                if isinstance(item, BaseOperator):
+                    operators.append(item)
+                    continue
+                if isinstance(item, type) and issubclass(item, BaseOperator):
+                    operators.append(self._instantiate_operator_class(name, item, llm_model=llm_model))
+            return operators
+        raise TypeError(f"Entry point {name!r} did not produce operator instances")
+
+    def _instantiate_operator_class(self, name: str, cls: type[BaseOperator], *, llm_model: str) -> BaseOperator:
+        for args, kwargs in [
+            ((llm_model,), {}),
+            ((), {"model": llm_model}),
+            ((), {"llm_model": llm_model}),
+            ((), {}),
+        ]:
+            try:
+                return cls(*args, **kwargs)
+            except TypeError:
+                continue
+        raise TypeError(f"Could not instantiate operator class from entry point {name!r}")
+
+    def _call_operator_factory(self, name: str, factory: Any, *, llm_model: str) -> Any:
+        for args, kwargs in [
+            ((llm_model,), {}),
+            ((), {"model": llm_model}),
+            ((), {"llm_model": llm_model}),
+            ((), {}),
+        ]:
+            try:
+                return factory(*args, **kwargs)
+            except TypeError:
+                continue
+        raise TypeError(f"Could not call operator factory from entry point {name!r}")

@@ -23,7 +23,7 @@ def _is_list_initializer(stmt: ast.stmt, name: str) -> bool:
     )
 
 
-def _sorted_assignment(stmt: ast.stmt) -> tuple[str, list[ast.keyword]] | None:
+def _sorted_assignment(stmt: ast.AST) -> tuple[str, list[ast.keyword]] | None:
     if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
         return None
     if not isinstance(stmt.targets[0], ast.Name):

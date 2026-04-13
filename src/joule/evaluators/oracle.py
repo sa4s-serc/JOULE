@@ -1,23 +1,91 @@
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import UTC, datetime
+import json
 from math import ceil
 from pathlib import Path
 import tempfile
+from typing import Any
 
 from joule.config import JouleSettings
-from joule.evaluators.backends import MockEnergyBackend, RaplEnergyBackend
+from joule.evaluators.backends.base import BackendMeasurement, EnergyBackend
+from joule.evaluators.backends.registry import BackendRegistry
 from joule.evaluators.correctness import _materialize_overlay
+from joule.integrations.git import source_sha256
+from joule.models import AggregateMetrics
 from joule.runtime import invoke_profile_worker
-from joule.models import CalibrationResult, Fidelity, MeasurementReport, MetricSample, TargetSpec, WorkloadBundle
+from joule.models import CalibrationResult, Fidelity, MeasurementReport, MetricSample, TargetSpec, WorkloadBundle, WorkloadSpec
 from joule.utils.metrics import aggregate_samples
 
 
+def _measure_workload_task(
+    target: TargetSpec,
+    workload: WorkloadSpec,
+    overlay_root: Path | None,
+    inner_repetitions: int,
+    timeout_s: float,
+    backend: EnergyBackend,
+    reps: int,
+) -> list[BackendMeasurement]:
+    measurements = []
+    for _ in range(1, reps + 1):
+        measurement = backend.measure(
+            target,
+            workload,
+            overlay_root=overlay_root,
+            inner_repetitions=inner_repetitions,
+            timeout_s=timeout_s,
+        )
+        measurements.append(measurement)
+    return measurements
+
+
+def _bundle_cache_key(bundle: WorkloadBundle) -> str:
+    ids = sorted(item.identifier for item in bundle.workloads)
+    return "bundle::" + "|".join(ids)
+
+
+def _report_from_record(payload: dict[str, Any]) -> MeasurementReport:
+    return MeasurementReport(
+        run_id=str(payload["run_id"]),
+        candidate_id=payload.get("candidate_id"),
+        fidelity=Fidelity(str(payload["fidelity"])),
+        aggregate=AggregateMetrics(**payload["aggregate"]),
+        per_workload=[AggregateMetrics(**item) for item in payload.get("per_workload", [])],
+        samples=[
+            MetricSample(
+                workload_id=str(item["workload_id"]),
+                fidelity=Fidelity(str(item["fidelity"])),
+                repetition=int(item["repetition"]),
+                success=bool(item["success"]),
+                wall_time_s=float(item["wall_time_s"]),
+                cpu_time_s=float(item["cpu_time_s"]),
+                peak_memory_bytes=int(item["peak_memory_bytes"]),
+                energy_j=float(item["energy_j"]),
+                return_code=int(item["return_code"]),
+                stdout=str(item.get("stdout", "")),
+                stderr=str(item.get("stderr", "")),
+                metadata=dict(item.get("metadata", {})),
+            )
+            for item in payload.get("samples", [])
+        ],
+        environment=dict(payload.get("environment", {})),
+        metadata=dict(payload.get("metadata", {})),
+    )
+
+
 class PerformanceOracle:
-    def __init__(self, settings: JouleSettings, backend_name: str | None = None, reporter=None) -> None:
+    def __init__(self, settings: JouleSettings, backend: EnergyBackend, reporter=None, db=None) -> None:
         self.settings = settings
         self.reporter = reporter
-        self.backend = _get_backend(backend_name or settings.default_backend, settings)
+        self.backend = backend
+        self.db = db
+
+    @classmethod
+    def create(cls, settings: JouleSettings, backend_name: str | None = None, reporter=None, db=None) -> "PerformanceOracle":
+        backend = BackendRegistry().get(backend_name or settings.default_backend, settings)
+        return cls(settings=settings, backend=backend, reporter=reporter, db=db)
 
     def repetitions_for(self, fidelity: Fidelity, explicit: int | None = None) -> int:
         if explicit is not None:
@@ -38,58 +106,131 @@ class PerformanceOracle:
         candidate_id: str | None = None,
         candidate_source: str | None = None,
         repetitions: int | None = None,
+        use_cache: bool = True,
     ) -> MeasurementReport:
         overlay_context = tempfile.TemporaryDirectory(prefix="joule-overlay-") if candidate_source else None
         overlay_root = Path(overlay_context.name) if overlay_context else None
         if overlay_root and candidate_source:
             _materialize_overlay(target, overlay_root, candidate_source)
         try:
+            source = candidate_source or target.source
+            source_hash = source_sha256(source)
+            file_mtime = target.file_path.stat().st_mtime if target.file_path.exists() else 0.0
+            cache_key = _bundle_cache_key(bundle)
+
+            if use_cache and self.db and candidate_id is None:
+                cached = self.db.get_cached_measurement(source_hash, cache_key, fidelity.value, file_mtime)
+                if cached:
+                    if self.reporter:
+                        self.reporter.info("cache", f"Cache hit for {cache_key} at {fidelity.value}")
+                    return _report_from_record(cached)
+
             all_samples: list[MetricSample] = []
             calibration_records: list[dict] = []
             reps = self.repetitions_for(fidelity, explicit=repetitions)
-            for workload in bundle.workloads:
-                calibration = self._calibrate(
-                    target=target,
-                    workload=workload,
-                    fidelity=fidelity,
-                    overlay_root=overlay_root,
-                )
-                calibration_records.append(calibration.to_record())
-                if self.reporter:
-                    self.reporter.verbose(
-                        "calibration",
-                        f"{workload.identifier} -> inner_repetitions={calibration.inner_repetitions} "
-                        f"mode={calibration.adaptive_mode} target={calibration.adaptive_target_window_s:.3f}s",
+            use_parallel = self.settings.max_parallel_workers > 1 and len(bundle.workloads) > 1
+
+            if use_parallel:
+                calibrations = []
+                for workload in bundle.workloads:
+                    calibration = self._calibrate(
+                        target=target,
+                        workload=workload,
+                        fidelity=fidelity,
+                        overlay_root=overlay_root,
                     )
-                for repetition in range(1, reps + 1):
+                    calibrations.append((workload, calibration))
+                    calibration_records.append(calibration.to_record())
                     if self.reporter:
                         self.reporter.verbose(
-                            "measurement",
-                            f"{workload.identifier} {fidelity.value} sample {repetition}/{reps}",
+                            "calibration",
+                            f"{workload.identifier} -> inner_repetitions={calibration.inner_repetitions} "
+                            f"mode={calibration.adaptive_mode} target={calibration.adaptive_target_window_s:.3f}s",
                         )
-                    measurement = self.backend.measure(
-                        target,
-                        workload,
+                
+                with ProcessPoolExecutor(max_workers=self.settings.max_parallel_workers) as executor:
+                    futures = {}
+                    for workload, calibration in calibrations:
+                        future = executor.submit(
+                            _measure_workload_task,
+                            target,
+                            workload,
+                            overlay_root,
+                            calibration.inner_repetitions,
+                            self.settings.workload_timeout_s,
+                            self.backend,
+                            reps,
+                        )
+                        futures[future] = (workload, calibration)
+
+                    for future in as_completed(futures):
+                        workload, calibration = futures[future]
+                        measurements = future.result()
+                        for i, measurement in enumerate(measurements, 1):
+                            if self.reporter:
+                                self.reporter.verbose(
+                                    "measurement",
+                                    f"{workload.identifier} {fidelity.value} sample {i}/{reps}",
+                                )
+                            self._report_worker_diagnostics(
+                                workload_id=workload.identifier,
+                                fidelity=fidelity,
+                                repetition=i,
+                                measurement=measurement,
+                            )
+                            sample = self._to_metric_sample(
+                                measurement=measurement,
+                                workload_id=workload.identifier,
+                                fidelity=fidelity,
+                                repetition=i,
+                                calibration=calibration,
+                            )
+                            all_samples.append(sample)
+            else:
+                for workload in bundle.workloads:
+                    calibration = self._calibrate(
+                        target=target,
+                        workload=workload,
+                        fidelity=fidelity,
                         overlay_root=overlay_root,
-                        inner_repetitions=calibration.inner_repetitions,
-                        timeout_s=self.settings.workload_timeout_s,
                     )
-                    self._report_worker_diagnostics(
-                        workload_id=workload.identifier,
-                        fidelity=fidelity,
-                        repetition=repetition,
-                        measurement=measurement,
-                    )
-                    sample = self._to_metric_sample(
-                        measurement=measurement,
-                        workload_id=workload.identifier,
-                        fidelity=fidelity,
-                        repetition=repetition,
-                        calibration=calibration,
-                    )
-                    all_samples.append(sample)
+                    calibration_records.append(calibration.to_record())
+                    if self.reporter:
+                        self.reporter.verbose(
+                            "calibration",
+                            f"{workload.identifier} -> inner_repetitions={calibration.inner_repetitions} "
+                            f"mode={calibration.adaptive_mode} target={calibration.adaptive_target_window_s:.3f}s",
+                        )
+                    for repetition in range(1, reps + 1):
+                        if self.reporter:
+                            self.reporter.verbose(
+                                "measurement",
+                                f"{workload.identifier} {fidelity.value} sample {repetition}/{reps}",
+                            )
+                        measurement = self.backend.measure(
+                            target,
+                            workload,
+                            overlay_root=overlay_root,
+                            inner_repetitions=calibration.inner_repetitions,
+                            timeout_s=self.settings.workload_timeout_s,
+                        )
+                        self._report_worker_diagnostics(
+                            workload_id=workload.identifier,
+                            fidelity=fidelity,
+                            repetition=repetition,
+                            measurement=measurement,
+                        )
+                        sample = self._to_metric_sample(
+                            measurement=measurement,
+                            workload_id=workload.identifier,
+                            fidelity=fidelity,
+                            repetition=repetition,
+                            calibration=calibration,
+                        )
+                        all_samples.append(sample)
+
             aggregate, per_workload = aggregate_samples(all_samples)
-            return MeasurementReport(
+            report = MeasurementReport(
                 run_id=run_id,
                 candidate_id=candidate_id,
                 fidelity=fidelity,
@@ -103,6 +244,17 @@ class PerformanceOracle:
                 },
                 metadata={"calibration": calibration_records},
             )
+
+            if use_cache and self.db and candidate_id is None:
+                self.db.save_cached_measurement(
+                    source_hash=source_hash,
+                    workload_id=cache_key,
+                    fidelity=fidelity.value,
+                    report_json=json.dumps(report.to_record()),
+                    file_mtime=file_mtime,
+                )
+
+            return report
         finally:
             if overlay_context:
                 overlay_context.cleanup()
@@ -111,7 +263,7 @@ class PerformanceOracle:
         self,
         *,
         target: TargetSpec,
-        workload,
+        workload: WorkloadSpec,
         fidelity: Fidelity,
         overlay_root: Path | None,
     ) -> CalibrationResult:
@@ -161,7 +313,15 @@ class PerformanceOracle:
             capped=capped,
         )
 
-    def _to_metric_sample(self, *, measurement, workload_id: str, fidelity: Fidelity, repetition: int, calibration: CalibrationResult):
+    def _to_metric_sample(
+        self,
+        *,
+        measurement: BackendMeasurement,
+        workload_id: str,
+        fidelity: Fidelity,
+        repetition: int,
+        calibration: CalibrationResult,
+    ):
         divisor = max(1, int(measurement.metadata.get("logical_invocations", calibration.inner_repetitions)))
         metadata = {
             "backend": getattr(self.backend, "name", type(self.backend).__name__),
@@ -189,7 +349,14 @@ class PerformanceOracle:
             metadata=metadata,
         )
 
-    def _report_worker_diagnostics(self, *, workload_id: str, fidelity: Fidelity, repetition: int, measurement) -> None:
+    def _report_worker_diagnostics(
+        self,
+        *,
+        workload_id: str,
+        fidelity: Fidelity,
+        repetition: int,
+        measurement: BackendMeasurement,
+    ) -> None:
         if not self.reporter:
             return
         if not measurement.success:
@@ -240,11 +407,3 @@ class PerformanceOracle:
         finally:
             if overlay_context:
                 overlay_context.cleanup()
-
-
-def _get_backend(name: str, settings: JouleSettings):
-    if name == "rapl":
-        rapl_options = settings.backends.options.get("rapl", {}) if settings.backends.options else {}
-        rapl_path = rapl_options.get("path")
-        return RaplEnergyBackend(rapl_path=Path(rapl_path) if isinstance(rapl_path, str) else None)
-    return MockEnergyBackend()

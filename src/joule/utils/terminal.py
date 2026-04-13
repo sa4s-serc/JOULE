@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from rich.console import Console
 
@@ -15,6 +16,26 @@ _LEVELS = {
     "debug": 4,
     "trace": 5,
 }
+
+
+@runtime_checkable
+class Reporter(Protocol):
+    console: Console
+
+    def set_log_file(self, path: Path | None) -> None:
+        ...
+
+    def info(self, stage: str, message: str) -> None:
+        ...
+
+    def verbose(self, stage: str, message: str) -> None:
+        ...
+
+    def debug(self, stage: str, message: str) -> None:
+        ...
+
+    def warn(self, stage: str, message: str) -> None:
+        ...
 
 
 class TerminalReporter:

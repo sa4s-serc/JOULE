@@ -3,34 +3,51 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from joule.config import JouleSettings
 from joule.discovery.resolver import resolve_target, resolve_workload_bundle
+from joule.evaluators.correctness import CorrectnessEngine
+from joule.evaluators.oracle import PerformanceOracle
 from joule.integrations.git import file_sha256, source_sha256
-from joule.models import RunRecord, RunType
+from joule.models import RunRecord, RunType, TargetSpec, WorkloadBundle
+from joule.orchestrator.mfbo import OptimizationOrchestrator
+from joule.surrogate.gp import GaussianProcessSurrogate
+from joule.transformers.registry import OperatorRegistry
 from joule.utils.artifacts import run_directory, write_lockfile
 from joule.utils.db import JouleDB
 from joule.utils.reporting import workload_provenance_records
-from joule.utils.terminal import TerminalReporter
+from joule.utils.terminal import Reporter
+
+
+@dataclass(slots=True)
+class JouleContainer:
+    settings: JouleSettings
+    db: JouleDB
+    reporter: Reporter
+    oracle: PerformanceOracle
+    orchestrator: OptimizationOrchestrator
+    correctness: CorrectnessEngine
+    registry: OperatorRegistry
+    surrogate: GaussianProcessSurrogate
 
 
 @dataclass(slots=True)
 class ExecutionContext:
+    container: JouleContainer
     settings: JouleSettings
     db: JouleDB
-    reporter: TerminalReporter
-    target: Any
-    bundle: Any
+    reporter: Reporter
+    target: TargetSpec
+    bundle: WorkloadBundle
     chosen_backend: str
     run_id: str
     run_dir: Path
     record: RunRecord
-    oracle: Any
-    orchestrator: Any
+    oracle: PerformanceOracle
+    orchestrator: OptimizationOrchestrator
 
 
-def run_metadata(target, settings: JouleSettings, bundle, backend_name: str) -> dict:
+def run_metadata(target: TargetSpec, settings: JouleSettings, bundle: WorkloadBundle, backend_name: str) -> dict:
     return {
         "target_qualname": target.qualname,
         "target_file_hash": file_sha256(target.file_path),
@@ -47,11 +64,11 @@ def resolve_target_and_bundle(
     path: Path,
     function: str,
     settings: JouleSettings,
-    reporter: TerminalReporter,
+    reporter: Reporter,
     tests: list[str] | None,
     properties: list[str] | None,
     harness: str | None,
-):
+) -> tuple[TargetSpec, WorkloadBundle]:
     reporter.info("setup", f"Project root: {settings.project_root}")
     target = resolve_target(path, function, project_root=settings.project_root)
     reporter.info("target", f"Resolved {target.qualname} at {target.file_path}")
@@ -65,8 +82,8 @@ def create_run_record(
     settings: JouleSettings,
     db: JouleDB,
     run_type: RunType,
-    target,
-    bundle,
+    target: TargetSpec,
+    bundle: WorkloadBundle,
     chosen_backend: str,
 ) -> tuple[RunRecord, str, Path]:
     run_id = settings.new_run_id()

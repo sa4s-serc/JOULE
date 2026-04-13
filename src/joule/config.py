@@ -55,6 +55,7 @@ class JouleSettings:
     inner_repetitions_max: int = 10_000
     adaptive_min_window_s: float = 0.05
     adaptive_probe_samples: int = 1
+    max_parallel_workers: int = 1
     search_max_generations: int = 3
     search_branching_factor: int = 2
     search_exploration_fraction: float = 0.45
@@ -137,6 +138,7 @@ def load_settings(path: str | Path) -> JouleSettings:
         inner_repetitions_max=int(payload.get("inner_repetitions_max", 10_000)),
         adaptive_min_window_s=float(payload.get("adaptive_min_window_s", 0.05)),
         adaptive_probe_samples=int(payload.get("adaptive_probe_samples", 1)),
+        max_parallel_workers=int(payload.get("max_parallel_workers", 1)),
         search_max_generations=int(payload.get("search_max_generations", 3)),
         search_branching_factor=int(payload.get("search_branching_factor", 2)),
         search_exploration_fraction=float(payload.get("search_exploration_fraction", 0.45)),

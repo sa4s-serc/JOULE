@@ -97,7 +97,9 @@ class SeenSetForAppendDedup(BaseOperator):
                         known_names.add(seen_name)
 
                         dedup_if = second.body[0]
-                        dedup_if.test.comparators[0] = ast.Name(id=seen_name, ctx=ast.Load())
+                        test = dedup_if.test
+                        assert isinstance(test, ast.Compare)
+                        test.comparators[0] = ast.Name(id=seen_name, ctx=ast.Load())
                         dedup_if.body.insert(
                             0,
                             ast.Expr(

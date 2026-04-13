@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 import json
 import sqlite3
-from typing import Any, Iterator
+from typing import Any, Iterator, TypedDict
 
 from joule.models import MeasurementReport, RunRecord, RunType, TargetSpec, WorkloadBundle
+
+
+class CandidateRecord(TypedDict):
+    candidate_id: str
+    parent_id: str | None
+    operator_name: str
+    reasoning: str
+    dependencies: list[str]
+    source_code: str
+    status: str
+    score: float
+    metadata: dict[str, Any]
 
 
 SCHEMA = """
@@ -95,7 +108,44 @@ CREATE TABLE IF NOT EXISTS hotspot_profiles (
   payload_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schema_version (
+  version INTEGER PRIMARY KEY,
+  applied_at TEXT NOT NULL
+);
 """
+
+MIGRATIONS: list[tuple[int, str]] = [
+    (
+        1,
+        """
+CREATE TABLE IF NOT EXISTS checkpoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  candidate_id TEXT NOT NULL,
+  pareto_front_json TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+""",
+    ),
+    (
+        2,
+        """
+CREATE TABLE IF NOT EXISTS measurements_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_hash TEXT NOT NULL,
+  workload_id TEXT NOT NULL,
+  fidelity TEXT NOT NULL,
+  report_json TEXT NOT NULL,
+  file_mtime REAL NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cache_lookup ON measurements_cache(source_hash, workload_id, fidelity);
+""",
+    ),
+]
 
 
 class JouleDB:
@@ -104,6 +154,19 @@ class JouleDB:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+        self._apply_migrations()
+
+    def _apply_migrations(self) -> None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
+            current_version = row[0] if row else 0
+            for version, sql in MIGRATIONS:
+                if version > current_version:
+                    conn.executescript(sql)
+                    conn.execute(
+                        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                        (version, datetime.now(UTC).isoformat()),
+                    )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -301,7 +364,7 @@ class JouleDB:
         )
         return [self._artifact_row_to_record(row) for row in rows]
 
-    def get_candidates(self, run_id: str) -> list[dict]:
+    def get_candidates(self, run_id: str) -> list[CandidateRecord]:
         rows = self._fetchall(
             """
             SELECT candidate_id, parent_id, operator_name, reasoning, dependencies_json,
@@ -393,6 +456,94 @@ class JouleDB:
         )
         return [self._apply_audit_row_to_record(row) for row in rows]
 
+    def save_checkpoint(
+        self,
+        run_id: str,
+        generation: int,
+        candidate_id: str,
+        pareto_front_json: str,
+        metadata_json: str,
+    ) -> None:
+        created_at = datetime.now(UTC).isoformat()
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO checkpoints (run_id, generation, candidate_id, pareto_front_json, metadata_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (run_id, generation, candidate_id, pareto_front_json, metadata_json, created_at),
+            )
+
+    def get_latest_checkpoint(self, run_id: str) -> dict | None:
+        rows = self._fetchall(
+            "SELECT generation, candidate_id, pareto_front_json, metadata_json, created_at FROM checkpoints WHERE run_id = ? ORDER BY generation DESC LIMIT 1",
+            (run_id,),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            "generation": row[0],
+            "candidate_id": row[1],
+            "pareto_front_json": row[2],
+            "metadata": json.loads(row[3]),
+            "created_at": row[4],
+        }
+
+    def get_checkpoints(self, run_id: str) -> list[dict]:
+        rows = self._fetchall(
+            "SELECT generation, candidate_id, pareto_front_json, metadata_json, created_at FROM checkpoints WHERE run_id = ? ORDER BY generation",
+            (run_id,),
+        )
+        return [
+            {
+                "generation": row[0],
+                "candidate_id": row[1],
+                "pareto_front_json": row[2],
+                "metadata": json.loads(row[3]),
+                "created_at": row[4],
+            }
+            for row in rows
+        ]
+
+    def get_cached_measurement(
+        self, source_hash: str, workload_id: str, fidelity: str, file_mtime: float
+    ) -> dict | None:
+        rows = self._fetchall(
+            """
+            SELECT report_json, file_mtime
+            FROM measurements_cache
+            WHERE source_hash = ? AND workload_id = ? AND fidelity = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (source_hash, workload_id, fidelity),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        cached_mtime = row[1]
+        if cached_mtime < file_mtime:
+            return None
+        return json.loads(row[0])
+
+    def save_cached_measurement(
+        self, source_hash: str, workload_id: str, fidelity: str, report_json: str, file_mtime: float
+    ) -> None:
+        created_at = datetime.now(UTC).isoformat()
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM measurements_cache WHERE source_hash = ? AND workload_id = ? AND fidelity = ?",
+                (source_hash, workload_id, fidelity),
+            )
+            conn.execute(
+                """INSERT INTO measurements_cache (source_hash, workload_id, fidelity, report_json, file_mtime, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (source_hash, workload_id, fidelity, report_json, file_mtime, created_at),
+            )
+
+    def clear_measurements_cache(self) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM measurements_cache")
+
     def _run_summary_row_to_record(self, row: tuple[Any, ...]) -> dict[str, Any]:
         return {
             "run_id": row[0],
@@ -405,7 +556,7 @@ class JouleDB:
     def _artifact_row_to_record(self, row: tuple[Any, ...]) -> dict[str, Any]:
         return {"name": row[0], "kind": row[1], "payload": row[2]}
 
-    def _candidate_row_to_record(self, row: tuple[Any, ...]) -> dict[str, Any]:
+    def _candidate_row_to_record(self, row: tuple[Any, ...]) -> CandidateRecord:
         return {
             "candidate_id": row[0],
             "parent_id": row[1],

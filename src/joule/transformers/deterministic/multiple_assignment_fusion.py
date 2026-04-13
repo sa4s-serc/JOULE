@@ -8,7 +8,7 @@ from joule.transformers.base import BaseOperator
 from ._shared import loaded_names
 
 
-def _single_name_assignment(stmt: ast.stmt) -> tuple[str, ast.expr] | None:
+def _single_name_assignment(stmt: ast.AST) -> tuple[str, ast.expr] | None:
     if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
         return None
     target = stmt.targets[0]

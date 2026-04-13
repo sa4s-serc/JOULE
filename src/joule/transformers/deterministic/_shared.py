@@ -71,11 +71,10 @@ def insertion_index(module: ast.Module) -> int:
         and isinstance(module.body[0].value.value, str)
     ):
         index = 1
-    while (
-        index < len(module.body)
-        and isinstance(module.body[index], ast.ImportFrom)
-        and module.body[index].module == "__future__"
-    ):
+    while index < len(module.body):
+        stmt = module.body[index]
+        if not (isinstance(stmt, ast.ImportFrom) and stmt.module == "__future__"):
+            break
         index += 1
     return index
 

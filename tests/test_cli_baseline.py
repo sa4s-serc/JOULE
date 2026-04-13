@@ -88,3 +88,21 @@ def test_baseline_help_includes_path_and_function_guidance():
     assert result.exit_code == 0, result.output
     assert "Path to a target .py file or project root" in result.output
     assert "module.func" in result.output
+
+
+def test_baseline_reuses_measurement_cache(sample_project):
+    command = [
+        "baseline",
+        str(sample_project / "sample_pkg" / "algos.py"),
+        "--function",
+        "membership_total",
+        "--tests",
+        "tests/test_algos.py::test_membership_total",
+        "--no-dashboard",
+    ]
+    first = runner.invoke(app, command)
+    assert first.exit_code == 0, first.output
+
+    second = runner.invoke(app, command)
+    assert second.exit_code == 0, second.output
+    assert "cache" in second.output.lower()

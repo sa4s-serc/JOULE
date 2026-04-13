@@ -214,3 +214,48 @@ def test_apply_commit_requires_branch(sample_project):
     )
     assert result.exit_code != 0
     assert "--commit requires --branch" in result.output
+
+
+def test_resume_command_continues_existing_run(sample_project):
+    _loosen_thresholds(sample_project)
+    target_file = sample_project / "sample_pkg" / "algos.py"
+
+    first = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "2",
+            "--analysis",
+            "--no-dashboard",
+        ],
+    )
+    assert first.exit_code == 0, first.output
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", first.output).group(1)
+
+    settings = load_settings(sample_project)
+    db = JouleDB(settings.db_path)
+    before = len(db.get_candidates(run_id))
+    checkpoint_path = sample_project / ".joule" / "runs" / run_id / "checkpoint.json"
+    assert checkpoint_path.exists()
+
+    resumed = runner.invoke(
+        app,
+        [
+            "resume",
+            str(sample_project),
+            "--run-id",
+            run_id,
+            "--budget",
+            "4",
+            "--analysis",
+            "--no-dashboard",
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.output
+
+    after = len(db.get_candidates(run_id))
+    assert after >= before

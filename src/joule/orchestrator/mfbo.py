@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import json
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 import uuid
@@ -10,9 +12,12 @@ from joule.config import JouleSettings
 from joule.evaluators.correctness import CorrectnessEngine
 from joule.evaluators.oracle import PerformanceOracle
 from joule.models import (
+    AggregateMetrics,
     CandidateEvaluation,
     Fidelity,
     FrontierState,
+    MeasurementReport,
+    MetricSample,
     SearchContext,
     SearchPhase,
     TargetSpec,
@@ -34,6 +39,7 @@ from joule.transformers.registry import OperatorRegistry
 from joule.utils.analysis import candidate_source_hash
 from joule.utils.db import JouleDB
 from joule.utils.metrics import improvement_ratio, scalar_score
+from joule.utils.terminal import TerminalReporter
 
 
 @dataclass(slots=True)
@@ -46,18 +52,50 @@ class _ParentSnapshot:
 
 
 class OptimizationOrchestrator:
-    def __init__(self, settings: JouleSettings, db: JouleDB, oracle: PerformanceOracle, reporter=None) -> None:
+    def __init__(
+        self,
+        settings: JouleSettings,
+        db: JouleDB,
+        oracle: PerformanceOracle,
+        correctness: CorrectnessEngine,
+        registry: OperatorRegistry,
+        surrogate: GaussianProcessSurrogate,
+        reporter: TerminalReporter | None = None,
+    ) -> None:
         self.settings = settings
         self.db = db
         self.oracle = oracle
+        self.correctness = correctness
+        self.registry = registry
+        self.surrogate = surrogate
         self.reporter = reporter
-        self.correctness = CorrectnessEngine()
-        self.registry = OperatorRegistry(llm_model=settings.llm_model, include_llm=True)
-        self.registry.load_stats(self.db.get_operator_stats())
-        self.surrogate = GaussianProcessSurrogate()
         self._warm_start_surrogate()
 
-    def baseline(self, run_id: str, target: TargetSpec, bundle: WorkloadBundle, repetitions: int | None = None):
+    @classmethod
+    def create(
+        cls,
+        settings: JouleSettings,
+        db: JouleDB,
+        oracle: PerformanceOracle,
+        reporter: TerminalReporter | None = None,
+    ) -> "OptimizationOrchestrator":
+        correctness = CorrectnessEngine()
+        registry = OperatorRegistry(llm_model=settings.llm_model, include_llm=True)
+        registry.load_stats(db.get_operator_stats())
+        surrogate = GaussianProcessSurrogate()
+        return cls(
+            settings=settings,
+            db=db,
+            oracle=oracle,
+            correctness=correctness,
+            registry=registry,
+            surrogate=surrogate,
+            reporter=reporter,
+        )
+
+    def baseline(
+        self, run_id: str, target: TargetSpec, bundle: WorkloadBundle, repetitions: int | None = None, use_cache: bool = True
+    ) -> MeasurementReport:
         if self.reporter:
             self.reporter.info("baseline", f"Measuring {target.qualname} with {len(bundle.workloads)} workload(s)")
         report = self.oracle.measure_bundle(
@@ -66,6 +104,7 @@ class OptimizationOrchestrator:
             bundle=bundle,
             fidelity=Fidelity.F3,
             repetitions=repetitions,
+            use_cache=use_cache,
         )
         self.db.record_measurement(report, created_at=datetime.now(UTC).isoformat())
         return report
@@ -78,43 +117,68 @@ class OptimizationOrchestrator:
         *,
         budget: int | None = None,
         analysis: bool = False,
+        resume: str | None = None,
+        use_cache: bool = True,
+        checkpoint_path: Path | None = None,
     ) -> tuple:
-        baseline = self.baseline(run_id, target, bundle)
+        if resume and resume != run_id:
+            raise ValueError("Run IDs must match when resuming. Use `joule resume --run-id <id>` to continue an existing run.")
+
+        restored = self._restore_checkpoint(run_id=resume or run_id)
+        if restored:
+            baseline = restored["baseline"]
+            pareto = restored["pareto"]
+            parent_snapshots = restored["parent_snapshots"]
+            seen_sources = restored["seen_sources"]
+            state = restored["state"]
+            escape_used = restored["escape_used"]
+            if budget is not None:
+                state.total_budget = max(state.measured, budget)
+            accepted_evaluations = self._load_accepted_evaluations(run_id)
+            if self.reporter:
+                self.reporter.info(
+                    "resume",
+                    f"Resumed run at candidate {state.measured}/{state.total_budget}",
+                )
+        else:
+            baseline = self.baseline(run_id, target, bundle, use_cache=use_cache)
+            pareto = ParetoFront(
+                weights=(
+                    self.settings.pareto_weights.energy,
+                    self.settings.pareto_weights.latency,
+                    self.settings.pareto_weights.memory,
+                )
+            )
+            pareto.add(
+                ParetoPoint(
+                    candidate_id="baseline",
+                    metrics=baseline.aggregate,
+                    parent_id=None,
+                    generation_depth=0,
+                    operator_name="baseline",
+                    active=True,
+                )
+            )
+            accepted_evaluations = {}
+            parent_snapshots = {
+                "baseline": _ParentSnapshot(
+                    candidate_id="baseline",
+                    source=target.source,
+                    operator_name="baseline",
+                    generation_depth=0,
+                )
+            }
+            seen_sources = {candidate_source_hash(target.source): "baseline"}
+            state = OptimizationState(
+                total_budget=budget or self.settings.optimization_budget,
+                max_parent_expansions=max(1, self.settings.search_branching_factor)
+                * max(1, len(self.registry.operators)),
+            )
+            escape_used = False
+
         baseline_score = scalar_score(baseline.aggregate)
         self.surrogate.record(target.source, baseline_score)
-        pareto = ParetoFront(
-            weights=(
-                self.settings.pareto_weights.energy,
-                self.settings.pareto_weights.latency,
-                self.settings.pareto_weights.memory,
-            )
-        )
-        pareto.add(
-            ParetoPoint(
-                candidate_id="baseline",
-                metrics=baseline.aggregate,
-                parent_id=None,
-                generation_depth=0,
-                operator_name="baseline",
-                active=True,
-            )
-        )
-        accepted_evaluations: dict[str, CandidateEvaluation] = {}
-        parent_snapshots: dict[str, _ParentSnapshot] = {
-            "baseline": _ParentSnapshot(
-                candidate_id="baseline",
-                source=target.source,
-                operator_name="baseline",
-                generation_depth=0,
-            )
-        }
-        seen_sources = {candidate_source_hash(target.source): "baseline"}
-
-        state = OptimizationState(
-            total_budget=budget or self.settings.optimization_budget,
-            max_parent_expansions=max(1, self.settings.search_branching_factor) * max(1, len(self.registry.operators)),
-        )
-        escape_used = False
+        accepted_candidate_ids = {candidate_id for candidate_id in accepted_evaluations}
         if self.reporter:
             self.reporter.info("progress", f"Optimization budget: {state.total_budget} measured candidate(s)")
         while state.measured < state.total_budget:
@@ -366,6 +430,18 @@ class OptimizationOrchestrator:
                     )
                     parent.rejection_history.append(str(screening["reason"]))
                     state.no_frontier_gain += 1
+                    self._save_checkpoint(
+                        run_id=run_id,
+                        candidate_id=candidate_id,
+                        baseline=baseline,
+                        pareto=pareto,
+                        parent_snapshots=parent_snapshots,
+                        seen_sources=seen_sources,
+                        state=state,
+                        escape_used=escape_used,
+                        accepted_candidate_ids=accepted_candidate_ids,
+                        checkpoint_path=checkpoint_path,
+                    )
                     continue
                 correctness_started = perf_counter()
                 valid, reasons = self.correctness.verify(
@@ -407,6 +483,18 @@ class OptimizationOrchestrator:
                     )
                     parent.rejection_history.append("correctness")
                     state.no_frontier_gain += 1
+                    self._save_checkpoint(
+                        run_id=run_id,
+                        candidate_id=candidate_id,
+                        baseline=baseline,
+                        pareto=pareto,
+                        parent_snapshots=parent_snapshots,
+                        seen_sources=seen_sources,
+                        state=state,
+                        escape_used=escape_used,
+                        accepted_candidate_ids=accepted_candidate_ids,
+                        checkpoint_path=checkpoint_path,
+                    )
                     continue
                 fidelities = self._fidelities_for_decision(str(screening["decision"]), phase)
                 accepted = False
@@ -569,6 +657,7 @@ class OptimizationOrchestrator:
                 )
                 if accepted:
                     accepted_evaluations[candidate_id] = evaluation
+                    accepted_candidate_ids.add(candidate_id)
                     state.no_frontier_gain = 0
                     escape_used = False
                     if self.reporter:
@@ -581,6 +670,18 @@ class OptimizationOrchestrator:
                             "progress",
                             f"Candidate {candidate_id} rejected ({rejection_reason or 'threshold'})",
                         )
+                self._save_checkpoint(
+                    run_id=run_id,
+                    candidate_id=candidate_id,
+                    baseline=baseline,
+                    pareto=pareto,
+                    parent_snapshots=parent_snapshots,
+                    seen_sources=seen_sources,
+                    state=state,
+                    escape_used=escape_used,
+                    accepted_candidate_ids=accepted_candidate_ids,
+                    checkpoint_path=checkpoint_path,
+                )
                 if state.no_frontier_gain >= self.settings.search_convergence_patience:
                     # Break out early so the next outer-loop iteration can trigger the escape operator.
                     break
@@ -602,6 +703,259 @@ class OptimizationOrchestrator:
                 f"Optimization complete: measured {state.measured}/{state.total_budget} candidate(s)",
             )
         return baseline, pareto, best_candidate
+
+    def _save_checkpoint(
+        self,
+        *,
+        run_id: str,
+        candidate_id: str,
+        baseline: MeasurementReport,
+        pareto: ParetoFront,
+        parent_snapshots: dict[str, _ParentSnapshot],
+        seen_sources: dict[str, str],
+        state: OptimizationState,
+        escape_used: bool,
+        accepted_candidate_ids: set[str],
+        checkpoint_path: Path | None,
+    ) -> None:
+        pareto_payload = [
+            {
+                "candidate_id": point.candidate_id,
+                "metrics": point.metrics.to_record(),
+                "parent_id": point.parent_id,
+                "generation_depth": point.generation_depth,
+                "operator_name": point.operator_name,
+                "active": point.active,
+            }
+            for point in pareto.points()
+        ]
+        metadata = {
+            "baseline_report": baseline.to_record(),
+            "state": {
+                "measured": state.measured,
+                "total_budget": state.total_budget,
+                "no_frontier_gain": state.no_frontier_gain,
+                "max_parent_expansions": state.max_parent_expansions,
+            },
+            "seen_sources": seen_sources,
+            "parent_snapshots": {
+                key: {
+                    "candidate_id": item.candidate_id,
+                    "source": item.source,
+                    "operator_name": item.operator_name,
+                    "generation_depth": item.generation_depth,
+                    "rejection_history": item.rejection_history,
+                }
+                for key, item in parent_snapshots.items()
+            },
+            "accepted_candidate_ids": sorted(accepted_candidate_ids),
+            "escape_used": escape_used,
+        }
+        self.db.save_checkpoint(
+            run_id=run_id,
+            generation=state.measured,
+            candidate_id=candidate_id,
+            pareto_front_json=json.dumps(pareto_payload),
+            metadata_json=json.dumps(metadata),
+        )
+        if checkpoint_path is None:
+            return
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint_path.write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "generation": state.measured,
+                    "candidate_id": candidate_id,
+                    "pareto": pareto_payload,
+                    "metadata": metadata,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    def _restore_checkpoint(self, *, run_id: str) -> dict[str, Any] | None:
+        checkpoint = self.db.get_latest_checkpoint(run_id)
+        if checkpoint is None:
+            return None
+        metadata = checkpoint.get("metadata", {}) if isinstance(checkpoint, dict) else {}
+        baseline_payload = metadata.get("baseline_report") if isinstance(metadata, dict) else None
+        if not isinstance(baseline_payload, dict):
+            return None
+        baseline = self._measurement_report_from_record(baseline_payload)
+
+        pareto = ParetoFront(
+            weights=(
+                self.settings.pareto_weights.energy,
+                self.settings.pareto_weights.latency,
+                self.settings.pareto_weights.memory,
+            )
+        )
+        try:
+            pareto_payload = json.loads(str(checkpoint.get("pareto_front_json", "[]")))
+        except json.JSONDecodeError:
+            pareto_payload = []
+        for point in pareto_payload:
+            if not isinstance(point, dict):
+                continue
+            metrics_payload = point.get("metrics")
+            if not isinstance(metrics_payload, dict):
+                continue
+            pareto.add(
+                ParetoPoint(
+                    candidate_id=str(point.get("candidate_id", "")),
+                    metrics=AggregateMetrics(**metrics_payload),
+                    parent_id=point.get("parent_id"),
+                    generation_depth=int(point.get("generation_depth", 0)),
+                    operator_name=str(point.get("operator_name", "baseline")),
+                    active=bool(point.get("active", True)),
+                )
+            )
+        if not pareto.points():
+            pareto.add(
+                ParetoPoint(
+                    candidate_id="baseline",
+                    metrics=baseline.aggregate,
+                    parent_id=None,
+                    generation_depth=0,
+                    operator_name="baseline",
+                    active=True,
+                )
+            )
+
+        parent_payload = metadata.get("parent_snapshots", {}) if isinstance(metadata, dict) else {}
+        parent_snapshots: dict[str, _ParentSnapshot] = {}
+        if isinstance(parent_payload, dict):
+            for key, payload in parent_payload.items():
+                if not isinstance(payload, dict):
+                    continue
+                parent_snapshots[str(key)] = _ParentSnapshot(
+                    candidate_id=str(payload.get("candidate_id", key)),
+                    source=str(payload.get("source", "")),
+                    operator_name=str(payload.get("operator_name", "baseline")),
+                    generation_depth=int(payload.get("generation_depth", 0)),
+                    rejection_history=[str(item) for item in payload.get("rejection_history", [])],
+                )
+
+        if "baseline" not in parent_snapshots:
+            parent_snapshots["baseline"] = _ParentSnapshot(
+                candidate_id="baseline",
+                source="",
+                operator_name="baseline",
+                generation_depth=0,
+            )
+
+        seen_sources_payload = metadata.get("seen_sources", {}) if isinstance(metadata, dict) else {}
+        if isinstance(seen_sources_payload, dict):
+            seen_sources = {str(key): str(value) for key, value in seen_sources_payload.items()}
+        else:
+            seen_sources = {}
+        baseline_source = parent_snapshots["baseline"].source
+        if baseline_source:
+            seen_sources.setdefault(candidate_source_hash(baseline_source), "baseline")
+
+        state_payload = metadata.get("state", {}) if isinstance(metadata, dict) else {}
+        if not isinstance(state_payload, dict):
+            state_payload = {}
+        state = OptimizationState(
+            total_budget=max(1, int(state_payload.get("total_budget", self.settings.optimization_budget))),
+            max_parent_expansions=max(
+                1,
+                int(
+                    state_payload.get(
+                        "max_parent_expansions",
+                        max(1, self.settings.search_branching_factor) * max(1, len(self.registry.operators)),
+                    )
+                ),
+            ),
+            measured=max(0, int(state_payload.get("measured", checkpoint.get("generation", 0)))),
+            no_frontier_gain=max(0, int(state_payload.get("no_frontier_gain", 0))),
+        )
+        return {
+            "baseline": baseline,
+            "pareto": pareto,
+            "parent_snapshots": parent_snapshots,
+            "seen_sources": seen_sources,
+            "state": state,
+            "escape_used": bool(metadata.get("escape_used", False)) if isinstance(metadata, dict) else False,
+        }
+
+    def _load_accepted_evaluations(self, run_id: str) -> dict[str, CandidateEvaluation]:
+        candidates = [item for item in self.db.get_candidates(run_id) if item["status"] == "accepted"]
+        if not candidates:
+            return {}
+
+        measurements = self.db.get_measurements(run_id)
+        reports_by_candidate: dict[str, MeasurementReport] = {}
+        fidelity_rank = {Fidelity.F1: 1, Fidelity.F2: 2, Fidelity.F3: 3}
+        for payload in measurements:
+            candidate_id = payload.get("candidate_id")
+            if not candidate_id:
+                continue
+            report = self._measurement_report_from_record(payload)
+            existing = reports_by_candidate.get(candidate_id)
+            if existing is None or fidelity_rank[report.fidelity] >= fidelity_rank[existing.fidelity]:
+                reports_by_candidate[candidate_id] = report
+
+        evaluations: dict[str, CandidateEvaluation] = {}
+        for item in candidates:
+            metadata = dict(item.get("metadata", {}))
+            frontier_raw = str(metadata.get("frontier_state", FrontierState.FRONTIER_ACTIVE.value))
+            try:
+                frontier_state = FrontierState(frontier_raw)
+            except ValueError:
+                frontier_state = FrontierState.FRONTIER_ACTIVE
+            surrogate_payload = metadata.get("surrogate", {})
+            acquisition_score = 0.0
+            if isinstance(surrogate_payload, dict):
+                acquisition_score = float(surrogate_payload.get("acquisition_score", 0.0))
+
+            evaluations[item["candidate_id"]] = CandidateEvaluation(
+                candidate_id=item["candidate_id"],
+                operator_name=item["operator_name"],
+                reasoning=item["reasoning"],
+                source=item["source_code"],
+                dependencies=item["dependencies"],
+                parent_id=item["parent_id"] or "baseline",
+                generation_depth=int(metadata.get("generation_depth", 0)),
+                frontier_state=frontier_state,
+                accepted=True,
+                score=float(item["score"]),
+                acquisition_score=acquisition_score,
+                dominance_summary=dict(metadata.get("dominance_summary", {})),
+                report=reports_by_candidate.get(item["candidate_id"]),
+                metadata=metadata,
+            )
+        return evaluations
+
+    def _measurement_report_from_record(self, payload: dict[str, Any]) -> MeasurementReport:
+        return MeasurementReport(
+            run_id=str(payload["run_id"]),
+            candidate_id=payload.get("candidate_id"),
+            fidelity=Fidelity(str(payload["fidelity"])),
+            aggregate=AggregateMetrics(**payload["aggregate"]),
+            per_workload=[AggregateMetrics(**item) for item in payload.get("per_workload", [])],
+            samples=[
+                MetricSample(
+                    workload_id=str(item["workload_id"]),
+                    fidelity=Fidelity(str(item["fidelity"])),
+                    repetition=int(item["repetition"]),
+                    success=bool(item["success"]),
+                    wall_time_s=float(item["wall_time_s"]),
+                    cpu_time_s=float(item["cpu_time_s"]),
+                    peak_memory_bytes=int(item["peak_memory_bytes"]),
+                    energy_j=float(item["energy_j"]),
+                    return_code=int(item["return_code"]),
+                    stdout=str(item.get("stdout", "")),
+                    stderr=str(item.get("stderr", "")),
+                    metadata=dict(item.get("metadata", {})),
+                )
+                for item in payload.get("samples", [])
+            ],
+            environment=dict(payload.get("environment", {})),
+            metadata=dict(payload.get("metadata", {})),
+        )
 
     def _record_candidate(self, run_id: str, evaluation: CandidateEvaluation, *, status: str) -> None:
         self.db.record_candidate(

@@ -6,7 +6,7 @@ import json
 import resource
 import subprocess
 import time
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import psutil  # type: ignore[import-untyped]
 
@@ -24,7 +24,7 @@ class BackendMeasurement:
     success: bool
     stdout: str = ""
     stderr: str = ""
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -35,6 +35,7 @@ class WorkerExecution:
     payload: dict[str, Any]
 
 
+@runtime_checkable
 class EnergyBackend(Protocol):
     name: str
 
