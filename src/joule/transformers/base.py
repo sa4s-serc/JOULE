@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import ast
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 from joule.models import SearchContext, TargetSpec, Tier, TransformationResult, tier_descriptor
 
 
 class BaseOperator(ABC):
-    name: str
-    family: str = "deterministic"
-    tier: Tier = Tier.L
-    escape_only: bool = False
-    precheck_node_types: tuple[type[ast.AST], ...] = ()
+    name: ClassVar[str]
+    family: ClassVar[str] = "deterministic"
+    tier: ClassVar[Tier] = Tier.L
+    escape_only: ClassVar[bool] = False
+    precheck_node_types: ClassVar[tuple[type[ast.AST], ...]] = ()
 
     def tier_name(self) -> str:
         return self.tier.value

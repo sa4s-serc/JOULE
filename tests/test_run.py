@@ -132,6 +132,45 @@ def test_apply_rejects_dependency_bearing_candidate(sample_project):
     assert "review-only" in apply_result.output
 
 
+def test_apply_allows_stdlib_dependency_bearing_candidate(sample_project):
+    _loosen_thresholds(sample_project)
+    target_file = sample_project / "sample_pkg" / "algos.py"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "4",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", result.output).group(1)
+    settings = load_settings(sample_project)
+    db = JouleDB(settings.db_path)
+    candidate = db.get_candidates(run_id)[0]
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE candidates SET dependencies_json = ? WHERE candidate_id = ?",
+            ('["collections"]', candidate["candidate_id"]),
+        )
+    apply_result = runner.invoke(
+        app,
+        [
+            "apply",
+            str(sample_project),
+            "--run-id",
+            run_id,
+            "--candidate-id",
+            candidate["candidate_id"],
+        ],
+    )
+    assert apply_result.exit_code == 0, apply_result.output
+
+
 def test_run_analysis_writes_candidate_and_analysis_artifacts(sample_project):
     _loosen_thresholds(sample_project)
     target_file = sample_project / "sample_pkg" / "algos.py"

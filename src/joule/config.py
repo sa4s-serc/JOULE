@@ -18,16 +18,23 @@ PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
         "workload_discovery_limit": 5,
         "hotspot_limit": 8,
         "search_branching_factor": 1,
+        "search_operator_beam_width": 1,
         "search_convergence_patience": 2,
     },
-    "standard": {},
+    "standard": {
+        "search_operator_beam_width": 2,
+    },
     "thorough": {
         "baseline_repetitions": 8,
         "optimization_budget": 10,
         "workload_discovery_limit": 12,
         "hotspot_limit": 20,
         "search_branching_factor": 3,
+        "search_operator_beam_width": 3,
         "search_convergence_patience": 6,
+        "search_composition_enabled": True,
+        "search_composition_width": 2,
+        "search_composition_max_hops": 2,
     },
     "ci": {
         "baseline_repetitions": 4,
@@ -36,6 +43,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
         "hotspot_limit": 6,
         "terminal_verbosity": "quiet",
         "search_branching_factor": 1,
+        "search_operator_beam_width": 1,
         "search_convergence_patience": 2,
     },
 }
@@ -60,6 +68,22 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return bool(value)
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _coerce_bool_map(value: Any) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key).strip(): _coerce_bool(raw, default=True) for key, raw in value.items() if str(key).strip()}
 
 
 @dataclass(slots=True)
@@ -90,6 +114,7 @@ class JouleSettings:
     db_name: str = "joule.db"
     default_backend: str = "mock"
     llm_model: str = ""
+    enable_llm_operators: bool = True
     baseline_repetitions: int = 5
     optimization_budget: int = 6
     workload_discovery_limit: int = 8
@@ -112,6 +137,7 @@ class JouleSettings:
     max_parallel_workers: int = 1
     search_max_generations: int = 3
     search_branching_factor: int = 2
+    search_operator_beam_width: int = 1
     search_exploration_fraction: float = 0.45
     search_exploitation_fraction: float = 0.35
     search_confirmation_fraction: float = 0.20
@@ -119,6 +145,10 @@ class JouleSettings:
     search_min_novelty: float = 0.12
     search_composition_enabled: bool = False
     search_composition_width: int = 1
+    search_composition_max_hops: int = 1
+    operator_allowlist: list[str] = field(default_factory=list)
+    operator_denylist: list[str] = field(default_factory=list)
+    operator_kill_switches: dict[str, bool] = field(default_factory=dict)
     surrogate_warm_start_limit: int = 50
     surrogate_reuse_observations: bool = True
     surrogate_min_training_points: int = 3
@@ -195,6 +225,7 @@ def load_settings(path: str | Path) -> JouleSettings:
         db_name=str(resolved_payload.get("db_name", "joule.db")),
         default_backend=str(resolved_payload.get("default_backend", os.getenv("JOULE_BACKEND", "mock"))),
         llm_model=str(resolved_payload.get("llm_model", os.getenv("JOULE_LLM_MODEL", ""))),
+        enable_llm_operators=_coerce_bool(resolved_payload.get("enable_llm_operators", True), default=True),
         baseline_repetitions=int(resolved_payload.get("baseline_repetitions", 5)),
         optimization_budget=int(resolved_payload.get("optimization_budget", 6)),
         workload_discovery_limit=int(resolved_payload.get("workload_discovery_limit", 8)),
@@ -217,6 +248,7 @@ def load_settings(path: str | Path) -> JouleSettings:
         max_parallel_workers=int(resolved_payload.get("max_parallel_workers", 1)),
         search_max_generations=int(resolved_payload.get("search_max_generations", 3)),
         search_branching_factor=int(resolved_payload.get("search_branching_factor", 2)),
+        search_operator_beam_width=max(1, int(resolved_payload.get("search_operator_beam_width", 1))),
         search_exploration_fraction=float(resolved_payload.get("search_exploration_fraction", 0.45)),
         search_exploitation_fraction=float(resolved_payload.get("search_exploitation_fraction", 0.35)),
         search_confirmation_fraction=float(resolved_payload.get("search_confirmation_fraction", 0.20)),
@@ -227,6 +259,10 @@ def load_settings(path: str | Path) -> JouleSettings:
             default=False,
         ),
         search_composition_width=max(1, int(resolved_payload.get("search_composition_width", 1))),
+        search_composition_max_hops=max(1, int(resolved_payload.get("search_composition_max_hops", 1))),
+        operator_allowlist=_coerce_str_list(resolved_payload.get("operator_allowlist", [])),
+        operator_denylist=_coerce_str_list(resolved_payload.get("operator_denylist", [])),
+        operator_kill_switches=_coerce_bool_map(resolved_payload.get("operator_kill_switches", {})),
         surrogate_warm_start_limit=int(resolved_payload.get("surrogate_warm_start_limit", 50)),
         surrogate_reuse_observations=_coerce_bool(
             resolved_payload.get("surrogate_reuse_observations", True),

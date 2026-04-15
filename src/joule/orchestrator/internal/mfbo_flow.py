@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import sys
 from typing import Any
 
 from joule.metadata import CandidateMetadata, ImprovementSummary, SurrogateDecision
@@ -57,14 +58,25 @@ def generated_candidate_detail(
 
 def dependency_policy_metadata(dependencies: list[str]) -> dict[str, str]:
     if dependencies:
+        external_deps = [dependency for dependency in dependencies if not _is_stdlib_dependency(dependency)]
+        if external_deps:
+            return {
+                "dependency_policy_state": "review_required",
+                "dependency_policy_reason": "candidate proposes external dependencies and remains review-only",
+            }
         return {
-            "dependency_policy_state": "review_required",
-            "dependency_policy_reason": "candidate proposes additional dependencies and remains review-only",
+            "dependency_policy_state": "stdlib_only",
+            "dependency_policy_reason": "candidate uses stdlib dependencies only",
         }
     return {
         "dependency_policy_state": "no_dependencies",
         "dependency_policy_reason": "candidate uses existing dependencies only",
     }
+
+
+def _is_stdlib_dependency(dependency: str) -> bool:
+    root = dependency.split(".", 1)[0].strip()
+    return bool(root) and root in sys.stdlib_module_names
 
 
 def build_correctness_rejection_evaluation(

@@ -6,6 +6,12 @@ from joule.models import Tier, TargetSpec, TransformationResult
 from joule.transformers.base import BaseOperator
 
 
+def _simple_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
 class ChainedComparisonFusion(BaseOperator):
     name = "ChainedComparisonFusion"
     family = "deterministic"
@@ -28,8 +34,10 @@ class ChainedComparisonFusion(BaseOperator):
                     return node
                 if len(left.ops) != 1 or len(left.comparators) != 1 or len(right.ops) != 1 or len(right.comparators) != 1:
                     return node
-                pivot = left.comparators[0]
-                if ast.dump(pivot) != ast.dump(right.left):
+                pivot_name = _simple_name(left.comparators[0])
+                if pivot_name is None:
+                    return node
+                if not isinstance(right.left, ast.Name) or right.left.id != pivot_name:
                     return node
                 changed = True
                 return ast.Compare(

@@ -15,17 +15,44 @@ LOGGER = logging.getLogger(__name__)
 
 
 class OperatorRegistry:
-    def __init__(self, *, llm_model: str, include_llm: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        llm_model: str,
+        include_llm: bool = True,
+        allowlist: list[str] | None = None,
+        denylist: list[str] | None = None,
+        kill_switches: dict[str, bool] | None = None,
+    ) -> None:
         self.operators: list[BaseOperator] = default_deterministic_operators()
         self.escape_operators: list[BaseOperator] = []
-        self.stats: dict[str, dict[str, Any]] = {operator.name: self._empty_stat() for operator in self.operators}
+        
+        self.allowlist = set(allowlist) if allowlist else None
+        self.denylist = set(denylist) if denylist else set()
+        self.kill_switches = kill_switches or {}
+
         if include_llm and llm_model.strip():
             llm_ops = default_llm_operators(llm_model)
             self.operators.extend(llm_ops)
             self.escape_operators.extend(escape_llm_operators(llm_model))
-            for operator in [*llm_ops, *self.escape_operators]:
-                self.stats.setdefault(operator.name, self._empty_stat())
+
+        self.stats: dict[str, dict[str, Any]] = {}
         self._discover_entry_points(llm_model=llm_model)
+        
+        self.operators = [op for op in self.operators if self._is_allowed(op.name)]
+        self.escape_operators = [op for op in self.escape_operators if self._is_allowed(op.name)]
+
+        for operator in [*self.operators, *self.escape_operators]:
+            self.stats.setdefault(operator.name, self._empty_stat())
+
+    def _is_allowed(self, name: str) -> bool:
+        if self.kill_switches.get(name, False):
+            return False
+        if name in self.denylist:
+            return False
+        if self.allowlist is not None and name not in self.allowlist:
+            return False
+        return True
 
     def ranked(self, *, phase: SearchPhase | None = None, parent_generation: int = 0) -> list[BaseOperator]:
         total_attempts = sum(max(1.0, stat["attempts"]) for stat in self.stats.values())
@@ -43,6 +70,9 @@ class OperatorRegistry:
     def select_operator(self, *, phase: SearchPhase, parent_generation: int) -> BaseOperator:
         return self.ranked(phase=phase, parent_generation=parent_generation)[0]
 
+    def select_operators(self, *, phase: SearchPhase, parent_generation: int, top_k: int = 1) -> list[BaseOperator]:
+        return self.ranked(phase=phase, parent_generation=parent_generation)[:top_k]
+
     def select_operator_for_candidate(
         self,
         *,
@@ -51,9 +81,23 @@ class OperatorRegistry:
         phase: SearchPhase,
         parent_generation: int,
     ) -> BaseOperator | None:
+        valid = self.select_operators_for_candidate(
+            target=target, context=context, phase=phase, parent_generation=parent_generation, top_k=1
+        )
+        return valid[0] if valid else None
+
+    def select_operators_for_candidate(
+        self,
+        *,
+        target: TargetSpec,
+        context: SearchContext | None,
+        phase: SearchPhase,
+        parent_generation: int,
+        top_k: int = 1,
+    ) -> list[BaseOperator]:
         ranked = self.ranked(phase=phase, parent_generation=parent_generation)
         valid = self._precheck_ranked(ranked, target=target, context=context)
-        return valid[0] if valid else None
+        return valid[:top_k]
 
     def select_escape_operator(self, *, phase: SearchPhase, parent_generation: int) -> BaseOperator | None:
         if not self.escape_operators:
@@ -132,6 +176,10 @@ class OperatorRegistry:
             stat["attempts"] = float(values.get("attempts", 0.0))
             stat["successes"] = float(values.get("successes", 0.0))
             stat["reward"] = float(values.get("reward", 0.0))
+            stat["duplicates"] = float(values.get("duplicates", 0.0))
+            stat["correctness_failures"] = float(values.get("correctness_failures", 0.0))
+            stat["frontier_contributions"] = float(values.get("frontier_contributions", 0.0))
+            stat["precheck_failures"] = float(values.get("precheck_failures", 0.0))
 
     def _ucb(self, name: str, total_attempts: float) -> float:
         stat = self.stats[name]
@@ -220,7 +268,7 @@ class OperatorRegistry:
                 LOGGER.warning("Failed to load operator entry point %s: %s", point.name, exc)
                 continue
             for operator in plugin_operators:
-                if operator.name in known_names:
+                if operator.name in known_names or not self._is_allowed(operator.name):
                     continue
                 known_names.add(operator.name)
                 if operator.escape_only:

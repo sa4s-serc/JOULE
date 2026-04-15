@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import ast
+
 from joule.models import Tier
 
-from .llm_base import LLMTransformationOperator
+from .llm_base import LLMTransformationOperator, _call_has_generator_chain
 
 
 class LazyEvaluationRewriteLLM(LLMTransformationOperator):
     name = "LazyEvaluationRewriteLLM"
     tier = Tier.M
     objective = "Rewrite eager processing into lazy evaluation pipeline to reduce memory pressure."
+    precheck_node_types = (ast.Call, ast.ListComp)
+    precheck_predicate = _call_has_generator_chain

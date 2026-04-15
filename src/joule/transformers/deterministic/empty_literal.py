@@ -6,6 +6,31 @@ from joule.models import Tier, TargetSpec, TransformationResult
 from joule.transformers.base import BaseOperator
 
 
+def _builtin_shadowed(tree: ast.AST, *, names: set[str]) -> bool:
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    bound.add(alias.asname)
+                else:
+                    bound.add(alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                bound.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+    return any(name in bound for name in names)
+
+
 class EmptyLiteralOperator(BaseOperator):
     name = "empty_literal"
     family = "deterministic"
@@ -15,6 +40,8 @@ class EmptyLiteralOperator(BaseOperator):
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:
         del context
         tree = ast.parse(target.source)
+        if _builtin_shadowed(tree, names={"list", "dict"}):
+            return []
         changed = False
 
         class Rewriter(ast.NodeTransformer):

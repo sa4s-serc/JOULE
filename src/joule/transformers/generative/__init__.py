@@ -23,6 +23,7 @@ from .recursion_to_dynamic_programming import RecursionToDynamicProgramming
 from .regex_precompilation_llm import RegexPrecompilationLLM
 from .seen_set_deduplication_llm import SeenSetDeduplicationLLM
 from .slots_delegate_llm import SlotsDelegateLLM
+from .sorted_reuse_llm import SortedReuseLLM
 from .string_build_buffer_llm import StringBuildBufferLLM
 from .try_except_fast_path_llm import TryExceptFastPathLLM
 from .vectorization_delegate import VectorizationDelegate
@@ -50,6 +51,7 @@ __all__ = [
     "RegexPrecompilationLLM",
     "SeenSetDeduplicationLLM",
     "SlotsDelegateLLM",
+    "SortedReuseLLM",
     "StringBuildBufferLLM",
     "TryExceptFastPathLLM",
     "VectorizationDelegate",
@@ -63,6 +65,7 @@ def default_llm_operators(model: str) -> list[BaseOperator]:
         GeneratorChainFusion(model),
         EarlyExitOptimization(model),
         CachingWrapper(model),
+        SortedReuseLLM(model),
         ManualReductionToBuiltinsLLM(model),
         LoopInvariantHoistingLLM(model),
         ItertoolsDelegateLLM(model),

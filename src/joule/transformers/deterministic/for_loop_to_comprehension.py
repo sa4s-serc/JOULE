@@ -6,6 +6,10 @@ from joule.models import Tier, TargetSpec, TransformationResult
 from joule.transformers.base import BaseOperator
 
 
+def _references_name(node: ast.AST, name: str) -> bool:
+    return any(isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load) and item.id == name for item in ast.walk(node))
+
+
 class ForLoopToComprehension(BaseOperator):
     name = "ForLoopToComprehension"
     family = "deterministic"
@@ -17,7 +21,9 @@ class ForLoopToComprehension(BaseOperator):
         tree = ast.parse(target.source)
         changed = False
 
-        def append_arg(stmt: ast.stmt, list_name: str) -> tuple[ast.expr, list[ast.expr]] | None:
+        def append_arg(stmt: ast.stmt, list_name: str, depth: int = 0) -> tuple[ast.expr, list[ast.expr]] | None:
+            if depth > 10:
+                return None
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                 call = stmt.value
                 if (
@@ -28,10 +34,14 @@ class ForLoopToComprehension(BaseOperator):
                     and len(call.args) == 1
                     and not call.keywords
                 ):
+                    if _references_name(call.args[0], list_name):
+                        return None
                     return call.args[0], []
             if isinstance(stmt, ast.If) and stmt.orelse == [] and len(stmt.body) == 1:
-                nested = append_arg(stmt.body[0], list_name)
+                nested = append_arg(stmt.body[0], list_name, depth + 1)
                 if nested:
+                    if _references_name(stmt.test, list_name):
+                        return None
                     return nested[0], [stmt.test, *nested[1]]
             return None
 

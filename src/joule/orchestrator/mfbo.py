@@ -79,7 +79,13 @@ class OptimizationOrchestrator:
         reporter: TerminalReporter | None = None,
     ) -> "OptimizationOrchestrator":
         correctness = CorrectnessEngine()
-        registry = OperatorRegistry(llm_model=settings.llm_model, include_llm=True)
+        registry = OperatorRegistry(
+            llm_model=settings.llm_model,
+            include_llm=settings.enable_llm_operators,
+            allowlist=settings.operator_allowlist,
+            denylist=settings.operator_denylist,
+            kill_switches=settings.operator_kill_switches,
+        )
         registry.load_stats(db.get_operator_stats())
         surrogate = GaussianProcessSurrogate(
             acquisition=settings.surrogate_acquisition,
@@ -126,7 +132,7 @@ class OptimizationOrchestrator:
         use_cache: bool = True,
         checkpoint_path: Path | None = None,
         fresh_surrogate: bool = False,
-    ) -> tuple:
+    ) -> tuple[MeasurementReport, ParetoFront, CandidateEvaluation | None]:
         if resume and resume != run_id:
             raise ValueError("Run IDs must match when resuming. Use `joule resume --run-id <id>` to continue an existing run.")
 
@@ -262,18 +268,32 @@ class OptimizationOrchestrator:
                         },
                     )
                     break
-            if operator is None:
-                select_for_candidate = getattr(self.registry, "select_operator_for_candidate", None)
+            operators = [operator] if operator is not None else []
+            if not operators:
+                select_for_candidate = getattr(self.registry, "select_operators_for_candidate", None)
                 if callable(select_for_candidate):
-                    operator = select_for_candidate(
+                    operators = select_for_candidate(
                         target=candidate_target,
                         context=parent_context,
                         phase=phase,
                         parent_generation=parent.generation_depth,
+                        top_k=max(1, int(self.settings.search_operator_beam_width)),
                     )
                 else:
-                    operator = self.registry.select_operator(phase=phase, parent_generation=parent.generation_depth)
-                if operator is None:
+                    select_func = getattr(self.registry, "select_operator_for_candidate", None)
+                    if callable(select_func):
+                        base_op = select_func(
+                            target=candidate_target,
+                            context=parent_context,
+                            phase=phase,
+                            parent_generation=parent.generation_depth,
+                        )
+                    else:
+                        base_op = self.registry.select_operator(phase=phase, parent_generation=parent.generation_depth)
+                    if base_op is not None:
+                        operators = [base_op]
+
+                if not operators:
                     self._record_event(
                         run_id,
                         event_type="operator_pruned",
@@ -287,27 +307,37 @@ class OptimizationOrchestrator:
                     )
                     pareto.mark_exhausted(parent_id)
                     continue
-            if self.reporter:
-                self.reporter.verbose(
-                    "scheduler",
-                    f"phase={phase.value} parent={parent_id} depth={parent.generation_depth} operator={operator.name}",
-                )
-            proposals = operator.generate(candidate_target, parent_context)
+
+            proposals = []
+            for op in operators:
+                if self.reporter:
+                    self.reporter.verbose(
+                        "scheduler",
+                        f"phase={phase.value} parent={parent_id} depth={parent.generation_depth} operator={op.name}",
+                    )
+                op_proposals = op.generate(candidate_target, parent_context)
+                if not op_proposals:
+                    self._record_event(
+                        run_id,
+                        event_type="operator_empty",
+                        stage="generation",
+                        candidate_id=parent_id,
+                        operator_name=op.name,
+                        detail={"reason": "no_proposals", "phase": phase.value},
+                    )
+                    self.registry.record_empty_attempt(
+                        op.name,
+                        phase=phase,
+                        parent_generation=parent.generation_depth,
+                    )
+                    self.db.bump_operator(op.name, success=False, reward=0.0)
+                    continue
+                for prop in op_proposals:
+                    if not getattr(prop, "operator_name", None):
+                        prop.operator_name = op.name
+                proposals.extend(op_proposals)
+
             if not proposals:
-                self._record_event(
-                    run_id,
-                    event_type="operator_empty",
-                    stage="generation",
-                    candidate_id=parent_id,
-                    operator_name=operator.name,
-                    detail={"reason": "no_proposals", "phase": phase.value},
-                )
-                self.registry.record_empty_attempt(
-                    operator.name,
-                    phase=phase,
-                    parent_generation=parent.generation_depth,
-                )
-                self.db.bump_operator(operator.name, success=False, reward=0.0)
                 if pareto.expansion_count(parent_id) >= state.max_parent_expansions:
                     pareto.mark_exhausted(parent_id)
                 continue
@@ -1163,70 +1193,83 @@ class OptimizationOrchestrator:
             return proposals
 
         width = max(1, int(self.settings.search_composition_width))
+        max_hops = max(1, int(self.settings.search_composition_max_hops))
         ranked = sorted(proposals, key=lambda item: item.proposal_rank)[:width]
         composed: list[TransformationResult] = []
 
-        for primary in ranked:
-            primary_delta = self._proposal_generation_delta(primary)
-            intermediate_depth = parent.generation_depth + primary_delta
-            if intermediate_depth >= self.settings.search_max_generations:
-                continue
-            intermediate_target = self._target_with_source(target, primary.candidate_source, parent_id=parent_id)
-            intermediate_context = SearchContext(
-                parent_id=parent_id,
-                parent_source=primary.candidate_source,
-                parent_operator_name=primary.operator_name,
-                generation_depth=intermediate_depth,
-                phase=phase,
-                rejection_history=parent_context.rejection_history[-5:],
-                search_metadata={
-                    **dict(parent_context.search_metadata),
-                    "composition_hops": 1,
-                    "composed_from_operator": primary.operator_name,
-                },
-            )
-            select_for_candidate = getattr(self.registry, "select_operator_for_candidate", None)
-            if callable(select_for_candidate):
-                secondary_operator = select_for_candidate(
-                    target=intermediate_target,
-                    context=intermediate_context,
+        for base_proposal in ranked:
+            current_proposal = base_proposal
+            current_depth = parent.generation_depth + self._proposal_generation_delta(current_proposal)
+            chained_names = [current_proposal.operator_name]
+            chained_reasoning = [current_proposal.reasoning]
+            chained_delta = self._proposal_generation_delta(current_proposal)
+
+            for hop in range(1, max_hops + 1):
+                if current_depth >= self.settings.search_max_generations:
+                    break
+
+                intermediate_target = self._target_with_source(target, current_proposal.candidate_source, parent_id=parent_id)
+                intermediate_context = SearchContext(
+                    parent_id=parent_id,
+                    parent_source=current_proposal.candidate_source,
+                    parent_operator_name=current_proposal.operator_name,
+                    generation_depth=current_depth,
                     phase=phase,
-                    parent_generation=intermediate_depth,
+                    rejection_history=parent_context.rejection_history[-5:],
+                    search_metadata={
+                        **dict(parent_context.search_metadata),
+                        "composition_hops": hop,
+                        "composed_from_operator": current_proposal.operator_name,
+                    },
                 )
-            else:
-                secondary_operator = self.registry.select_operator(
-                    phase=phase,
-                    parent_generation=intermediate_depth,
-                )
-            if secondary_operator is None:
-                continue
-            secondary_proposals = secondary_operator.generate(intermediate_target, intermediate_context)
-            if not secondary_proposals:
-                continue
-            secondary = sorted(secondary_proposals, key=lambda item: item.proposal_rank)[0]
-            secondary_delta = self._proposal_generation_delta(secondary)
-            merged_hints = self._merge_feature_hints(primary.feature_hints, secondary.feature_hints)
-            composed_metadata = {
-                **dict(secondary.metadata),
-                "composed_operator_chain": [primary.operator_name, secondary.operator_name],
-                "composition_hops": 1,
-                "generation_delta": primary_delta + secondary_delta,
-                "composed_from_operator": primary.operator_name,
-                "composed_from_reasoning": primary.reasoning,
-            }
-            composed.append(
-                TransformationResult(
-                    operator_name=secondary.operator_name,
-                    candidate_source=secondary.candidate_source,
-                    reasoning=f"{primary.reasoning} -> {secondary.reasoning}".strip(),
-                    dependencies=sorted(set([*primary.dependencies, *secondary.dependencies])),
-                    operator_family=secondary.operator_family,
-                    operator_tier=secondary.operator_tier,
-                    proposal_rank=(primary.proposal_rank * 1000) + secondary.proposal_rank + 500,
+                select_for_candidate = getattr(self.registry, "select_operator_for_candidate", None)
+                if callable(select_for_candidate):
+                    next_operator = select_for_candidate(
+                        target=intermediate_target,
+                        context=intermediate_context,
+                        phase=phase,
+                        parent_generation=current_depth,
+                    )
+                else:
+                    next_operator = self.registry.select_operator(
+                        phase=phase,
+                        parent_generation=current_depth,
+                    )
+                if next_operator is None:
+                    break
+                next_proposals = next_operator.generate(intermediate_target, intermediate_context)
+                if not next_proposals:
+                    break
+                next_proposal = sorted(next_proposals, key=lambda item: item.proposal_rank)[0]
+                
+                next_delta = self._proposal_generation_delta(next_proposal)
+                current_depth += next_delta
+                chained_names.append(next_proposal.operator_name)
+                chained_reasoning.append(next_proposal.reasoning)
+                chained_delta += next_delta
+                
+                merged_hints = self._merge_feature_hints(current_proposal.feature_hints, next_proposal.feature_hints)
+                
+                new_proposal = TransformationResult(
+                    operator_name=next_proposal.operator_name,
+                    candidate_source=next_proposal.candidate_source,
+                    reasoning=" -> ".join(chained_reasoning).strip(),
+                    dependencies=sorted(set([*current_proposal.dependencies, *next_proposal.dependencies])),
+                    operator_family=next_proposal.operator_family,
+                    operator_tier=next_proposal.operator_tier,
+                    proposal_rank=(base_proposal.proposal_rank * 1000) + next_proposal.proposal_rank + (hop * 500),
                     feature_hints=merged_hints,
-                    metadata=composed_metadata,
+                    metadata={
+                        **dict(next_proposal.metadata),
+                        "composed_operator_chain": list(chained_names),
+                        "composition_hops": hop,
+                        "generation_delta": chained_delta,
+                        "composed_from_operator": base_proposal.operator_name,
+                        "composed_from_reasoning": base_proposal.reasoning,
+                    },
                 )
-            )
+                composed.append(new_proposal)
+                current_proposal = new_proposal
 
         if not composed:
             return proposals

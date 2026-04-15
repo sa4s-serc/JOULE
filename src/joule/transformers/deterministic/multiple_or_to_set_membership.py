@@ -6,6 +6,16 @@ from joule.models import Tier, TargetSpec, TransformationResult
 from joule.transformers.base import BaseOperator
 
 
+def _is_hashable_constant(node: ast.expr) -> bool:
+    if not isinstance(node, ast.Constant):
+        return False
+    try:
+        hash(node.value)
+    except TypeError:
+        return False
+    return True
+
+
 class MultipleOrToSetMembership(BaseOperator):
     name = "MultipleOrToSetMembership"
     family = "deterministic"
@@ -28,6 +38,8 @@ class MultipleOrToSetMembership(BaseOperator):
                     if not isinstance(part, ast.Compare) or len(part.ops) != 1 or len(part.comparators) != 1:
                         return node
                     if not isinstance(part.ops[0], ast.Eq):
+                        return node
+                    if not _is_hashable_constant(part.comparators[0]):
                         return node
                     comparisons.append(part)
                 anchor = comparisons[0].left

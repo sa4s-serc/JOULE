@@ -86,7 +86,11 @@ CREATE TABLE IF NOT EXISTS operator_stats (
   operator_name TEXT PRIMARY KEY,
   attempts INTEGER NOT NULL DEFAULT 0,
   successes INTEGER NOT NULL DEFAULT 0,
-  reward REAL NOT NULL DEFAULT 0
+  reward REAL NOT NULL DEFAULT 0,
+  duplicates INTEGER NOT NULL DEFAULT 0,
+  correctness_failures INTEGER NOT NULL DEFAULT 0,
+  frontier_contributions INTEGER NOT NULL DEFAULT 0,
+  precheck_failures INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS search_events (
@@ -163,6 +167,15 @@ CREATE TABLE IF NOT EXISTS surrogate_observations (
 CREATE INDEX IF NOT EXISTS idx_surrogate_obs_target_recent ON surrogate_observations(target_key, id DESC);
 """,
     ),
+    (
+        4,
+        """
+ALTER TABLE operator_stats ADD COLUMN duplicates INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE operator_stats ADD COLUMN correctness_failures INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE operator_stats ADD COLUMN frontier_contributions INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE operator_stats ADD COLUMN precheck_failures INTEGER NOT NULL DEFAULT 0;
+""",
+    ),
 ]
 
 
@@ -180,7 +193,11 @@ class JouleDB:
             current_version = row[0] if row else 0
             for version, sql in MIGRATIONS:
                 if version > current_version:
-                    conn.executescript(sql)
+                    try:
+                        conn.executescript(sql)
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" not in str(e).lower():
+                            raise
                     conn.execute(
                         "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
                         (version, datetime.now(UTC).isoformat()),
@@ -304,31 +321,53 @@ class JouleDB:
                 (run_id, name, kind, payload),
             )
 
-    def bump_operator(self, operator_name: str, success: bool, reward: float) -> None:
+    def bump_operator(
+        self,
+        operator_name: str,
+        success: bool,
+        reward: float,
+        *,
+        duplicate: bool = False,
+        correctness_failure: bool = False,
+        frontier_contribution: bool = False,
+        precheck_failure: bool = False,
+    ) -> None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT attempts, successes, reward FROM operator_stats WHERE operator_name = ?",
+                "SELECT attempts, successes, reward, duplicates, correctness_failures, frontier_contributions, precheck_failures FROM operator_stats WHERE operator_name = ?",
                 (operator_name,),
             ).fetchone()
             if row is None:
-                attempts, successes, total_reward = 0, 0, 0.0
+                attempts, successes, total_reward, dups, corr_fails, front_contribs, precheck_fails = 0, 0, 0.0, 0, 0, 0, 0
             else:
-                attempts, successes, total_reward = row
+                attempts, successes, total_reward, dups, corr_fails, front_contribs, precheck_fails = row
             attempts += 1
             successes += int(success)
             total_reward += reward
+            dups += int(duplicate)
+            corr_fails += int(correctness_failure)
+            front_contribs += int(frontier_contribution)
+            precheck_fails += int(precheck_failure)
             conn.execute(
                 """
-                INSERT OR REPLACE INTO operator_stats(operator_name, attempts, successes, reward)
-                VALUES(?, ?, ?, ?)
+                INSERT OR REPLACE INTO operator_stats(operator_name, attempts, successes, reward, duplicates, correctness_failures, frontier_contributions, precheck_failures)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (operator_name, attempts, successes, total_reward),
+                (operator_name, attempts, successes, total_reward, dups, corr_fails, front_contribs, precheck_fails),
             )
 
     def get_operator_stats(self) -> dict[str, dict[str, float]]:
-        rows = self._fetchall("SELECT operator_name, attempts, successes, reward FROM operator_stats")
+        rows = self._fetchall("SELECT operator_name, attempts, successes, reward, duplicates, correctness_failures, frontier_contributions, precheck_failures FROM operator_stats")
         return {
-            row[0]: {"attempts": float(row[1]), "successes": float(row[2]), "reward": float(row[3])}
+            row[0]: {
+                "attempts": float(row[1]),
+                "successes": float(row[2]),
+                "reward": float(row[3]),
+                "duplicates": float(row[4]),
+                "correctness_failures": float(row[5]),
+                "frontier_contributions": float(row[6]),
+                "precheck_failures": float(row[7]),
+            }
             for row in rows
         }
 

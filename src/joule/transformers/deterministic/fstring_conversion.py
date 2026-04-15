@@ -33,13 +33,18 @@ class FStringConversion(BaseOperator):
                     if slots == len(node.args) and slots > 0:
                         parts = template.split("{}")
                         values: list[ast.expr] = []
+                        valid = True
                         for index, text in enumerate(parts):
+                            if "{" in text or "}" in text:
+                                valid = False
+                                break
                             if text:
                                 values.append(ast.Constant(value=text))
                             if index < len(node.args):
                                 values.append(ast.FormattedValue(value=node.args[index], conversion=-1))
-                        changed = True
-                        return ast.JoinedStr(values=values)
+                        if valid:
+                            changed = True
+                            return ast.JoinedStr(values=values)
                 return node
 
         new_tree = Rewriter().visit(tree)

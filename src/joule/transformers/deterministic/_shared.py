@@ -59,7 +59,20 @@ def loaded_names(node: ast.AST) -> set[str]:
 
 
 def assigned_names(node: ast.AST) -> set[str]:
-    return {item.id for item in ast.walk(node) if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store)}
+    names = {item.id for item in ast.walk(node) if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store)}
+    for item in ast.walk(node):
+        if isinstance(item, ast.ExceptHandler) and item.name is not None:
+            names.add(item.name)
+        elif isinstance(item, ast.arg):
+            names.add(item.arg)
+        elif isinstance(item, ast.FunctionDef) or isinstance(item, ast.AsyncFunctionDef) or isinstance(item, ast.ClassDef):
+            names.add(item.name)
+        elif getattr(ast, "MatchAs", None) and isinstance(item, getattr(ast, "MatchAs")):
+            if item.name is not None:
+                names.add(item.name)
+        elif isinstance(item, ast.alias):
+            names.add(item.asname if item.asname is not None else item.name.split(".", 1)[0])
+    return names
 
 
 def insertion_index(module: ast.Module) -> int:

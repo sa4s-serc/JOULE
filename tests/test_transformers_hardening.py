@@ -4,11 +4,17 @@ import ast
 from pathlib import Path
 import textwrap
 
+from joule.integrations.git import apply_patch_to_target
 from joule.models import TargetSpec
+from joule.orchestrator.internal.mfbo_flow import dependency_policy_metadata
 from joule.transformers.deterministic import (
+    ChainedComparisonFusion,
     CounterSubstitution,
     DefaultDictSubstitution,
+    EmptyLiteralOperator,
     EnumerateSubstitution,
+    ForLoopToComprehension,
+    GeneratorToYieldFrom,
     HeapNLargestSmallest,
     IteratorSubstitution,
     ListPopZeroToDeque,
@@ -17,6 +23,7 @@ from joule.transformers.deterministic import (
     LoopMembershipSetCache,
     MemoizationAddition,
     MultipleAssignmentFusion,
+    MultipleOrToSetMembership,
     SeenSetForAppendDedup,
     SortedToInPlaceSort,
     StringConcatToJoin,
@@ -268,3 +275,117 @@ def test_seen_set_for_append_dedup_adds_seen_cache():
     assert "_out_seen = set()" in candidate
     assert "if item not in _out_seen" in candidate
     assert "_out_seen.add(item)" in candidate
+
+
+def test_replace_function_in_module_preserves_candidate_imports_and_decorators(tmp_path: Path):
+    module_path = tmp_path / "sample.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            def target(x):
+                return x + 1
+            """
+        ),
+        encoding="utf-8",
+    )
+    target = TargetSpec(
+        project_root=tmp_path,
+        module="sample",
+        file_path=module_path,
+        function_name="target",
+        qualname="target",
+        owner_path=[],
+        line_start=1,
+        line_end=2,
+        source=module_path.read_text(encoding="utf-8"),
+    )
+    candidate_source = textwrap.dedent(
+        """
+        from functools import lru_cache
+
+        @lru_cache(maxsize=None)
+        def target(x):
+            return x + 2
+        """
+    )
+
+    apply_patch_to_target(target, candidate_source)
+
+    updated = module_path.read_text(encoding="utf-8")
+    assert "from functools import lru_cache" in updated
+    assert "@lru_cache(maxsize=None)" in updated
+    assert "return x + 2" in updated
+
+
+def test_dependency_policy_distinguishes_stdlib_and_external_dependencies():
+    assert dependency_policy_metadata(["collections"])["dependency_policy_state"] == "stdlib_only"
+    assert dependency_policy_metadata(["numpy"])["dependency_policy_state"] == "review_required"
+
+
+def test_chained_comparison_fusion_skips_side_effectful_pivot_expression():
+    source = textwrap.dedent(
+        """
+        def f(a, c):
+            return a < bump() and bump() < c
+        """
+    )
+    assert ChainedComparisonFusion().generate(_target(source)) == []
+
+
+def test_empty_literal_operator_skips_shadowed_builtin_names():
+    source = textwrap.dedent(
+        """
+        def f():
+            list = tuple
+            return list()
+        """
+    )
+    assert EmptyLiteralOperator().generate(_target(source)) == []
+
+
+def test_multiple_or_to_set_membership_skips_unhashable_rhs_values():
+    source = textwrap.dedent(
+        """
+        def f(x):
+            return x == [] or x == [1]
+        """
+    )
+    assert MultipleOrToSetMembership().generate(_target(source)) == []
+
+
+def test_for_loop_to_comprehension_skips_self_referential_append_expression():
+    source = textwrap.dedent(
+        """
+        def f(n):
+            out = []
+            for _ in range(n):
+                out.append(len(out))
+            return out
+        """
+    )
+    assert ForLoopToComprehension().generate(_target(source)) == []
+
+
+def test_generator_to_yield_from_skips_when_loop_target_used_after_loop():
+    source = textwrap.dedent(
+        """
+        def f(xs):
+            for item in xs:
+                yield item
+            return item
+        """
+    )
+    assert GeneratorToYieldFrom().generate(_target(source)) == []
+
+
+def test_local_import_hoisting_skips_module_name_collision():
+    source = textwrap.dedent(
+        """
+        math = object()
+
+        def f(x):
+            import math
+            return math.sqrt(x)
+        """
+    )
+    assert LocalImportHoisting().generate(_target(source)) == []

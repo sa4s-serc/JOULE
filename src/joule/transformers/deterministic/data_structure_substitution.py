@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from typing import cast
 
 from joule.models import Tier, TargetSpec, TransformationResult
 from joule.transformers.base import BaseOperator
@@ -26,15 +27,23 @@ class ListToSetMembership(BaseOperator):
                 comparator = node.comparators[0]
                 if isinstance(comparator, (ast.List, ast.Tuple)) and len(comparator.elts) > 3:
                     if all(isinstance(item, ast.Constant) for item in comparator.elts):
-                        changed = True
-                        return ast.copy_location(
-                            ast.Compare(
-                                left=node.left,
-                                ops=node.ops,
-                                comparators=[ast.Set(elts=comparator.elts)],
-                            ),
-                            node,
-                        )
+                        is_hashable = True
+                        for item in comparator.elts:
+                            try:
+                                hash(cast(ast.Constant, item).value)
+                            except TypeError:
+                                is_hashable = False
+                                break
+                        if is_hashable:
+                            changed = True
+                            return ast.copy_location(
+                                ast.Compare(
+                                    left=node.left,
+                                    ops=node.ops,
+                                    comparators=[ast.Set(elts=comparator.elts)],
+                                ),
+                                node,
+                            )
                 return node
 
         new_tree = Rewriter().visit(tree)

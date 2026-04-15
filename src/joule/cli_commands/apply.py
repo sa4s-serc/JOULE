@@ -11,6 +11,7 @@ from joule.integrations.git import (
     file_sha256,
     stage_files,
 )
+from joule.orchestrator.internal.mfbo_flow import dependency_policy_metadata
 from joule.utils.db import JouleDB
 from joule.utils.terminal import TerminalReporter
 
@@ -38,7 +39,8 @@ def run_apply(
         raise BadParameter(
             f"No accepted candidate available for run {run_id}; use 'joule inspect {settings.project_root} --run-id {run_id}' to review candidates"
         )
-    if selected["dependencies"]:
+    dependency_policy = dependency_policy_metadata(list(selected["dependencies"]))
+    if dependency_policy["dependency_policy_state"] == "review_required":
         dependencies = ", ".join(str(dep) for dep in selected["dependencies"])
         raise BadParameter(
             f"Candidate {selected['candidate_id']} requires new dependencies ({dependencies}) and remains review-only in JOULE v0"

@@ -47,6 +47,47 @@ def _import_signatures(module: ast.Module) -> set[tuple[str, str, str, str | Non
     return signatures
 
 
+def _import_alias_names(stmt: ast.stmt) -> set[str]:
+    names: set[str] = set()
+    if isinstance(stmt, ast.Import):
+        for alias in stmt.names:
+            names.add(alias.asname or _root_module(alias.name))
+    elif isinstance(stmt, ast.ImportFrom):
+        for alias in stmt.names:
+            if alias.name == "*":
+                continue
+            names.add(alias.asname or alias.name)
+    return names
+
+
+def _bound_name_targets(node: ast.AST) -> set[str]:
+    return {
+        item.id
+        for item in ast.walk(node)
+        if isinstance(item, ast.Name) and isinstance(item.ctx, (ast.Store, ast.Param))
+    }
+
+
+def _module_level_bound_names(module: ast.Module) -> set[str]:
+    bound: set[str] = set()
+    for stmt in module.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(stmt.name)
+            continue
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                bound.add(alias.asname or _root_module(alias.name))
+            continue
+        if isinstance(stmt, ast.ImportFrom):
+            for alias in stmt.names:
+                if alias.name == "*":
+                    continue
+                bound.add(alias.asname or alias.name)
+            continue
+        bound.update(_bound_name_targets(stmt))
+    return bound
+
+
 class LocalImportHoisting(BaseOperator):
     name = "LocalImportHoisting"
     family = "deterministic"
@@ -67,6 +108,7 @@ class LocalImportHoisting(BaseOperator):
 
         changed = False
         hoisted: list[ast.stmt] = []
+        blocked_aliases = _module_level_bound_names(tree)
 
         class Rewriter(ast.NodeTransformer):
             def visit_FunctionDef(self, node: ast.FunctionDef):
@@ -75,6 +117,8 @@ class LocalImportHoisting(BaseOperator):
                 index = 0
                 while index < len(node.body) and isinstance(node.body[index], (ast.Import, ast.ImportFrom)):
                     if _safe_import_statement(node.body[index]):
+                        if _import_alias_names(node.body[index]) & blocked_aliases:
+                            break
                         hoisted.append(node.body[index])
                         changed = True
                         index += 1
@@ -90,6 +134,8 @@ class LocalImportHoisting(BaseOperator):
                 index = 0
                 while index < len(node.body) and isinstance(node.body[index], (ast.Import, ast.ImportFrom)):
                     if _safe_import_statement(node.body[index]):
+                        if _import_alias_names(node.body[index]) & blocked_aliases:
+                            break
                         hoisted.append(node.body[index])
                         changed = True
                         index += 1
@@ -104,19 +150,26 @@ class LocalImportHoisting(BaseOperator):
             return []
 
         existing = _import_signatures(new_tree)
+        module_bound_names = _module_level_bound_names(new_tree)
         additions: list[ast.stmt] = []
         for stmt in hoisted:
             if isinstance(stmt, ast.Import):
                 for alias in stmt.names:
+                    alias_name = alias.asname or _root_module(alias.name)
                     signature = ("import", alias.name, "", alias.asname, 0)
                     if signature in existing:
+                        continue
+                    if alias_name in module_bound_names:
                         continue
                     additions.append(ast.Import(names=[ast.alias(name=alias.name, asname=alias.asname)]))
                     existing.add(signature)
             elif isinstance(stmt, ast.ImportFrom) and stmt.module is not None:
                 for alias in stmt.names:
+                    alias_name = alias.asname or alias.name
                     signature = ("from", stmt.module, alias.name, alias.asname, stmt.level)
                     if signature in existing:
+                        continue
+                    if alias_name in module_bound_names:
                         continue
                     additions.append(
                         ast.ImportFrom(
