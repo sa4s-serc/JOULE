@@ -326,13 +326,13 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
 
     project_share = project_cumulative / total_cumulative if total_cumulative > 0 else 0.0
     target_share = target_cumulative / total_cumulative if total_cumulative > 0 else 0.0
-    dominant_bucket = merged_ownership[0]["bucket"] if merged_ownership else None
+    aggregate_dominant_bucket: str | None = str(merged_ownership[0]["bucket"]) if merged_ownership else None
     low_signal_reasons: list[str] = []
     if total_cumulative <= 0:
         low_signal_reasons.append("no_profile_samples")
     if normalized_target_file and target_share < 0.2:
         low_signal_reasons.append("target_file_under_20pct")
-    if dominant_bucket and dominant_bucket not in project_like_buckets:
+    if aggregate_dominant_bucket and aggregate_dominant_bucket not in project_like_buckets:
         low_signal_reasons.append("non_project_dominant")
 
     by_workload.sort(key=lambda item: float((item.get("signal") or {}).get("project_share", 0.0)), reverse=True)
@@ -348,7 +348,7 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
         "target_share": round(target_share, 4),
         "low_signal": bool(low_signal_reasons),
         "low_signal_reasons": low_signal_reasons,
-        "dominant_ownership_bucket": dominant_bucket,
+        "dominant_ownership_bucket": aggregate_dominant_bucket,
     }
     recommendations = _hotspot_recommendations(
         signal_quality=signal_quality,

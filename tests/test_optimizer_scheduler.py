@@ -700,7 +700,7 @@ def test_partial_fidelity_rejections_record_explicit_reason(tmp_path: Path):
         surrogate=GaussianProcessSurrogate(),
     )
 
-    orchestrator.surrogate.screen_candidate = lambda **_kwargs: {
+    cast(Any, orchestrator.surrogate).screen_candidate = lambda **_kwargs: {
         "decision": "measure_partial",
         "reason": "",
         "predicted_score": 1.0,

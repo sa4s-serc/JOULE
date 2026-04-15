@@ -125,6 +125,9 @@ def run_optimize(
     if analysis:
         write_candidate_artifacts(db=context.db, run_id=context.run_id, run_dir=context.run_dir, candidates=candidates)
     search_events = context.db.get_search_events(context.run_id)
+    best_candidate_id: str | None = None
+    if best_candidate_payload is not None:
+        best_candidate_id = str(best_candidate_payload["candidate_id"])
     optimization_analysis = build_optimization_analysis(
         run_id=context.run_id,
         target_qualname=context.target.qualname,
@@ -132,7 +135,7 @@ def run_optimize(
         candidates=candidates,
         events=search_events,
         hotspot_summary=hotspot_summary,
-        best_candidate_id=best_candidate_payload["candidate_id"] if best_candidate_payload else None,
+        best_candidate_id=best_candidate_id,
     )
     write_artifact(context.run_dir, "optimization_analysis.json", json_pretty(optimization_analysis))
     summary_candidates = []

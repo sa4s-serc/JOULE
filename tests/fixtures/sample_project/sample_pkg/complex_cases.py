@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 
 def warehouse_balancing_pipeline(
-    orders: list[dict[str, object]],
+    orders: list[dict[str, Any]],
     hub_capacities: dict[str, int],
     route_costs: dict[tuple[str, str], int],
-) -> dict[str, object]:
-    normalized_orders: list[dict[str, object]] = []
+) -> dict[str, Any]:
+    normalized_orders: list[dict[str, Any]] = []
     skipped_orders: list[str] = []
     seen_order_ids: list[str] = []
 
@@ -57,7 +59,7 @@ def warehouse_balancing_pipeline(
             }
         )
 
-    orders_by_hub: dict[str, list[dict[str, object]]] = {}
+    orders_by_hub: dict[str, list[dict[str, Any]]] = {}
     for hub in hub_capacities:
         normalized_hub = hub.strip().upper()
         if normalized_hub not in orders_by_hub:
@@ -95,7 +97,7 @@ def warehouse_balancing_pipeline(
     if "OVERFLOW" not in remaining_capacity:
         remaining_capacity["OVERFLOW"] = 10**9
 
-    assignments: list[dict[str, object]] = []
+    assignments: list[dict[str, Any]] = []
     unassigned_order_ids: list[str] = []
     hub_loads: dict[str, int] = {}
     route_totals: dict[str, int] = {}
@@ -137,7 +139,7 @@ def warehouse_balancing_pipeline(
             if selected_hub == "OVERFLOW":
                 unassigned_order_ids.append(order_id)
 
-            assignment = {
+            assignment: dict[str, Any] = {
                 "order_id": order_id,
                 "source": source,
                 "destination": destination,
@@ -198,12 +200,12 @@ def warehouse_balancing_pipeline(
             pressure_flags.append(hub_name + ":medium")
 
     dominant_routes = sorted(route_totals.items(), key=lambda item: item[1], reverse=True)
-    top_routes: list[dict[str, object]] = []
+    top_routes: list[dict[str, Any]] = []
     for route_name, route_cost in dominant_routes[:5]:
         top_routes.append({"route": route_name, "cost": route_cost})
 
     dominant_skus = sorted(sku_totals.items(), key=lambda item: item[1], reverse=True)
-    top_skus: list[dict[str, object]] = []
+    top_skus: list[dict[str, Any]] = []
     for sku_name, quantity in dominant_skus[:5]:
         top_skus.append({"sku": sku_name, "quantity": quantity})
 
@@ -240,13 +242,13 @@ def warehouse_balancing_pipeline(
             priority_totals[priority] = 0
         priority_totals[priority] += int(assignment["quantity"])
 
-    priority_mix: list[dict[str, object]] = []
+    priority_mix: list[dict[str, Any]] = []
     for priority_name in ["critical", "high", "normal", "low"]:
         if priority_name not in priority_totals:
             continue
         priority_mix.append({"priority": priority_name, "quantity": priority_totals[priority_name]})
 
-    source_destination_pressure: list[dict[str, object]] = []
+    source_destination_pressure: list[dict[str, Any]] = []
     for source_name, source_qty in sorted(source_totals.items()):
         destination_qty = destination_totals.get(source_name, 0)
         if source_qty <= 0:
@@ -279,11 +281,11 @@ def warehouse_balancing_pipeline(
 
 
 def telemetry_triage_pipeline(
-    events: list[dict[str, object]],
+    events: list[dict[str, Any]],
     thresholds: dict[str, float],
     region_weights: dict[str, float],
-) -> dict[str, object]:
-    normalized_events: list[dict[str, object]] = []
+) -> dict[str, Any]:
+    normalized_events: list[dict[str, Any]] = []
     rejected_events: list[str] = []
 
     for offset, event in enumerate(events):
@@ -364,7 +366,7 @@ def telemetry_triage_pipeline(
     service_totals: dict[str, dict[str, float]] = {}
     region_totals: dict[str, dict[str, float]] = {}
     tag_counts: dict[str, int] = {}
-    event_scores: list[dict[str, object]] = []
+    event_scores: list[dict[str, Any]] = []
 
     for event in normalized_events:
         service = str(event["service"])
@@ -413,20 +415,20 @@ def telemetry_triage_pipeline(
         score = 0.0
         latency_ms = float(event["latency_ms"])
         error_rate = float(event["error_rate"])
-        throughput = float(event["throughput"])
+        throughput_value = float(event["throughput"])
 
         if latency_ms > latency_threshold:
             score += 1.0 + ((latency_ms - latency_threshold) / max(1.0, latency_threshold))
         if error_rate > error_rate_threshold:
             score += 1.0 + ((error_rate - error_rate_threshold) * 10.0)
-        if throughput < throughput_threshold:
-            score += 1.0 + ((throughput_threshold - throughput) / max(1.0, throughput_threshold))
+        if throughput_value < throughput_threshold:
+            score += 1.0 + ((throughput_threshold - throughput_value) / max(1.0, throughput_threshold))
 
         recent_window = service_windows[service]
         if recent_window:
             rolling_sum = 0.0
-            for item in recent_window:
-                rolling_sum += item
+            for window_value in recent_window:
+                rolling_sum += window_value
             rolling_avg = rolling_sum / len(recent_window)
         else:
             rolling_avg = 0.0
@@ -435,8 +437,8 @@ def telemetry_triage_pipeline(
             score += 0.8
         if len(recent_window) >= int(burst_threshold):
             over_count = 0
-            for item in recent_window:
-                if item > latency_threshold:
+            for window_value in recent_window:
+                if window_value > latency_threshold:
                     over_count += 1
             if over_count >= int(burst_threshold):
                 score += 1.2
@@ -461,11 +463,11 @@ def telemetry_triage_pipeline(
                 "severity": severity,
                 "latency_ms": latency_ms,
                 "error_rate": round(error_rate, 4),
-                "throughput": throughput,
+                "throughput": throughput_value,
             }
         )
 
-    service_health: list[dict[str, object]] = []
+    service_health: list[dict[str, Any]] = []
     for service, stats in service_totals.items():
         count = max(1.0, stats["count"])
         avg_latency = stats["latency_sum"] / count
@@ -494,7 +496,7 @@ def telemetry_triage_pipeline(
 
     service_health.sort(key=lambda item: (item["health"], -item["avg_latency"], item["service"]))
 
-    region_health: list[dict[str, object]] = []
+    region_health: list[dict[str, Any]] = []
     for region, stats in region_totals.items():
         count = max(1.0, stats["count"])
         avg_latency = stats["latency_sum"] / count
@@ -524,9 +526,9 @@ def telemetry_triage_pipeline(
     region_health.sort(key=lambda item: (-item["pressure"], item["region"]))
 
     event_scores.sort(key=lambda item: (-item["score"], item["event_id"]))
-    critical_events: list[dict[str, object]] = []
-    high_events: list[dict[str, object]] = []
-    medium_events: list[dict[str, object]] = []
+    critical_events: list[dict[str, Any]] = []
+    high_events: list[dict[str, Any]] = []
+    medium_events: list[dict[str, Any]] = []
 
     for scored in event_scores:
         severity = str(scored["severity"])
@@ -538,21 +540,21 @@ def telemetry_triage_pipeline(
             medium_events.append(scored)
 
     top_tags = sorted(tag_counts.items(), key=lambda item: item[1], reverse=True)
-    tag_summary: list[dict[str, object]] = []
+    tag_summary: list[dict[str, Any]] = []
     for name, count in top_tags[:10]:
         tag_summary.append({"tag": name, "count": count})
 
     digest = ""
-    for item in service_health:
-        digest += "svc=" + str(item["service"]) + ";"
-        digest += "health=" + str(item["health"]) + ";"
-        digest += "avg_latency=" + str(item["avg_latency"]) + ";"
-        digest += "avg_error_rate=" + str(item["avg_error_rate"]) + "|"
+    for service_item in service_health:
+        digest += "svc=" + str(service_item["service"]) + ";"
+        digest += "health=" + str(service_item["health"]) + ";"
+        digest += "avg_latency=" + str(service_item["avg_latency"]) + ";"
+        digest += "avg_error_rate=" + str(service_item["avg_error_rate"]) + "|"
 
-    for item in region_health:
-        digest += "region=" + str(item["region"]) + ";"
-        digest += "band=" + str(item["band"]) + ";"
-        digest += "pressure=" + str(item["pressure"]) + "|"
+    for region_item in region_health:
+        digest += "region=" + str(region_item["region"]) + ";"
+        digest += "band=" + str(region_item["band"]) + ";"
+        digest += "pressure=" + str(region_item["pressure"]) + "|"
 
     return {
         "total_events": len(normalized_events),
