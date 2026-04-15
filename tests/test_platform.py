@@ -50,6 +50,30 @@ def test_dashboard_once_includes_guided_sections(sample_project):
     assert "candidate-status-filter" in result.output
 
 
+def test_dashboard_surfaces_hotspot_insights(sample_project):
+    baseline = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "membership_total",
+            "--tests",
+            "tests/test_algos.py::test_membership_total",
+            "--hotspots",
+            "--no-dashboard",
+        ],
+    )
+    assert baseline.exit_code == 0, baseline.output
+    run_id = re.search(r"Run:\s*([a-f0-9]+)", baseline.output).group(1)
+
+    result = runner.invoke(app, ["dashboard", str(sample_project), "--run-id", run_id, "--once"])
+    assert result.exit_code == 0, result.output
+    assert "Hotspot Signal Quality" in result.output
+    assert "<th>Target Share</th>" in result.output
+    assert "recommendations</strong>" in result.output.lower()
+
+
 def test_adaptive_measurement_uses_inner_repetitions(sample_project):
     pyproject = sample_project / "pyproject.toml"
     pyproject.write_text(
@@ -224,6 +248,46 @@ def test_inspect_unknown_candidate_returns_actionable_error(sample_project):
     )
     assert inspect_result.exit_code != 0
     assert "Unknown candidate_id" in inspect_result.output
+
+
+def test_inspect_summary_includes_search_and_artifact_reconciliation(sample_project):
+    run_result = runner.invoke(
+        app,
+        [
+            "run",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "3",
+            "--analysis",
+            "--output",
+            "json",
+            "--no-dashboard",
+        ],
+    )
+    assert run_result.exit_code == 0, run_result.output
+    run_payload = json.loads(run_result.output)
+    run_id = run_payload["run_id"]
+
+    inspect_result = runner.invoke(
+        app,
+        ["inspect", str(sample_project), "--run-id", run_id],
+    )
+    assert inspect_result.exit_code == 0, inspect_result.output
+    payload = json.loads(inspect_result.output)
+    summary = payload["summary"]
+
+    search_consistency = summary["search_consistency"]
+    assert search_consistency["generated_minus_candidates"] == 0
+    assert search_consistency["terminal_minus_candidates"] == 0
+    assert search_consistency["frontier_dominated_events"] >= 0
+
+    artifact_counts = summary["artifact_counts"]
+    assert artifact_counts["filesystem_files"] >= artifact_counts["db_recorded"]
+    reconciliation = summary["artifact_reconciliation"]
+    assert reconciliation["missing_db_records"] >= 0
+    assert isinstance(reconciliation["missing_db_record_examples"], list)
 
 
 def test_run_help_exposes_budget_and_path_guidance():

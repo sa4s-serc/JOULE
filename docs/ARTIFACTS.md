@@ -21,6 +21,8 @@ flowchart LR
 | Did a run initialize correctly? | `.joule.lock` | `.joule/runs/<run_id>/events.jsonl` |
 | What was measured as baseline? | `baseline.json` | `baseline_analysis.json` |
 | Why was a candidate rejected? | `inspect --candidate-id ...` | `events.jsonl` and candidate metadata |
+| Why was a candidate accepted? | `run_summary.json` candidate list | `events.jsonl` promotion and acceptance events |
+| Is hotspot data target-focused enough? | `hotspots.json` `signal_quality` and `recommendations` | `by_workload` signal shares and ownership buckets |
 | What changed for best candidate? | `best.patch` | `best_candidate.py` and `run_summary.json` |
 | What happened in optimization flow? | `optimization_analysis.json` | `events.jsonl` |
 | Can this candidate be applied? | candidate metadata `dependency_policy_state` | `apply` command response |
@@ -57,6 +59,35 @@ When parsing artifacts programmatically, read schema versions first and treat un
 3. Check `events.jsonl` for stage-level warning and rejection context.
 4. Use `inspect --run-id ... --output json` for complete persisted state.
 5. Review `best.patch` before any apply operation.
+
+## Accepted vs Rejected Candidate Signals
+
+Use these fields first when triaging candidate outcomes:
+
+- `run_summary.json` candidate records for top-level acceptance status and selected winner.
+- `events.jsonl` for stage-level transitions (screened, measured, promoted, rejected).
+- `candidates/<candidate_id>/candidate.json` in analysis mode for per-candidate metadata.
+
+Common checks:
+
+- Candidate marked rejected in `run_summary.json` but unclear why: inspect matching candidate events.
+- Candidate promoted but not final winner: compare scalar improvements and frontier state.
+- Candidate appears apply-ready: confirm dependency policy state before calling apply.
+
+## Hotspot Signal Triage
+
+When reading `hotspots.json`, use these fields in order:
+
+1. `signal_quality`: check `project_share`, `target_share`, and `low_signal` first.
+2. `recommendations`: concrete next-step guidance for improving target attribution.
+3. `by_workload`: per-workload `project_share`/`target_share` to find noisy selectors.
+4. `target_top_functions`: target-file hotspots with share and average per-call cost.
+
+Quick interpretation guide:
+
+- `target_share < 0.20`: hotspot signal is likely diluted by harness/setup overhead.
+- dominant owner is not `project` or `candidate-overlay`: optimize workload scope before code rewrites.
+- empty `target_top_functions`: target may not be exercised strongly enough in current workload set.
 
 ## Artifact Layout
 

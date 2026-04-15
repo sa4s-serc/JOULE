@@ -200,9 +200,18 @@ See [docs/ARTIFACTS.md](ARTIFACTS.md) for artifact triage guidance.
 - Search depth and composition breadth are intentionally bounded.
 - Persistence writes are still mostly per-operation rather than transaction-grouped per full candidate lifecycle.
 
-## 8. Related Docs
+## 8. Seeing It In Action
+
+Use the example docs to map architecture concepts to concrete runs:
+
+- [QUICKSTART.md](../QUICKSTART.md) for baseline and optimization command flow.
+- [docs/ARTIFACTS.md](ARTIFACTS.md) for run-state triage and artifact interpretation.
+- [docs/EXAMPLES.md](EXAMPLES.md) for target complexity tiers and workload selectors.
+
+## 9. Related Docs
 
 - [README.md](../README.md)
 - [QUICKSTART.md](../QUICKSTART.md)
 - [docs/ARTIFACTS.md](ARTIFACTS.md)
+- [docs/EXAMPLES.md](EXAMPLES.md)
 - [docs/TRANSFORMATIONS.md](TRANSFORMATIONS.md)

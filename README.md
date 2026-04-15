@@ -27,6 +27,7 @@ make smoke-example
 ```
 
 Smoke test covers doctor, baseline, run, inspect, and dashboard-once using [example/mock_repo](example/mock_repo).
+The example suite now includes medium and very large complex targets documented in [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
 ## Command Map
 
@@ -110,4 +111,5 @@ Not in scope for current v0:
 - [QUICKSTART.md](QUICKSTART.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/ARTIFACTS.md](docs/ARTIFACTS.md)
+- [docs/EXAMPLES.md](docs/EXAMPLES.md)
 - [docs/TRANSFORMATIONS.md](docs/TRANSFORMATIONS.md)

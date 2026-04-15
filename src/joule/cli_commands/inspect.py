@@ -14,6 +14,17 @@ from joule.utils.analysis import (
 from joule.utils.reporting import workload_provenance_records
 
 
+def _run_filesystem_artifacts(run_dir: Path) -> list[str]:
+    if not run_dir.exists():
+        return []
+    files: list[str] = []
+    for entry in run_dir.rglob("*"):
+        if entry.is_file():
+            files.append(entry.relative_to(run_dir).as_posix())
+    files.sort()
+    return files
+
+
 def run_inspect(
     path: Path,
     run_id: str,
@@ -31,6 +42,7 @@ def run_inspect(
     effective_quiet = quiet or (output_mode == "json" and not verbose)
     settings, db, reporter = bootstrap_fn(path, verbose=verbose, quiet=effective_quiet)
     reporter.info("inspect", f"Loading run {run_id}")
+    run_dir = settings.artifact_path / "runs" / run_id
     record = db.get_run(run_id)
     measurements = db.get_measurements(run_id)
     candidates = db.get_candidates(run_id)
@@ -79,6 +91,7 @@ def run_inspect(
         hotspots=hotspot_profiles,
         artifacts=payload["artifacts"],
         apply_audits=payload["apply_audits"],
+        filesystem_artifacts=_run_filesystem_artifacts(run_dir),
     )
     payload["summary"]["surrogate_learning"] = {
         "stored_observations": payload["surrogate_learning"]["stored_observations"],

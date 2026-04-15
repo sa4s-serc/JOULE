@@ -11,6 +11,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_ROOT = REPO_ROOT / "example" / "mock_repo"
 TARGET_FILE = EXAMPLE_ROOT / "sample_pkg" / "algos.py"
+COMPLEX_TARGET_FILE = EXAMPLE_ROOT / "sample_pkg" / "complex_cases.py"
 LAUNCHER = REPO_ROOT / "joule"
 
 
@@ -36,6 +37,17 @@ def main() -> int:
         ]
     )
     baseline_run_id = extract_run_id(baseline_output)
+    run_command(
+        [
+            "baseline",
+            str(COMPLEX_TARGET_FILE),
+            "--function",
+            "warehouse_balancing_pipeline",
+            "--tests",
+            "tests/test_complex_cases.py::test_warehouse_balancing_pipeline",
+            "--no-dashboard",
+        ]
+    )
     run_output = run_command(
         [
             "run",

@@ -44,9 +44,11 @@ shell: ## Open a Python REPL in the project environment
 	$(PYTHON_BIN)
 
 clean: ## Remove Python caches and build outputs
-	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist *.egg-info
+	rm -rf .mypy_cache .ruff_cache .coverage htmlcov build dist *.egg-info
+	find . -type d -name '.pytest_cache' -exec rm -rf {} +
 	find $(SRC_DIR) $(TEST_DIR) -type d -name '__pycache__' -prune -exec rm -rf {} +
 	find $(SRC_DIR) $(TEST_DIR) -type f -name '*.pyc' -delete
 
 clean-artifacts: ## Remove Joule runtime artifacts
-	rm -rf .joule .joule.lock
+	find . -type d -name '.joule' -exec rm -rf {} +
+	find . -type f -name '.joule.lock' -delete

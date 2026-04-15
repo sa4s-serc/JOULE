@@ -398,6 +398,10 @@ class PerformanceOracle:
                 records.append(
                     {
                         "workload_id": workload.identifier,
+                        "workload_kind": workload.kind.value,
+                        "workload_label": workload.label,
+                        "workload_selector": workload.selector,
+                        "workload_metadata": dict(workload.metadata),
                         "success": bool(profiled.get("success", False)),
                         "return_code": int(profiled.get("return_code", 1)),
                         "stderr": str(profiled.get("stderr", "")),

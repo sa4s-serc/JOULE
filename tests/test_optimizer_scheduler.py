@@ -674,6 +674,62 @@ def test_candidate_metadata_is_versioned_and_typed(tmp_path: Path):
     assert all(int(event["detail"].get("schema_version", 0)) >= 1 for event in events)
 
 
+def test_partial_fidelity_rejections_record_explicit_reason(tmp_path: Path):
+    settings = JouleSettings(
+        project_root=tmp_path,
+        search_min_novelty=0.0,
+        surrogate_min_training_points=1,
+        search_branching_factor=1,
+        search_max_generations=2,
+        search_exploration_fraction=1.0,
+        search_exploitation_fraction=0.0,
+        search_confirmation_fraction=0.0,
+    )
+    target, bundle = _target_and_bundle(tmp_path)
+    source_metrics = {
+        target.source: (10.0, 10.0, 1_000.0),
+        "def target(limit):\n    return sum(value for value in range(limit))\n": (10.0, 10.0, 1_000.0),
+    }
+    db = JouleDB(settings.db_path)
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle(source_metrics)),
+        correctness=cast(Any, _AlwaysCorrect()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=GaussianProcessSurrogate(),
+    )
+
+    orchestrator.surrogate.screen_candidate = lambda **_kwargs: {
+        "decision": "measure_partial",
+        "reason": "",
+        "predicted_score": 1.0,
+        "uncertainty": 0.0,
+        "novelty": 1.0,
+        "acquisition_score": 0.0,
+        "expected_improvement": 0.0,
+        "model_mode": "forced",
+        "acquisition": "ei",
+        "schema_version": 1,
+    }
+
+    orchestrator.optimize("run-partial-fidelity", target, bundle, budget=1)
+
+    candidates = db.get_candidates("run-partial-fidelity")
+    assert len(candidates) == 1
+    metadata = parse_candidate_metadata(candidates[0].get("metadata", {}))
+    assert metadata.rejected == "partial_fidelity_f1"
+
+    events = db.get_search_events("run-partial-fidelity")
+    rejected_f1 = [
+        event
+        for event in events
+        if event["candidate_id"] == candidates[0]["candidate_id"] and event["event_type"] == "rejected_f1"
+    ]
+    assert rejected_f1
+    assert rejected_f1[-1]["detail"].get("reason") == "partial_fidelity_f1"
+
+
 def test_energy_backend_protocol_requires_parallel_capability_flag():
     class MissingCapabilityBackend:
         name = "missing"

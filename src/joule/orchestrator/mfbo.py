@@ -673,6 +673,21 @@ class OptimizationOrchestrator:
                         detail={"reason": rejection_reason or ("accepted" if accepted else "threshold")},
                     )
                     break
+                if (
+                    candidate_report
+                    and not accepted
+                    and not rejection_reason
+                    and last_stage in {Fidelity.F1.value, Fidelity.F2.value}
+                ):
+                    rejection_reason = f"partial_fidelity_{last_stage.lower()}"
+                    self._record_event(
+                        run_id,
+                        event_type=f"rejected_{last_stage.lower()}",
+                        stage=last_stage,
+                        candidate_id=candidate_id,
+                        operator_name=proposal.operator_name,
+                        detail={"reason": rejection_reason},
+                    )
                 evaluation = CandidateEvaluation(
                     candidate_id=candidate_id,
                     operator_name=proposal.operator_name,

@@ -71,6 +71,22 @@ def run_optimize(
         hotspot_summary=hotspot_summary,
     )
     write_artifact(context.run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
+    baseline_score = scalar_score(baseline_report.aggregate)
+    best_scalar_improvement = 0.0
+    best_regressed_scalar = False
+    if best and best.report and baseline_score > 0:
+        best_scalar_improvement = (baseline_score - scalar_score(best.report.aggregate)) / baseline_score
+        if best_scalar_improvement <= 0.0:
+            best_regressed_scalar = True
+            context.reporter.info(
+                "result",
+                (
+                    f"Best frontier candidate {best.candidate_id} did not improve scalar score over baseline; "
+                    "skipping patch artifact"
+                ),
+            )
+            best = None
+            best_scalar_improvement = 0.0
     metadata = {
         **context.record.metadata,
         "aggregate": baseline_report.aggregate.to_record(),
@@ -100,11 +116,14 @@ def run_optimize(
         metadata["patch_path"] = str(context.run_dir / "best.patch")
         context.reporter.info("result", f"Best candidate {best.candidate_id} recorded at {context.run_dir / 'best.patch'}")
     else:
-        context.reporter.info("result", "No candidate cleared the promotion thresholds")
+        if best_regressed_scalar:
+            context.reporter.info("result", "No candidate improved scalar score over baseline")
+        else:
+            context.reporter.info("result", "No candidate cleared the promotion thresholds")
     context.db.update_run_status(context.run_id, "completed", metadata=metadata)
     candidates = context.db.get_candidates(context.run_id)
     if analysis:
-        write_candidate_artifacts(context.run_dir, candidates)
+        write_candidate_artifacts(db=context.db, run_id=context.run_id, run_dir=context.run_dir, candidates=candidates)
     search_events = context.db.get_search_events(context.run_id)
     optimization_analysis = build_optimization_analysis(
         run_id=context.run_id,
@@ -113,6 +132,7 @@ def run_optimize(
         candidates=candidates,
         events=search_events,
         hotspot_summary=hotspot_summary,
+        best_candidate_id=best_candidate_payload["candidate_id"] if best_candidate_payload else None,
     )
     write_artifact(context.run_dir, "optimization_analysis.json", json_pretty(optimization_analysis))
     summary_candidates = []
@@ -144,10 +164,6 @@ def run_optimize(
     threshold = improvement_threshold if improvement_threshold is not None else context.settings.final_improvement_min
     baseline_failed = baseline_report.aggregate.success_rate < 1.0
     accepted_exists = any(item["status"] == "accepted" for item in candidates)
-    baseline_score = scalar_score(baseline_report.aggregate)
-    best_scalar_improvement = 0.0
-    if best and best.report and baseline_score > 0:
-        best_scalar_improvement = max(0.0, (baseline_score - scalar_score(best.report.aggregate)) / baseline_score)
 
     ci_exit_code = 0
     if ci:

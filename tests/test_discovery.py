@@ -118,3 +118,56 @@ def test_module_name_resolution_prefers_project_src_root(tmp_path: Path):
 
     assert resolver_module._module_name(project_root, file_path) == "sample_pkg.algos"
     assert profiler_module._module_name(project_root, file_path) == "sample_pkg.algos"
+
+
+def test_resolve_target_supports_complex_module_targets(sample_project):
+    source = sample_project / "sample_pkg" / "complex_cases.py"
+    warehouse_target = resolve_target(source, "warehouse_balancing_pipeline", project_root=sample_project)
+    telemetry_target = resolve_target(source, "telemetry_triage_pipeline", project_root=sample_project)
+
+    assert warehouse_target.module == "sample_pkg.complex_cases"
+    assert warehouse_target.qualname == "warehouse_balancing_pipeline"
+    assert telemetry_target.qualname == "telemetry_triage_pipeline"
+
+
+def test_workload_bundle_accepts_new_property_selector(sample_project):
+    settings = load_settings(sample_project)
+    target = resolve_target(sample_project / "sample_pkg" / "algos.py", "counter_histogram", project_root=sample_project)
+    bundle = resolve_workload_bundle(
+        settings,
+        target,
+        tests=None,
+        properties=["sample_pkg.properties:property_counter_histogram"],
+        harness=None,
+    )
+
+    assert len(bundle.workloads) == 1
+    assert bundle.workloads[0].kind is WorkloadKind.PROPERTY
+    assert bundle.workloads[0].metadata["provenance"] == "explicit"
+
+
+def test_workload_bundle_accepts_new_harness_selector(sample_project):
+    settings = load_settings(sample_project)
+    target = resolve_target(
+        sample_project / "sample_pkg" / "complex_cases.py",
+        "warehouse_balancing_pipeline",
+        project_root=sample_project,
+    )
+    bundle = resolve_workload_bundle(
+        settings,
+        target,
+        tests=None,
+        properties=None,
+        harness="sample_pkg.harnesses:warehouse_pipeline_harness",
+    )
+
+    assert len(bundle.workloads) == 1
+    assert bundle.workloads[0].kind is WorkloadKind.HARNESS
+    assert bundle.workloads[0].metadata["provenance"] == "explicit"
+
+
+def test_resolve_target_supports_recursive_example_target(sample_project):
+    source = sample_project / "sample_pkg" / "edge_cases.py"
+    target = resolve_target(source, "recursive_inventory_checksum", project_root=sample_project)
+
+    assert target.qualname == "recursive_inventory_checksum"

@@ -56,7 +56,7 @@ def collect_hotspot_analysis(
         )
     from joule.utils.analysis import summarize_hotspots, json_pretty
 
-    summary = summarize_hotspots(records, limit=limit)
+    summary = summarize_hotspots(records, limit=limit, target_file=target.file_path)
     db.record_hotspot_profile(
         run_id=run_id,
         workload_id="all",
@@ -68,16 +68,29 @@ def collect_hotspot_analysis(
     return summary
 
 
-def write_candidate_artifacts(run_dir: Path, candidates: list[CandidateRecord]) -> None:
+def write_candidate_artifacts(
+    run_dir: Path,
+    candidates: list[CandidateRecord],
+    *,
+    db: JouleDB | None = None,
+    run_id: str | None = None,
+) -> None:
     from joule.utils.analysis import json_pretty
+
+    if db is not None and not run_id:
+        raise ValueError("run_id is required when db is provided")
 
     candidates_dir = run_dir / "candidates"
     candidates_dir.mkdir(parents=True, exist_ok=True)
     for item in candidates:
+        candidate_json = json_pretty(item)
         candidate_dir = candidates_dir / item["candidate_id"]
         candidate_dir.mkdir(parents=True, exist_ok=True)
-        write_artifact(candidate_dir, "candidate.json", json_pretty(item))
+        write_artifact(candidate_dir, "candidate.json", candidate_json)
         write_artifact(candidate_dir, "candidate.py", item["source_code"])
+        if db is not None and run_id:
+            db.record_artifact(run_id, f"candidates/{item['candidate_id']}/candidate.json", "json", candidate_json)
+            db.record_artifact(run_id, f"candidates/{item['candidate_id']}/candidate.py", "code", item["source_code"])
 
 
 def artifact_paths_payload(run_dir: Path, names: list[str]) -> dict[str, str]:

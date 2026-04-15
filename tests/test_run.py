@@ -7,6 +7,8 @@ from typer.testing import CliRunner
 
 from joule.cli import app
 from joule.config import load_settings
+from joule.models import CandidateEvaluation, FrontierState
+from joule.orchestrator.mfbo import OptimizationOrchestrator
 from joule.utils.db import JouleDB
 
 
@@ -55,6 +57,48 @@ def test_run_command_measures_candidates(sample_project):
     assert (run_dir / "run_summary.json").exists()
     if "Best: none accepted" not in result.output:
         assert (run_dir / "best.patch").exists()
+
+
+def test_run_command_supports_new_medium_target(sample_project):
+    _loosen_thresholds(sample_project)
+    target_file = sample_project / "sample_pkg" / "algos.py"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "string_concat_report",
+            "--tests",
+            "tests/test_algos.py::test_string_concat_report",
+            "--budget",
+            "3",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Run:" in result.output
+
+
+def test_run_command_supports_complex_harness_target(sample_project):
+    _loosen_thresholds(sample_project)
+    target_file = sample_project / "sample_pkg" / "complex_cases.py"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "warehouse_balancing_pipeline",
+            "--harness",
+            "sample_pkg.harnesses:warehouse_pipeline_harness",
+            "--budget",
+            "2",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Run:" in result.output
 
 
 def test_apply_command_applies_best_candidate(sample_project):
@@ -194,6 +238,89 @@ def test_run_analysis_writes_candidate_and_analysis_artifacts(sample_project):
     run_dir = sample_project / ".joule" / "runs" / run_id
     assert (run_dir / "optimization_analysis.json").exists()
     assert (run_dir / "candidates").exists()
+
+
+def test_run_analysis_best_candidate_id_matches_summary_when_scalar_regresses(sample_project, monkeypatch):
+    _loosen_thresholds(sample_project)
+    from joule.cli_commands import run as run_command
+
+    original_optimize = OptimizationOrchestrator.optimize
+
+    def _optimize_with_forced_best(self, run_id, target, bundle, **kwargs):
+        baseline, pareto, best = original_optimize(self, run_id, target, bundle, **kwargs)
+        if best is not None:
+            return baseline, pareto, best
+        candidate_id = "forcedbest"
+        self.db.record_candidate(
+            candidate_id=candidate_id,
+            run_id=run_id,
+            parent_id="baseline",
+            operator_name="forced",
+            reasoning="forced best candidate for regression guard coverage",
+            dependencies=[],
+            source_code=target.source,
+            status="accepted",
+            score=0.0,
+            metadata={"stage": "F3", "phase": "confirmation", "rejected": None},
+        )
+        return (
+            baseline,
+            pareto,
+            CandidateEvaluation(
+                candidate_id=candidate_id,
+                operator_name="forced",
+                reasoning="forced best candidate for regression guard coverage",
+                source=target.source,
+                dependencies=[],
+                parent_id="baseline",
+                generation_depth=1,
+                frontier_state=FrontierState.FRONTIER_ACTIVE,
+                accepted=True,
+                score=0.0,
+                acquisition_score=0.0,
+                dominance_summary={},
+                report=baseline,
+                metadata={},
+            ),
+        )
+
+    monkeypatch.setattr(OptimizationOrchestrator, "optimize", _optimize_with_forced_best)
+
+    calls = {"count": 0}
+
+    def _forced_scalar_score(_aggregate):
+        calls["count"] += 1
+        return 1.0 if calls["count"] == 1 else 2.0
+
+    monkeypatch.setattr(run_command, "scalar_score", _forced_scalar_score)
+
+    target_file = sample_project / "sample_pkg" / "algos.py"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(target_file),
+            "--function",
+            "unreferenced_total",
+            "--budget",
+            "6",
+            "--analysis",
+            "--output",
+            "json",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    payload = json.loads(result.output)
+    analysis = payload["analysis"]
+    run_dir = sample_project / ".joule" / "runs" / payload["run_id"]
+
+    assert calls["count"] >= 2
+    assert analysis["accepted_candidate_ids"]
+    assert payload["best_candidate"] is None
+    assert analysis["best_candidate_id"] is None
+    assert not (run_dir / "best.patch").exists()
 
 
 def test_run_rejects_non_positive_budget(sample_project):

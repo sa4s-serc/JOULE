@@ -47,6 +47,12 @@ Smoke test runs:
   --no-dashboard
 ```
 
+Baseline output interpretation:
+
+- `baseline.json` stores aggregate measurement payloads per workload.
+- `baseline_analysis.json` summarizes stage metrics and hotspot rollups.
+- `hotspots.json` is useful when inspecting where runtime is concentrated.
+
 ## 4. Run Optimization
 
 ```bash
@@ -59,6 +65,22 @@ Smoke test runs:
   --output human \
   --no-dashboard
 ```
+
+For a very large function path, run a baseline on the advanced sample:
+
+```bash
+./joule baseline \
+  example/mock_repo/sample_pkg/complex_cases.py \
+  --function warehouse_balancing_pipeline \
+  --tests tests/test_complex_cases.py::test_warehouse_balancing_pipeline \
+  --no-dashboard
+```
+
+Run output interpretation:
+
+- `run_summary.json` is the first artifact to inspect for acceptance and outcome.
+- `optimization_analysis.json` explains funnel-stage behavior and operator contribution.
+- `events.jsonl` is the stage timeline for candidate acceptance and rejection reasons.
 
 CI-oriented run:
 
@@ -147,6 +169,8 @@ Artifact lookup by question: [docs/ARTIFACTS.md](docs/ARTIFACTS.md)
 - Use explicit selectors for async/stateful targets.
 - Use heuristic discovery for simple conventional pytest layouts.
 - Use default-arg fallback only for safe pure targets.
+
+Expanded example catalog and target matrix: [docs/EXAMPLES.md](docs/EXAMPLES.md)
 
 ## 11. Next Docs
 

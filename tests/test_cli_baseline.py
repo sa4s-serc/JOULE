@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from typer.testing import CliRunner
 
 from joule.cli import app
@@ -61,7 +63,25 @@ def test_baseline_hotspots_json_output_includes_hotspots(sample_project):
         ],
     )
     assert result.exit_code == 0, result.output
-    assert '"hotspots"' in result.output
+    payload = json.loads(result.output)
+    hotspots = payload["hotspots"]
+    assert hotspots
+    assert hotspots["schema_version"] >= 2
+    assert "signal_quality" in hotspots
+    assert "workload_kind_counts" in hotspots
+    assert hotspots["workload_kind_counts"].get("pytest", 0) >= 1
+    assert "target_top_functions" in hotspots
+    assert "project_top_functions" in hotspots
+    assert "non_project_top_functions" in hotspots
+    assert "insights" in hotspots
+    assert "recommendations" in hotspots
+    assert hotspots["recommendations"]
+    assert hotspots["by_workload"][0]["workload_kind"] == "pytest"
+    assert 0.0 <= hotspots["by_workload"][0]["signal"]["project_share"] <= 1.0
+    assert 0.0 <= hotspots["by_workload"][0]["signal"]["target_share"] <= 1.0
+    if hotspots["top_functions"]:
+        assert 0.0 <= hotspots["top_functions"][0]["share"] <= 1.0
+        assert hotspots["top_functions"][0]["avg_cost_us"] >= 0.0
 
 
 def test_baseline_rejects_non_positive_repetitions(sample_project):
@@ -106,3 +126,37 @@ def test_baseline_reuses_measurement_cache(sample_project):
     second = runner.invoke(app, command)
     assert second.exit_code == 0, second.output
     assert "cache" in second.output.lower()
+
+
+def test_baseline_command_with_new_property_workload(sample_project):
+    result = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "algos.py"),
+            "--function",
+            "counter_histogram",
+            "--properties",
+            "sample_pkg.properties:property_counter_histogram",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "property::sample_pkg.properties:property_counter_histogram" in result.output
+
+
+def test_baseline_command_with_new_harness_workload(sample_project):
+    result = runner.invoke(
+        app,
+        [
+            "baseline",
+            str(sample_project / "sample_pkg" / "complex_cases.py"),
+            "--function",
+            "warehouse_balancing_pipeline",
+            "--harness",
+            "sample_pkg.harnesses:warehouse_pipeline_harness",
+            "--no-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "harness::sample_pkg.harnesses:warehouse_pipeline_harness" in result.output

@@ -324,19 +324,79 @@ def _hotspot_section(records: list[dict]) -> str:
     if not summary:
         return "<p>No hotspot analysis recorded.</p>"
     top_functions = summary.get("top_functions", [])
+    target_top_functions = summary.get("target_top_functions", [])
     ownership = summary.get("ownership", [])
+    by_workload = summary.get("by_workload", [])
+    workload_kind_counts = summary.get("workload_kind_counts", {})
+    signal_quality = summary.get("signal_quality", {})
+    recommendations = summary.get("recommendations", [])
+
     fn_rows = "".join(
         f"<tr><td>{escape(Path(item['file']).name)}</td><td>{item['line']}</td><td>{escape(item['function'])}</td>"
-        f"<td>{item['cumulative_time_s']:.4f}s</td><td>{escape(item['ownership'])}</td></tr>"
+        f"<td>{item['cumulative_time_s']:.4f}s</td><td>{float(item.get('share', 0.0)) * 100:.1f}%</td><td>{escape(item['ownership'])}</td></tr>"
         for item in top_functions
-    ) or "<tr><td colspan='5'>No hotspot functions</td></tr>"
+    ) or "<tr><td colspan='6'>No hotspot functions</td></tr>"
+
+    target_rows = "".join(
+        f"<tr><td>{escape(Path(item['file']).name)}</td><td>{item['line']}</td><td>{escape(item['function'])}</td>"
+        f"<td>{item['cumulative_time_s']:.4f}s</td><td>{float(item.get('share', 0.0)) * 100:.1f}%</td></tr>"
+        for item in target_top_functions[:8]
+    ) or "<tr><td colspan='5'>No target-file hotspots captured</td></tr>"
+
     owner_rows = "".join(
         f"<li>{escape(item['bucket'])}: {item['cumulative_time_s']:.4f}s</li>"
         for item in ownership
     ) or "<li>No ownership data</li>"
+
+    workload_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(item.get('workload_id', '-')))}</td>"
+        f"<td>{escape(str(item.get('workload_kind', '-')))}</td>"
+        f"<td>{float((item.get('signal') or {}).get('project_share', 0.0)) * 100:.1f}%</td>"
+        f"<td>{float((item.get('signal') or {}).get('target_share', 0.0)) * 100:.1f}%</td>"
+        f"<td>{escape(str((item.get('signal') or {}).get('dominant_ownership_bucket', '-')))}</td>"
+        f"<td>{'yes' if bool((item.get('signal') or {}).get('low_signal', False)) else 'no'}</td>"
+        "</tr>"
+        for item in by_workload[:10]
+    ) or "<tr><td colspan='6'>No workload signal diagnostics</td></tr>"
+
+    workload_kind_chips = "".join(
+        f"<span class='chip'>{escape(str(kind))}={count}</span>"
+        for kind, count in workload_kind_counts.items()
+    ) or "<span class='chip'>no-workload-kinds</span>"
+
+    low_signal = bool(signal_quality.get("low_signal", False))
+    low_signal_reasons = signal_quality.get("low_signal_reasons", []) or []
+    reason_items = "".join(f"<li>{escape(str(reason))}</li>" for reason in low_signal_reasons)
+    if not reason_items:
+        reason_items = "<li>none</li>"
+
+    recommendation_items = "".join(
+        f"<li>{escape(str(item))}</li>"
+        for item in recommendations
+    ) or "<li>No recommendations yet</li>"
+
     return (
-        "<table><thead><tr><th>File</th><th>Line</th><th>Function</th><th>Cumulative</th><th>Owner</th></tr></thead>"
-        f"<tbody>{fn_rows}</tbody></table><ul>{owner_rows}</ul>"
+        "<p><strong>Hotspot Signal Quality</strong>: "
+        f"low_signal={'yes' if low_signal else 'no'} "
+        f"project_share={float(signal_quality.get('project_share', 0.0)) * 100:.1f}% "
+        f"target_share={float(signal_quality.get('target_share', 0.0)) * 100:.1f}% "
+        f"dominant_owner={escape(str(signal_quality.get('dominant_ownership_bucket', '-')))}</p>"
+        f"<ul>{reason_items}</ul>"
+        "<p><strong>Workload Mix</strong></p>"
+        f"<div class='chips'>{workload_kind_chips}</div>"
+        "<table><thead><tr><th>Workload</th><th>Kind</th><th>Project Share</th><th>Target Share</th><th>Top Owner</th><th>Low Signal</th></tr></thead>"
+        f"<tbody>{workload_rows}</tbody></table>"
+        "<p><strong>Target Hotspots</strong></p>"
+        "<table><thead><tr><th>File</th><th>Line</th><th>Function</th><th>Cumulative</th><th>Share</th></tr></thead>"
+        f"<tbody>{target_rows}</tbody></table>"
+        "<p><strong>Overall Hotspots</strong></p>"
+        "<table><thead><tr><th>File</th><th>Line</th><th>Function</th><th>Cumulative</th><th>Share</th><th>Owner</th></tr></thead>"
+        f"<tbody>{fn_rows}</tbody></table>"
+        "<p><strong>Ownership Totals</strong></p>"
+        f"<ul>{owner_rows}</ul>"
+        "<p><strong>Hotspot Recommendations</strong></p>"
+        f"<ul>{recommendation_items}</ul>"
     )
 
 
