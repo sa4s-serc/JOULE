@@ -3,11 +3,11 @@ from __future__ import annotations
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 from joule.metadata import parse_candidate_metadata
 from joule.utils.db import JouleDB
-from joule.utils.analysis import cross_run_trends
+from joule.utils.analysis import FUNNEL_ORDER, cross_run_trends
 from joule.utils.reporting import workload_provenance_records
 
 
@@ -21,18 +21,51 @@ def render_dashboard_html(db: JouleDB, selected_run_id: str | None = None) -> st
     completed_runs = sum(1 for item in runs if item.get("status") == "completed")
     running_runs = sum(1 for item in runs if item.get("status") == "running")
     failed_runs = sum(1 for item in runs if item.get("status") not in {"completed", "running"})
-    rows = "".join(
-        f"<tr><td><a href='/?run_id={escape(run['run_id'])}'>{escape(run['run_id'])}</a></td>"
-        f"<td>{escape(run['run_type'])}</td>"
-        f"<td>{escape(run['status'])}</td><td>{escape(run['created_at'])}</td></tr>"
+    run_type_counts: dict[str, int] = {}
+    rows_parts: list[str] = []
+    for run in runs:
+        run_id = str(run.get("run_id", ""))
+        run_type = str(run.get("run_type", "-"))
+        status = str(run.get("status", "-"))
+        created_at = str(run.get("created_at", "-"))
+        run_type_counts[run_type] = run_type_counts.get(run_type, 0) + 1
+        rows_parts.append(
+            f"<tr><td><a href='/?run_id={quote_plus(run_id)}'>{escape(run_id)}</a></td>"
+            f"<td>{escape(run_type)}</td>"
+            f"<td><span class='status-badge {_status_css_class(status)}'>{escape(status)}</span></td>"
+            f"<td>{escape(created_at)}</td></tr>"
+        )
+    rows = "".join(rows_parts) if rows_parts else "<tr><td colspan='4'>No runs</td></tr>"
+    run_options = "".join(
+        f"<option value='{escape(str(run.get('run_id', '')))}'"
+        f"{' selected' if run.get('run_id') == latest else ''}>{escape(str(run.get('run_id', '')))}</option>"
         for run in runs
     )
-    if not rows:
-        rows = "<tr><td colspan='4'>No runs</td></tr>"
+    run_type_chips = "".join(
+        f"<span class='chip'>{escape(run_type)}={count}</span>"
+        for run_type, count in sorted(run_type_counts.items())
+    )
+    if run_options:
+        run_selector = (
+            "<form class='controls' method='get'>"
+            "<label for='run-selector'>Run</label>"
+            f"<select id='run-selector' name='run_id'>{run_options}</select>"
+            "<button type='submit'>Open</button>"
+            "<button type='button' onclick='window.location.reload()'>Refresh</button>"
+            "</form>"
+        )
+    else:
+        run_selector = (
+            "<div class='controls'>"
+            "<button type='button' onclick='window.location.reload()'>Refresh</button>"
+            "</div>"
+        )
+    selected_label = escape(str(latest)) if latest else "none"
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>JOULE Dashboard</title>
   <style>
     :root {{
@@ -44,11 +77,14 @@ def render_dashboard_html(db: JouleDB, selected_run_id: str | None = None) -> st
       --border: #d9d2c3;
       --ok: #2b7a0b;
       --bad: #8d1c13;
+            --running: #8a5b00;
             --chip: #f2eadf;
     }}
     body {{ font-family: Georgia, "Iowan Old Style", serif; background: linear-gradient(180deg, #f8f5ef 0%, #efe7da 100%); color: var(--ink); margin: 0; }}
     main {{ max-width: 1100px; margin: 0 auto; padding: 32px 20px 48px; }}
     h1, h2 {{ margin: 0 0 12px; }}
+        h3 {{ margin: 16px 0 10px; }}
+        a {{ color: var(--accent); }}
     .grid {{ display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }}
     .panel {{ background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 18px; box-shadow: 0 10px 24px rgba(30, 42, 47, 0.06); }}
     table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
@@ -58,8 +94,10 @@ def render_dashboard_html(db: JouleDB, selected_run_id: str | None = None) -> st
         .hero {{ display: grid; gap: 10px; margin-bottom: 18px; }}
         .chips {{ display: flex; gap: 8px; flex-wrap: wrap; }}
         .chip {{ background: var(--chip); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12px; }}
-        .controls {{ display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }}
-        .controls select, .controls button {{
+        .controls {{ display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; align-items: center; }}
+        .controls select,
+        .controls button,
+        .controls input {{
             border: 1px solid var(--border);
             border-radius: 10px;
             background: #fff;
@@ -67,10 +105,16 @@ def render_dashboard_html(db: JouleDB, selected_run_id: str | None = None) -> st
             font-family: inherit;
             color: var(--ink);
         }}
+        .controls label {{ display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }}
         .next-steps li {{ margin-bottom: 6px; }}
+        .status-badge {{ display: inline-block; border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; }}
+        .status-ok {{ color: var(--ok); }}
+        .status-running {{ color: var(--running); }}
+        .status-bad {{ color: var(--bad); }}
     .ok {{ color: var(--ok); }}
     .bad {{ color: var(--bad); }}
     .muted {{ color: var(--muted); }}
+        .small {{ font-size: 13px; }}
   </style>
 </head>
 <body>
@@ -84,14 +128,14 @@ def render_dashboard_html(db: JouleDB, selected_run_id: str | None = None) -> st
                 <span class="chip">running={running_runs}</span>
                 <span class="chip">other={failed_runs}</span>
             </div>
-            <div class="controls">
-                <button onclick="window.location.reload()">Refresh</button>
-            </div>
+            {"<div class='chips'>" + run_type_chips + "</div>" if run_type_chips else ""}
+            <p class="muted small">selected_run={selected_label}</p>
+            {run_selector}
         </section>
     <div class="grid">
       <section class="panel">
         <h2>Runs</h2>
-                <p class="muted">Select a run ID to inspect its candidate and artifact details.</p>
+                <p class="muted">Select a run ID to inspect candidate details, hotspot diagnostics, and artifacts.</p>
         <table>
           <thead><tr><th>Run</th><th>Type</th><th>Status</th><th>Created</th></tr></thead>
           <tbody>{rows}</tbody>
@@ -120,6 +164,7 @@ def serve_dashboard(db_path: Path, host: str = "127.0.0.1", port: int = 8501, se
             payload = render_dashboard_html(db, selected_run_id=requested_run_id).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store, max-age=0")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -154,16 +199,31 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     candidate_rows_parts: list[str] = []
     for item in candidates:
         metadata = parse_candidate_metadata(item.get("metadata", {}))
+        stage_value = metadata.stage or "-"
+        tier_value = metadata.operator_tier or "-"
+        reason_value = metadata.rejected or "-"
+        detail_value = _candidate_detail(item.get("metadata", {}))
+        searchable = " ".join(
+            [
+                str(item.get("candidate_id", "")),
+                str(item.get("operator_name", "")),
+                str(stage_value),
+                str(tier_value),
+                str(reason_value),
+                str(detail_value),
+            ]
+        ).lower()
+        status_value = str(item.get("status", "-"))
+        score_value = float(item.get("score", 0.0))
         candidate_rows_parts.append(
-            f"<tr class='candidate-row' data-status='{escape(item['status'])}' data-score='{item['score']:.12f}' "
-            f"data-stage='{escape(metadata.stage or '-')}' "
-            f"data-tier='{escape(metadata.operator_tier or '-')}'>"
-            f"<td>{escape(item['candidate_id'])}</td><td>{escape(item['operator_name'])}</td>"
-            f"<td>{escape(metadata.operator_tier or '-')}</td>"
-            f"<td>{escape(item['status'])}</td><td>{item['score']:.6f}</td>"
-            f"<td>{escape(metadata.stage or '-')}</td>"
-            f"<td>{escape(metadata.rejected or '-')}</td>"
-            f"<td>{escape(_candidate_detail(item.get('metadata', {})))}</td></tr>"
+            f"<tr class='candidate-row' data-status='{escape(status_value)}' data-score='{score_value:.12f}' "
+            f"data-stage='{escape(stage_value)}' data-tier='{escape(tier_value)}' data-search='{escape(searchable)}'>"
+            f"<td>{escape(str(item.get('candidate_id', '-')))}</td><td>{escape(str(item.get('operator_name', '-')))}</td>"
+            f"<td>{escape(tier_value)}</td>"
+            f"<td><span class='status-badge {_status_css_class(status_value)}'>{escape(status_value)}</span></td><td>{score_value:.6f}</td>"
+            f"<td>{escape(stage_value)}</td>"
+            f"<td>{escape(reason_value)}</td>"
+            f"<td>{escape(detail_value)}</td></tr>"
         )
     candidate_rows = "".join(candidate_rows_parts)
     if not candidate_rows:
@@ -228,7 +288,10 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     {hotspot_html}
     <h3>Candidates</h3>
         <div class="controls">
-            <label>Status
+            <label for="candidate-search-filter">Search
+                <input id="candidate-search-filter" type="search" oninput="filterCandidates()" placeholder="id, operator, reason, details">
+            </label>
+            <label for="candidate-status-filter">Status
                 <select id="candidate-status-filter" onchange="filterCandidates()">
                     <option value="all">all</option>
                     <option value="accepted">accepted</option>
@@ -236,7 +299,7 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
                     <option value="skipped">skipped</option>
                 </select>
             </label>
-            <label>Tier
+            <label for="candidate-tier-filter">Tier
                 <select id="candidate-tier-filter" onchange="filterCandidates()">
                     <option value="all">all</option>
                     <option value="L">L</option>
@@ -244,14 +307,21 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
                     <option value="H">H</option>
                 </select>
             </label>
-            <label>Sort
+            <label for="candidate-stage-filter">Stage
+                <select id="candidate-stage-filter" onchange="filterCandidates()">
+                    <option value="all">all</option>
+                </select>
+            </label>
+            <label for="candidate-sort">Sort
                 <select id="candidate-sort" onchange="filterCandidates()">
                     <option value="score-asc">score asc</option>
                     <option value="score-desc">score desc</option>
                     <option value="stage">stage</option>
                 </select>
             </label>
+            <button type="button" onclick="resetCandidateFilters()">Clear filters</button>
         </div>
+        <p class="muted small" id="candidate-visible-count" aria-live="polite"></p>
     <table>
       <thead><tr><th>ID</th><th>Operator</th><th>Tier</th><th>Status</th><th>Score</th><th>Stage</th><th>Reason</th><th>Details</th></tr></thead>
             <tbody id="candidate-table-body">{candidate_rows}</tbody>
@@ -261,30 +331,90 @@ def _run_section(db: JouleDB, run_id: str | None) -> str:
     <h3>Apply Audits</h3>
     <ul>{audit_items}</ul>
         <script>
+            function candidateRows() {{
+                const body = document.getElementById('candidate-table-body');
+                if (!body) return [];
+                return Array.from(body.querySelectorAll('.candidate-row'));
+            }}
+
+            function scoreValue(row) {{
+                const score = Number(row.dataset.score);
+                return Number.isFinite(score) ? score : 0;
+            }}
+
+            function populateStageFilter() {{
+                const stageFilter = document.getElementById('candidate-stage-filter');
+                if (!stageFilter || stageFilter.dataset.ready === '1') return;
+                const stages = Array.from(new Set(candidateRows().map((row) => String(row.dataset.stage || '-'))));
+                stages.sort((left, right) => left.localeCompare(right));
+                stages.forEach((stage) => {{
+                    const option = document.createElement('option');
+                    option.value = stage;
+                    option.textContent = stage;
+                    stageFilter.appendChild(option);
+                }});
+                stageFilter.dataset.ready = '1';
+            }}
+
+            function resetCandidateFilters() {{
+                const search = document.getElementById('candidate-search-filter');
+                const status = document.getElementById('candidate-status-filter');
+                const tier = document.getElementById('candidate-tier-filter');
+                const stage = document.getElementById('candidate-stage-filter');
+                const sort = document.getElementById('candidate-sort');
+                if (search) search.value = '';
+                if (status) status.value = 'all';
+                if (tier) tier.value = 'all';
+                if (stage) stage.value = 'all';
+                if (sort) sort.value = 'score-asc';
+                filterCandidates();
+            }}
+
             function filterCandidates() {{
                 const statusFilter = document.getElementById('candidate-status-filter');
                 const tierFilter = document.getElementById('candidate-tier-filter');
+                const stageFilter = document.getElementById('candidate-stage-filter');
+                const searchFilter = document.getElementById('candidate-search-filter');
                 const sortMode = document.getElementById('candidate-sort');
                 const body = document.getElementById('candidate-table-body');
                 if (!body) return;
-                const rows = Array.from(body.querySelectorAll('.candidate-row'));
-                const wanted = statusFilter ? statusFilter.value : 'all';
+
+                const rows = candidateRows();
+                const wantedStatus = statusFilter ? statusFilter.value : 'all';
                 const wantedTier = tierFilter ? tierFilter.value : 'all';
+                const wantedStage = stageFilter ? stageFilter.value : 'all';
+                const wantedText = searchFilter ? searchFilter.value.trim().toLowerCase() : '';
+
                 rows.forEach((row) => {{
-                    const statusOk = wanted === 'all' || row.dataset.status === wanted;
+                    const statusOk = wantedStatus === 'all' || row.dataset.status === wantedStatus;
                     const tierOk = wantedTier === 'all' || row.dataset.tier === wantedTier;
-                    const keep = statusOk && tierOk;
+                    const stageOk = wantedStage === 'all' || row.dataset.stage === wantedStage;
+                    const haystack = String(row.dataset.search || '');
+                    const textOk = !wantedText || haystack.includes(wantedText);
+                    const keep = statusOk && tierOk && stageOk && textOk;
                     row.style.display = keep ? '' : 'none';
                 }});
+
                 const visible = rows.filter((row) => row.style.display !== 'none');
                 const mode = sortMode ? sortMode.value : 'score-asc';
                 visible.sort((a, b) => {{
-                    if (mode === 'score-desc') return Number(b.dataset.score) - Number(a.dataset.score);
-                    if (mode === 'stage') return String(a.dataset.stage).localeCompare(String(b.dataset.stage));
-                    return Number(a.dataset.score) - Number(b.dataset.score);
+                    if (mode === 'score-desc') return scoreValue(b) - scoreValue(a);
+                    if (mode === 'stage') {{
+                        const stageDelta = String(a.dataset.stage || '').localeCompare(String(b.dataset.stage || ''));
+                        if (stageDelta !== 0) return stageDelta;
+                        return scoreValue(a) - scoreValue(b);
+                    }}
+                    return scoreValue(a) - scoreValue(b);
                 }});
                 visible.forEach((row) => body.appendChild(row));
+
+                const countLabel = document.getElementById('candidate-visible-count');
+                if (countLabel) {{
+                    countLabel.textContent = `Showing ${{visible.length}} of ${{rows.length}} candidates`;
+                }}
             }}
+
+            populateStageFilter();
             filterCandidates();
         </script>
     """
@@ -311,12 +441,32 @@ def _trends_section(runs: list[dict]) -> str:
 
 def _search_summary(events: list[dict]) -> str:
     if not events:
-        return "No search events"
+        return "<span class='muted'>No search events</span>"
     counts: dict[str, int] = {}
     for event in events:
-        counts[event["event_type"]] = counts.get(event["event_type"], 0) + 1
-    ordered = [f"{key}={counts[key]}" for key in sorted(counts)]
-    return escape(" ".join(ordered))
+        event_type = str(event.get("event_type", "unknown"))
+        counts[event_type] = counts.get(event_type, 0) + 1
+    ordered_counts = sorted(counts.items(), key=lambda item: _event_sort_key(item[0]))
+    chips = "".join(
+        f"<span class='chip'>{escape(name)}={count}</span>"
+        for name, count in ordered_counts
+    )
+    return f"<div class='chips'>{chips}</div>"
+
+
+def _event_sort_key(event_type: str) -> tuple[int, int | str]:
+    if event_type in FUNNEL_ORDER:
+        return (0, FUNNEL_ORDER.index(event_type))
+    return (1, event_type)
+
+
+def _status_css_class(status: str) -> str:
+    normalized = str(status).strip().lower()
+    if normalized == "completed":
+        return "status-ok"
+    if normalized == "running":
+        return "status-running"
+    return "status-bad"
 
 
 def _hotspot_section(records: list[dict]) -> str:
@@ -329,7 +479,19 @@ def _hotspot_section(records: list[dict]) -> str:
     by_workload = summary.get("by_workload", [])
     workload_kind_counts = summary.get("workload_kind_counts", {})
     signal_quality = summary.get("signal_quality", {})
+    insights = summary.get("insights", {})
     recommendations = summary.get("recommendations", [])
+    schema_version = summary.get("schema_version", "-")
+
+    def _workload_signal_line(label: str, payload: dict | None) -> str | None:
+        if not isinstance(payload, dict) or not payload:
+            return None
+        return (
+            f"{label}="
+            f"{payload.get('workload_id', '-')}/{payload.get('workload_kind', '-')} "
+            f"(project_share={float(payload.get('project_share', 0.0)) * 100:.1f}%, "
+            f"target_share={float(payload.get('target_share', 0.0)) * 100:.1f}%)"
+        )
 
     fn_rows = "".join(
         f"<tr><td>{escape(Path(item['file']).name)}</td><td>{item['line']}</td><td>{escape(item['function'])}</td>"
@@ -376,13 +538,36 @@ def _hotspot_section(records: list[dict]) -> str:
         for item in recommendations
     ) or "<li>No recommendations yet</li>"
 
+    insight_lines: list[str] = [
+        f"profiled_workloads={insights.get('profiled_workload_count', len(by_workload))}",
+    ]
+    primary_target_hotspot = insights.get("primary_target_hotspot")
+    if isinstance(primary_target_hotspot, dict) and primary_target_hotspot:
+        insight_lines.append(
+            "primary_target_hotspot="
+            f"{Path(str(primary_target_hotspot.get('file', 'unknown'))).name}:"
+            f"{primary_target_hotspot.get('line', '-')}:"
+            f"{primary_target_hotspot.get('function', 'unknown')} "
+            f"(share={float(primary_target_hotspot.get('share', 0.0)) * 100:.1f}%)"
+        )
+    strongest_line = _workload_signal_line("strongest_signal_workload", insights.get("strongest_signal_workload"))
+    if strongest_line:
+        insight_lines.append(strongest_line)
+    weakest_line = _workload_signal_line("weakest_signal_workload", insights.get("weakest_signal_workload"))
+    if weakest_line:
+        insight_lines.append(weakest_line)
+    insight_items = "".join(f"<li>{escape(line)}</li>" for line in insight_lines)
+
     return (
         "<p><strong>Hotspot Signal Quality</strong>: "
         f"low_signal={'yes' if low_signal else 'no'} "
         f"project_share={float(signal_quality.get('project_share', 0.0)) * 100:.1f}% "
         f"target_share={float(signal_quality.get('target_share', 0.0)) * 100:.1f}% "
         f"dominant_owner={escape(str(signal_quality.get('dominant_ownership_bucket', '-')))}</p>"
+        f"<p class='muted small'>schema_version={escape(str(schema_version))}</p>"
         f"<ul>{reason_items}</ul>"
+        "<p><strong>Hotspot Insights</strong></p>"
+        f"<ul>{insight_items}</ul>"
         "<p><strong>Workload Mix</strong></p>"
         f"<div class='chips'>{workload_kind_chips}</div>"
         "<table><thead><tr><th>Workload</th><th>Kind</th><th>Project Share</th><th>Target Share</th><th>Top Owner</th><th>Low Signal</th></tr></thead>"

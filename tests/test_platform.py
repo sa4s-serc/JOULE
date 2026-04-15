@@ -47,7 +47,11 @@ def test_dashboard_once_includes_guided_sections(sample_project):
     result = runner.invoke(app, ["dashboard", str(sample_project), "--run-id", run_id, "--once"])
     assert result.exit_code == 0, result.output
     assert "Recommended Next Steps" in result.output
+    assert "run-selector" in result.output
+    assert "candidate-search-filter" in result.output
     assert "candidate-status-filter" in result.output
+    assert "candidate-stage-filter" in result.output
+    assert "candidate-visible-count" in result.output
 
 
 def test_dashboard_surfaces_hotspot_insights(sample_project):
@@ -69,7 +73,11 @@ def test_dashboard_surfaces_hotspot_insights(sample_project):
 
     result = runner.invoke(app, ["dashboard", str(sample_project), "--run-id", run_id, "--once"])
     assert result.exit_code == 0, result.output
-    assert "Hotspot Signal Quality" in result.output
+    normalized = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    normalized = re.sub(r"\s+", " ", normalized)
+    assert "Hotspot Signal Quality" in normalized
+    assert "Hotspot Insights" in normalized
+    assert "schema_version=" in normalized
     assert "<th>Target Share</th>" in result.output
     assert "recommendations</strong>" in result.output.lower()
 
