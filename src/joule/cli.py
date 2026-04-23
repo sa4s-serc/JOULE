@@ -18,6 +18,7 @@ from joule.cli_commands.inspect import run_inspect
 from joule.cli_commands.parse_json import run_parse_json
 from joule.cli_commands.resume import run_resume
 from joule.cli_commands.transformations import run_transformations
+from joule.cli_commands.ui import run_ui
 from joule.config import JouleSettings, load_settings
 from joule.evaluators.oracle import PerformanceOracle
 from joule.models import RunType
@@ -367,6 +368,20 @@ def parse_json(
     file: Path | None = typer.Option(None, "--file", help="Read JSON payload from file instead of stdin"),
 ):
     run_parse_json(file, console=console)
+
+
+@app.command()
+def ui(
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    host: str = typer.Option("127.0.0.1", "--host", help="UI server host"),
+    port: int | None = typer.Option(None, "--port", help="UI server port"),
+    backend_only: bool = typer.Option(False, "--backend-only", help="Start only the backend API server"),
+    frontend_only: bool = typer.Option(False, "--frontend-only", help="Start only the frontend dev server"),
+    verbose: bool = typer.Option(False, "--verbose", help="Print detailed events"),
+    quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
+):
+    run_ui(path, host, port, backend_only, frontend_only, verbose, quiet)
+
 
 if __name__ == "__main__":  # pragma: no cover
     app()

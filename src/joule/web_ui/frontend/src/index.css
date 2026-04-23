@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-joule-bg text-joule-ink font-serif;
+  }
+}
+
+@layer components {
+  .joule-panel {
+    @apply bg-joule-panel border border-joule-border rounded-2xl p-6 shadow-lg;
+  }
+
+  .joule-button {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200;
+  }
+
+  .joule-button-primary {
+    @apply bg-joule-accent text-white hover:bg-opacity-90;
+  }
+
+  .joule-button-secondary {
+    @apply bg-joule-chip text-joule-ink hover:bg-opacity-80;
+  }
+
+  .joule-status-badge {
+    @apply px-2 py-1 rounded-full text-xs font-medium;
+  }
+
+  .joule-status-completed {
+    @apply bg-green-100 text-green-800;
+  }
+
+  .joule-status-running {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+
+  .joule-status-failed {
+    @apply bg-red-100 text-red-800;
+  }
+
+  .joule-chip {
+    @apply bg-joule-chip border border-joule-border rounded-full px-3 py-1 text-xs;
+  }
+}
