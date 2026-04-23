@@ -1,0 +1,67 @@
+{
+  "function": "task",
+  "original_source": "from math import factorial\nfrom itertools import islice\n\n\ndef permutations(n, start, size):\n    p = bytearray(range(n))\n    count = bytearray(n)\n\n    remainder = start\n    for v in range(n - 1, 0, -1):\n        count[v], remainder = divmod(remainder, factorial(v))\n        for _ in range(count[v]):\n            p[:v], p[v] = p[1:v + 1], p[0]\n\n    assert(count[1] == 0)\n    assert(size < 2 or (size % 2 == 0))\n\n    if size < 2:\n        yield p[:]\n    else:\n        rotation_swaps = [None] * n\n        for i in range(1, n):\n            r = list(range(n))\n            for v in range(1, i + 1):\n                r[:v], r[v] = r[1:v + 1], r[0]\n            swaps = []\n            for dst, src in enumerate(r):\n                if dst != src:\n                    swaps.append((dst, src))\n            rotation_swaps[i] = tuple(swaps)\n\n        while True:\n            yield p[:]\n            p[0], p[1] = p[1], p[0]\n            yield p[:]\n            i = 2\n            while count[i] >= i:\n                count[i] = 0\n                i += 1\n            else:\n                count[i] += 1\n                t = p[:]\n                for dst, src in rotation_swaps[i]:\n                    p[dst] = t[src]\n\n\ndef alternating_flips_generator(n, start, size):\n    maximum_flips = 0\n    alternating_factor = 1\n    for permutation in islice(permutations(n, start, size), size):\n        first = permutation[0]\n        if first:\n            flips_count = 1\n            while True:\n                permutation[:first + 1] = permutation[first::-1]\n                first = permutation[0]\n                if not first:\n                    break\n                flips_count += 1\n            if maximum_flips < flips_count:\n                maximum_flips = flips_count\n            yield flips_count * alternating_factor\n        else:\n            yield 0\n        alternating_factor = -alternating_factor\n    yield maximum_flips\n\n\ndef task(n, start, size):\n    alternating_flips = alternating_flips_generator(n, start, size)\n    return sum(islice(alternating_flips, size)), next(alternating_flips)",
+  "best_source": "from math import factorial\nfrom itertools import islice\n\n\ndef permutations(n, start, size):\n    p = bytearray(range(n))\n    count = bytearray(n)\n\n    remainder = start\n    for v in range(n - 1, 0, -1):\n        count[v], remainder = divmod(remainder, factorial(v))\n        for _ in range(count[v]):\n            p[:v], p[v] = p[1:v + 1], p[0]\n        if remainder == 0:\n            break\n\n    assert(count[1] == 0)\n    assert(size < 2 or (size % 2 == 0))\n\n    if size < 2:\n        yield p[:]\n    else:\n        rotation_swaps = [None] * n\n        for i in range(1, n):\n            r = list(range(n))\n            for v in range(1, i + 1):\n                r[:v], r[v] = r[1:v + 1], r[0]\n            swaps = []\n            for dst, src in enumerate(r):\n                if dst != src:\n                    swaps.append((dst, src))\n            rotation_swaps[i] = tuple(swaps)\n\n        while True:\n            yield p[:]\n            p[0], p[1] = p[1], p[0]\n            yield p[:]\n            i = 2\n            while count[i] >= i:\n                count[i] = 0\n                i += 1\n            else:\n                count[i] += 1\n                t = p[:]\n                for dst, src in rotation_swaps[i]:\n                    p[dst] = t[src]\n\n\ndef alternating_flips_generator(n, start, size):\n    maximum_flips = 0\n    alternating_factor = 1\n    for permutation in islice(permutations(n, start, size), size):\n        first = permutation[0]\n        if first:\n            flips_count = 1\n            while True:\n                permutation[:first + 1] = permutation[first::-1]\n                first = permutation[0]\n                if not first:\n                    break\n                flips_count += 1\n            if maximum_flips < flips_count:\n                maximum_flips = flips_count\n            yield flips_count * alternating_factor\n        else:\n            yield 0\n        alternating_factor = -alternating_factor\n    yield maximum_flips\n\n\ndef task(n, start, size):\n    alternating_flips = alternating_flips_generator(n, start, size)\n    return sum(islice(alternating_flips, size)), next(alternating_flips)",
+  "chain": [
+    "EarlyExitOptimization"
+  ],
+  "improvement_pct": 3.434,
+  "baseline_mj": 8054.70045,
+  "baseline_std_mj": 260.568731,
+  "best_mj": 7778.083278,
+  "co2_search_ug": 232885.74,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 8,
+  "ei_top_k": 2,
+  "wall_s": 1142.05,
+  "energy_backend": "rapl",
+  "fallback_escapes_used": 0,
+  "llm_retries": 4,
+  "isolation_successes": 25,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 8,
+    "n_f2_f3_pairs": 8,
+    "f1_f3_pearson": 0.3546139053715418,
+    "f2_f3_pearson": 0.6905011316171978,
+    "f1_f3_mae": 0.044277221538387465,
+    "f2_f3_mae": 0.029361586159296585,
+    "f1_f3_bias": 0.008534227210150305,
+    "f2_f3_bias": 0.010407112656808923,
+    "effective_p_abandon_f1": 0.06489431403592022,
+    "effective_p_abandon_f2": 0.375
+  },
+  "operator_stats": {
+    "MultipleAssignmentFusion": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    },
+    "LoopGlobalToLocalHoisting": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    },
+    "VectorizationDelegate[loop\u2192numpy]": {
+      "attempts": 1,
+      "confirmations": 0,
+      "rate": 0.0
+    },
+    "MathToBitwiseLLM": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    },
+    "ManualReductionToBuiltinsLLM": {
+      "attempts": 2,
+      "confirmations": 0,
+      "rate": 0.0
+    },
+    "EarlyExitOptimization": {
+      "attempts": 2,
+      "confirmations": 1,
+      "rate": 0.5
+    }
+  }
+}
