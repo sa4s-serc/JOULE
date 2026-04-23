@@ -97,6 +97,7 @@ In scope:
 - top-level functions, async functions, and class methods
 - explicit and heuristic workload resolution
 - iterative Pareto-parent search with bounded depth
+- configurable multi-metric surrogate models (`hist_gbdt`, `gp`, `local_kernel`)
 - local persistence and artifact-based inspection
 - review-first dependency policy during apply
 

@@ -6,7 +6,7 @@ from typing import Any
 
 
 CANDIDATE_METADATA_SCHEMA_VERSION = 1
-SURROGATE_DECISION_SCHEMA_VERSION = 1
+SURROGATE_DECISION_SCHEMA_VERSION = 2
 SEARCH_EVENT_DETAIL_SCHEMA_VERSION = 1
 
 
@@ -19,8 +19,12 @@ class SurrogateDecision:
     novelty: float = 0.0
     acquisition_score: float = 0.0
     expected_improvement: float = 0.0
-    model_mode: str = ""
+    model_kind: str = ""
     acquisition: str = ""
+    objective_kind: str = ""
+    objective_weights: list[float] = field(default_factory=list)
+    predicted_metrics: dict[str, float] = field(default_factory=dict)
+    metric_uncertainties: dict[str, float] = field(default_factory=dict)
     schema_version: int = SURROGATE_DECISION_SCHEMA_VERSION
 
     def to_record(self) -> dict[str, Any]:
@@ -33,14 +37,21 @@ class SurrogateDecision:
             "novelty": float(self.novelty),
             "acquisition_score": float(self.acquisition_score),
             "expected_improvement": float(self.expected_improvement),
-            "model_mode": self.model_mode,
+            "model_kind": self.model_kind,
             "acquisition": self.acquisition,
+            "objective_kind": self.objective_kind,
+            "objective_weights": [float(value) for value in self.objective_weights],
+            "predicted_metrics": {str(key): float(value) for key, value in self.predicted_metrics.items()},
+            "metric_uncertainties": {str(key): float(value) for key, value in self.metric_uncertainties.items()},
         }
 
     @classmethod
     def from_record(cls, payload: Mapping[str, Any] | None) -> "SurrogateDecision":
         if payload is None:
             return cls()
+        objective_weights_payload = payload.get("objective_weights", [])
+        predicted_metrics_payload = payload.get("predicted_metrics", {})
+        metric_uncertainties_payload = payload.get("metric_uncertainties", {})
         return cls(
             decision=str(payload.get("decision", "")),
             reason=str(payload.get("reason", "")),
@@ -49,8 +60,28 @@ class SurrogateDecision:
             novelty=float(payload.get("novelty", 0.0)),
             acquisition_score=float(payload.get("acquisition_score", 0.0)),
             expected_improvement=float(payload.get("expected_improvement", 0.0)),
-            model_mode=str(payload.get("model_mode", "")),
+            model_kind=str(payload.get("model_kind", "")),
             acquisition=str(payload.get("acquisition", "")),
+            objective_kind=str(payload.get("objective_kind", "")),
+            objective_weights=[float(value) for value in objective_weights_payload]
+            if isinstance(objective_weights_payload, list)
+            else [],
+            predicted_metrics=(
+                {
+                    str(key): float(value)
+                    for key, value in predicted_metrics_payload.items()
+                }
+                if isinstance(predicted_metrics_payload, Mapping)
+                else {}
+            ),
+            metric_uncertainties=(
+                {
+                    str(key): float(value)
+                    for key, value in metric_uncertainties_payload.items()
+                }
+                if isinstance(metric_uncertainties_payload, Mapping)
+                else {}
+            ),
             schema_version=int(payload.get("schema_version", SURROGATE_DECISION_SCHEMA_VERSION)),
         )
 

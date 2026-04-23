@@ -11,7 +11,7 @@ from joule.evaluators.oracle import PerformanceOracle
 from joule.integrations.git import file_sha256, source_sha256
 from joule.models import RunRecord, RunType, TargetSpec, WorkloadBundle
 from joule.orchestrator.mfbo import OptimizationOrchestrator
-from joule.surrogate.gp import GaussianProcessSurrogate
+from joule.surrogate import ObjectiveSurrogate
 from joule.transformers.registry import OperatorRegistry
 from joule.utils.artifacts import run_directory, write_lockfile
 from joule.utils.db import JouleDB
@@ -28,7 +28,7 @@ class JouleContainer:
     orchestrator: OptimizationOrchestrator
     correctness: CorrectnessEngine
     registry: OperatorRegistry
-    surrogate: GaussianProcessSurrogate
+    surrogate: ObjectiveSurrogate
 
 
 @dataclass(slots=True)

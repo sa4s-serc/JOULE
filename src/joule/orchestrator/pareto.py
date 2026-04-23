@@ -82,8 +82,10 @@ class ParetoFront:
                 item.candidate_id,
             ),
         )
-        self._expansions[selected.candidate_id] = self._expansions.get(selected.candidate_id, 0) + 1
         return selected.candidate_id
+
+    def record_expansion(self, candidate_id: str) -> None:
+        self._expansions[candidate_id] = self._expansions.get(candidate_id, 0) + 1
 
     def mark_exhausted(self, candidate_id: str) -> None:
         for item in self._points:

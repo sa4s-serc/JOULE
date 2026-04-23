@@ -109,7 +109,8 @@ Primary files:
 - [src/joule/orchestrator/mfbo.py](../src/joule/orchestrator/mfbo.py)
 - [src/joule/orchestrator/internal/mfbo_flow.py](../src/joule/orchestrator/internal/mfbo_flow.py)
 - [src/joule/orchestrator/pareto.py](../src/joule/orchestrator/pareto.py)
-- [src/joule/surrogate/gp.py](../src/joule/surrogate/gp.py)
+- [src/joule/surrogate/facade.py](../src/joule/surrogate/facade.py)
+- [src/joule/surrogate/registry.py](../src/joule/surrogate/registry.py)
 - [src/joule/transformers/registry.py](../src/joule/transformers/registry.py)
 
 Responsibilities:

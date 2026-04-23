@@ -34,11 +34,11 @@ from joule.orchestrator.internal.mfbo_flow import (
     generated_candidate_detail,
 )
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
-from joule.surrogate.gp import GaussianProcessSurrogate
+from joule.surrogate import ObjectiveSurrogate, SurrogateMetricTargets, SurrogateObservation, SurrogateQuery
 from joule.transformers.registry import OperatorRegistry
 from joule.utils.analysis import candidate_source_hash
 from joule.utils.db import JouleDB
-from joule.utils.metrics import improvement_ratio, scalar_score
+from joule.utils.metrics import improvement_ratio, objective_score
 from joule.utils.terminal import TerminalReporter
 
 
@@ -59,7 +59,7 @@ class OptimizationOrchestrator:
         oracle: PerformanceOracle,
         correctness: CorrectnessEngine,
         registry: OperatorRegistry,
-        surrogate: GaussianProcessSurrogate,
+        surrogate: ObjectiveSurrogate,
         reporter: TerminalReporter | None = None,
     ) -> None:
         self.settings = settings
@@ -87,12 +87,9 @@ class OptimizationOrchestrator:
             kill_switches=settings.operator_kill_switches,
         )
         registry.load_stats(db.get_operator_stats())
-        surrogate = GaussianProcessSurrogate(
-            acquisition=settings.surrogate_acquisition,
-            gp_noise=settings.surrogate_gp_noise,
-            gp_length_scale=settings.surrogate_gp_length_scale,
-            gp_nu=settings.surrogate_gp_nu,
-            gp_ucb_beta=settings.surrogate_gp_ucb_beta,
+        surrogate = ObjectiveSurrogate(
+            settings=settings,
+            weights=settings.pareto_weights,
         )
         return cls(
             settings=settings,
@@ -191,12 +188,12 @@ class OptimizationOrchestrator:
             )
             escape_used = False
 
-        baseline_score = scalar_score(baseline.aggregate)
+        baseline_score = self._objective_score(baseline.aggregate)
         self._record_surrogate_observation(
             run_id=run_id,
             target_key=target_key,
             source=target.source,
-            score=baseline_score,
+            targets=SurrogateMetricTargets.from_aggregate(baseline.aggregate),
         )
         accepted_candidate_ids = {candidate_id for candidate_id in accepted_evaluations}
         if self.reporter:
@@ -218,6 +215,7 @@ class OptimizationOrchestrator:
                     detail={"reason": "no_active_frontier"},
                 )
                 break
+            pareto.record_expansion(parent_id)
             parent = parent_snapshots[parent_id]
             parent_context = build_parent_context(parent, phase=phase, analysis=analysis)
             candidate_target = self._target_with_source(target, parent.source, parent_id=parent_id)
@@ -443,19 +441,22 @@ class OptimizationOrchestrator:
                     )
                 seen_sources[source_hash] = candidate_id
                 screening = self.surrogate.screen_candidate(
-                    source=proposal.candidate_source,
+                    query=SurrogateQuery(
+                        source=proposal.candidate_source,
+                        feature_hints=dict(proposal.feature_hints),
+                    ),
                     best_score=baseline_score,
                     phase=phase,
                     min_novelty=self.settings.search_min_novelty,
-                    min_training_points=self.settings.surrogate_min_training_points,
-                    feature_hints=proposal.feature_hints,
+                    min_training_points=self.settings.surrogate.min_training_points,
                     context=parent_context,
                 )
-                if screening["decision"] == "reject":
+                screening_record = screening.to_record()
+                if screening.decision == "reject":
                     if self.reporter:
                         self.reporter.verbose(
                             "progress",
-                            f"Candidate {candidate_id} screened out ({screening['reason']})",
+                            f"Candidate {candidate_id} screened out ({screening.reason})",
                         )
                     self._record_screened_candidate(
                         run_id,
@@ -464,10 +465,10 @@ class OptimizationOrchestrator:
                         parent_id=parent_id,
                         generation_depth=next_depth,
                         source_hash=source_hash,
-                        reason=str(screening["reason"]),
+                        reason=str(screening.reason),
                         status="rejected",
                         stage="surrogate",
-                        screening=screening,
+                        screening=screening_record,
                     )
                     self._record_event(
                         run_id,
@@ -475,7 +476,7 @@ class OptimizationOrchestrator:
                         stage="surrogate",
                         candidate_id=candidate_id,
                         operator_name=proposal.operator_name,
-                        detail={"reason": screening["reason"], "acquisition_score": screening["acquisition_score"]},
+                        detail={"reason": screening.reason, "acquisition_score": screening.acquisition_score},
                     )
                     self._update_operator(
                         proposal,
@@ -483,9 +484,9 @@ class OptimizationOrchestrator:
                         reward=0.0,
                         phase=phase,
                         parent_generation=parent.generation_depth,
-                        duplicate=str(screening["reason"]) == "low_novelty",
+                        duplicate=str(screening.reason) == "low_novelty",
                     )
-                    parent.rejection_history.append(str(screening["reason"]))
+                    parent.rejection_history.append(str(screening.reason))
                     state.no_frontier_gain += 1
                     self._save_checkpoint(
                         run_id=run_id,
@@ -519,7 +520,7 @@ class OptimizationOrchestrator:
                         reasons=reasons,
                         phase=phase,
                         source_hash=source_hash,
-                        screening=screening,
+                        screening=screening_record,
                     )
                     self._record_candidate(run_id, evaluation, status="rejected")
                     self._record_event(
@@ -553,10 +554,10 @@ class OptimizationOrchestrator:
                         checkpoint_path=checkpoint_path,
                     )
                     continue
-                fidelities = self._fidelities_for_decision(str(screening["decision"]), phase)
+                fidelities = self._fidelities_for_decision(str(screening.decision), phase)
                 accepted = False
                 candidate_report = None
-                candidate_score = float(screening["predicted_score"])
+                candidate_score = float(screening.predicted_score)
                 dominance_summary: dict[str, Any] = {}
                 measurement_cost_s = 0.0
                 rejection_reason = ""
@@ -577,12 +578,12 @@ class OptimizationOrchestrator:
                     self.db.record_measurement(report, created_at=datetime.now(UTC).isoformat())
                     candidate_report = report
                     last_stage = fidelity.value
-                    candidate_score = scalar_score(report.aggregate)
+                    candidate_score = self._objective_score(report.aggregate)
                     self._record_surrogate_observation(
                         run_id=run_id,
                         target_key=target_key,
                         source=proposal.candidate_source,
-                        score=candidate_score,
+                        targets=SurrogateMetricTargets.from_aggregate(report.aggregate),
                         feature_hints=proposal.feature_hints,
                         context=parent_context,
                     )
@@ -597,7 +598,7 @@ class OptimizationOrchestrator:
                             "duration_s": duration,
                             "score": candidate_score,
                             "dominance": dominance_summary,
-                            "acquisition_score": screening["acquisition_score"],
+                            "acquisition_score": screening.acquisition_score,
                         },
                     )
                     if fidelity is not Fidelity.F3:
@@ -605,7 +606,7 @@ class OptimizationOrchestrator:
                             baseline.aggregate,
                             report.aggregate,
                             dominance_summary=dominance_summary,
-                            uncertainty=float(screening["uncertainty"]),
+                            uncertainty=float(screening.uncertainty),
                             phase=phase,
                         )
                         if not can_promote:
@@ -699,7 +700,7 @@ class OptimizationOrchestrator:
                     frontier_state=frontier_state,
                     accepted=accepted,
                     score=candidate_score,
-                    acquisition_score=float(screening["acquisition_score"]),
+                    acquisition_score=float(screening.acquisition_score),
                     dominance_summary=dominance_summary,
                     report=candidate_report,
                     metadata=build_candidate_metadata(
@@ -707,7 +708,7 @@ class OptimizationOrchestrator:
                         candidate_report=candidate_report,
                         stage=last_stage,
                         phase=phase,
-                        screening=screening,
+                        screening=screening_record,
                         measurement_cost_s=measurement_cost_s,
                         accepted=accepted,
                         rejection_reason=rejection_reason,
@@ -804,6 +805,7 @@ class OptimizationOrchestrator:
             for point in pareto.points()
         ]
         metadata = {
+            "schema_version": 2,
             "baseline_report": baseline.to_record(),
             "state": {
                 "measured": state.measured,
@@ -855,6 +857,10 @@ class OptimizationOrchestrator:
         if checkpoint is None:
             return None
         metadata = checkpoint.get("metadata", {}) if isinstance(checkpoint, dict) else {}
+        if not isinstance(metadata, dict) or int(metadata.get("schema_version", 0)) < 2:
+            raise ValueError(
+                "Detected incompatible checkpoint schema. Remove .joule/ and rerun to initialize the clean multi-surrogate state."
+            )
         baseline_payload = metadata.get("baseline_report") if isinstance(metadata, dict) else None
         if not isinstance(baseline_payload, dict):
             return None
@@ -1085,8 +1091,8 @@ class OptimizationOrchestrator:
             SearchPhase.EXPLOITATION: 0.7,
             SearchPhase.CONFIRMATION: 0.4,
         }[phase]
-        optimistic_score = scalar_score(candidate) - (uncertainty * uncertainty_factor)
-        if optimistic_score <= scalar_score(baseline):
+        optimistic_score = self._objective_score(candidate) - (uncertainty * uncertainty_factor)
+        if optimistic_score <= self._objective_score(baseline):
             return True, ""
         return False, "dominated_low_uncertainty"
 
@@ -1315,31 +1321,51 @@ class OptimizationOrchestrator:
         run_id: str,
         target_key: str,
         source: str,
-        score: float,
+        targets: SurrogateMetricTargets,
         feature_hints: dict[str, float] | None = None,
         context: SearchContext | None = None,
     ) -> None:
         hints = self._surrogate_hints(source=source, feature_hints=feature_hints, context=context)
-        self.surrogate.record(source, score, feature_hints=hints, context=context)
+        self.surrogate.record(
+            SurrogateObservation(
+                source=source,
+                targets=targets,
+                feature_hints=hints,
+                feature_schema_version=self.surrogate.feature_schema_version,
+            ),
+            context=context,
+        )
         self.db.save_surrogate_observation(
             run_id=run_id,
             target_key=target_key,
             source_code=source,
-            score=score,
+            targets=targets.to_record(),
             feature_hints=hints,
+            feature_schema_version=self.surrogate.feature_schema_version,
         )
 
     def _warm_start_surrogate(self, *, target_key: str, fresh_start: bool) -> None:
-        limit = max(0, self.settings.surrogate_warm_start_limit)
-        if limit == 0 or fresh_start or not self.settings.surrogate_reuse_observations:
+        limit = max(0, self.settings.surrogate.warm_start_limit)
+        if limit == 0 or fresh_start or not self.settings.surrogate.reuse_observations:
             return
         observations = self.db.get_surrogate_observations(limit=limit, target_key=target_key)
         for item in reversed(observations):
+            if int(item.get("feature_schema_version", 0)) != self.surrogate.feature_schema_version:
+                continue
+            targets_payload = item.get("targets", {})
+            if not isinstance(targets_payload, dict):
+                continue
             self.surrogate.record(
-                str(item.get("source", "")),
-                float(item.get("score", 0.0)),
-                feature_hints=dict(item.get("feature_hints", {})),
+                SurrogateObservation(
+                    source=str(item.get("source", "")),
+                    targets=SurrogateMetricTargets.from_mapping(targets_payload),
+                    feature_hints=dict(item.get("feature_hints", {})),
+                    feature_schema_version=int(item.get("feature_schema_version", 0)),
+                )
             )
+
+    def _objective_score(self, metrics: AggregateMetrics) -> float:
+        return objective_score(metrics, self.settings.pareto_weights)
 
     def _target_with_source(self, target: TargetSpec, source: str, *, parent_id: str) -> TargetSpec:
         metadata = dict(target.metadata)

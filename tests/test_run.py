@@ -288,11 +288,11 @@ def test_run_analysis_best_candidate_id_matches_summary_when_scalar_regresses(sa
 
     calls = {"count": 0}
 
-    def _forced_scalar_score(_aggregate):
+    def _forced_objective_score(_aggregate, _weights):
         calls["count"] += 1
         return 1.0 if calls["count"] == 1 else 2.0
 
-    monkeypatch.setattr(run_command, "scalar_score", _forced_scalar_score)
+    monkeypatch.setattr(run_command, "objective_score", _forced_objective_score)
 
     target_file = sample_project / "sample_pkg" / "algos.py"
     result = runner.invoke(

@@ -46,12 +46,12 @@ def _validate_non_negative(value: float | None, *, option_name: str) -> None:
 def _bootstrap(path: Path, *, verbose: bool = False, quiet: bool = False):
     try:
         settings = load_settings(path)
+        db = JouleDB(settings.db_path)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     ensure_artifacts(settings)
     seed_random(settings.seed)
     reporter = TerminalReporter(console, _resolve_verbosity(settings, verbose=verbose, quiet=quiet))
-    db = JouleDB(settings.db_path)
     return settings, db, reporter
 
 

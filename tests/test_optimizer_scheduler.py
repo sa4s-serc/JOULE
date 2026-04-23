@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from joule.config import JouleSettings
+from joule.config import GPSurrogateSettings, JouleSettings, SurrogateSettings
 from joule.metadata import parse_candidate_metadata
 from joule.models import (
     AggregateMetrics,
@@ -25,7 +26,7 @@ from joule.evaluators.oracle import PerformanceOracle
 from joule.orchestrator.mfbo import OptimizationOrchestrator, _ParentSnapshot
 from joule.orchestrator.internal.mfbo_flow import OptimizationState
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
-from joule.surrogate.gp import GaussianProcessSurrogate
+from joule.surrogate import ObjectiveSurrogate, SurrogateMetricTargets, SurrogateObservation, SurrogateQuery, SurrogateScreeningDecision
 from joule.utils.analysis import candidate_source_hash
 from joule.utils.db import JouleDB
 
@@ -214,11 +215,41 @@ def _target_and_bundle(project_root: Path) -> tuple[TargetSpec, WorkloadBundle]:
     return target, bundle
 
 
+def _scalar_targets(value: float) -> SurrogateMetricTargets:
+    return SurrogateMetricTargets(
+        energy=float(value),
+        latency=float(value),
+        memory=float(value) * 1024 * 1024,
+    )
+
+
+def _make_surrogate(
+    project_root: Path,
+    *,
+    model: str = "gp",
+    fallback_model: str = "local_kernel",
+    acquisition: str = "ei",
+    max_observations: int = 100,
+    gp: GPSurrogateSettings | None = None,
+) -> ObjectiveSurrogate:
+    settings = JouleSettings(
+        project_root=project_root,
+        surrogate=SurrogateSettings(
+            model=model,
+            fallback_model=fallback_model,
+            acquisition=acquisition,
+            max_observations=max_observations,
+            gp=gp or GPSurrogateSettings(),
+        ),
+    )
+    return ObjectiveSurrogate(settings=settings, weights=settings.pareto_weights)
+
+
 def test_optimizer_expands_non_baseline_parent_and_persists_lineage(tmp_path: Path):
     settings = JouleSettings(
         project_root=tmp_path,
         search_min_novelty=0.0,
-        surrogate_min_training_points=1,
+        surrogate=SurrogateSettings(min_training_points=1),
         search_branching_factor=2,
         search_max_generations=4,
         search_convergence_patience=8,
@@ -242,7 +273,7 @@ def test_optimizer_expands_non_baseline_parent_and_persists_lineage(tmp_path: Pa
         oracle=cast(Any, _FakeOracle(source_metrics)),
         correctness=cast(Any, _AlwaysCorrect()),
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
-        surrogate=GaussianProcessSurrogate(),
+        surrogate=_make_surrogate(tmp_path),
     )
 
     _baseline, _pareto, best = orchestrator.optimize("run-chain", target, bundle, budget=2)
@@ -288,7 +319,7 @@ def test_checkpoint_restore_recovers_pareto_expansion_counts(tmp_path: Path):
         oracle=cast(Any, _FakeOracle({target.source: (1.0, 1.0, 1.0)})),
         correctness=cast(Any, _AlwaysCorrect()),
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
-        surrogate=GaussianProcessSurrogate(),
+        surrogate=_make_surrogate(tmp_path),
     )
 
     baseline = AggregateMetrics("all", 1, 1.0, 10.0, 10.0, 1_000.0, 10.0, 0.0, 0.0, 0.0, 0.0)
@@ -304,6 +335,7 @@ def test_checkpoint_restore_recovers_pareto_expansion_counts(tmp_path: Path):
     pareto = ParetoFront(weights=(0.5, 0.3, 0.2))
     pareto.add(ParetoPoint(candidate_id="baseline", metrics=baseline))
     assert pareto.sample_active_parent(max_generation=4) == "baseline"
+    pareto.record_expansion("baseline")
     assert pareto.expansion_count("baseline") == 1
 
     state = OptimizationState(total_budget=1, max_parent_expansions=2, measured=1, no_frontier_gain=0)
@@ -349,20 +381,23 @@ def test_pareto_parent_sampling_can_prefer_deeper_points():
 
 
 def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
-    surrogate = GaussianProcessSurrogate()
+    surrogate = _make_surrogate(tmp_path)
     source = "def f(x):\n    return x + 1\n"
-    surrogate.record(source, 1.2)
+    surrogate.record(SurrogateObservation(source=source, targets=_scalar_targets(1.2)))
     screened = surrogate.screen_candidate(
-        source=source,
+        query=SurrogateQuery(source=source),
         best_score=1.0,
         phase=SearchPhase.EXPLORATION,
         min_novelty=0.2,
         min_training_points=1,
     )
-    assert screened["decision"] == "reject"
-    assert screened["reason"] == "low_novelty"
+    assert screened.decision == "reject"
+    assert screened.reason == "low_novelty"
 
-    settings = JouleSettings(project_root=tmp_path, surrogate_warm_start_limit=5)
+    settings = JouleSettings(
+        project_root=tmp_path,
+        surrogate=SurrogateSettings(warm_start_limit=5),
+    )
     target, _bundle = _target_and_bundle(tmp_path)
     target_key = f"{target.module}:{target.qualname}"
     db = JouleDB(settings.db_path)
@@ -370,7 +405,8 @@ def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
         run_id="hist-run",
         target_key=target_key,
         source_code=source,
-        score=2.5,
+        targets=_scalar_targets(2.5).to_record(),
+        feature_schema_version=1,
     )
     orchestrator = OptimizationOrchestrator(
         settings=settings,
@@ -378,11 +414,11 @@ def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
         oracle=cast(Any, _FakeOracle({source: (1.0, 1.0, 1.0)})),
         correctness=cast(Any, CorrectnessEngine()),
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
-        surrogate=GaussianProcessSurrogate(),
+        surrogate=_make_surrogate(tmp_path),
     )
     orchestrator._warm_start_surrogate(target_key=target_key, fresh_start=False)
-    mean, _uncertainty = orchestrator.surrogate.predict(source)
-    assert mean == 2.5
+    prediction = orchestrator.surrogate.predict(SurrogateQuery(source=source))
+    assert prediction.predicted_score == pytest.approx(2.5)
 
     fresh_orchestrator = OptimizationOrchestrator(
         settings=settings,
@@ -390,49 +426,67 @@ def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
         oracle=cast(Any, _FakeOracle({source: (1.0, 1.0, 1.0)})),
         correctness=cast(Any, CorrectnessEngine()),
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
-        surrogate=GaussianProcessSurrogate(),
+        surrogate=_make_surrogate(tmp_path),
     )
     fresh_orchestrator._warm_start_surrogate(target_key=target_key, fresh_start=True)
-    fresh_mean, _fresh_uncertainty = fresh_orchestrator.surrogate.predict(source)
-    assert fresh_mean == 0.0
+    fresh_prediction = fresh_orchestrator.surrogate.predict(SurrogateQuery(source=source))
+    assert fresh_prediction.predicted_score == 0.0
 
 
 def test_surrogate_predicts_and_exposes_acquisition_metadata():
-    surrogate = GaussianProcessSurrogate(acquisition="ei")
+    surrogate = _make_surrogate(Path("."), acquisition="ei")
     training = [
         ("def f(x):\n    return x + 1\n", 1.2),
         ("def f(x):\n    return x + 2\n", 1.1),
         ("def f(x):\n    return (x + 3)\n", 1.0),
     ]
     for source, score in training:
-        surrogate.record(source, score)
+        surrogate.record(SurrogateObservation(source=source, targets=_scalar_targets(score)))
 
     query = "def f(x):\n    y = x + 1\n    return y\n"
-    mean, uncertainty = surrogate.predict(query)
-    assert math.isfinite(mean)
-    assert math.isfinite(uncertainty)
-    assert uncertainty >= 0.0
+    prediction = surrogate.predict(SurrogateQuery(source=query))
+    assert math.isfinite(prediction.predicted_score)
+    assert math.isfinite(prediction.uncertainty)
+    assert prediction.uncertainty >= 0.0
 
     screened = surrogate.screen_candidate(
-        source=query,
+        query=SurrogateQuery(source=query),
         best_score=0.9,
         phase=SearchPhase.EXPLOITATION,
         min_novelty=0.0,
         min_training_points=3,
     )
-    assert screened["model_mode"] == "gp"
-    assert screened["acquisition"] == "ei"
-    assert math.isfinite(float(screened["acquisition_score"]))
+    assert screened.model_kind == "gp"
+    assert screened.acquisition == "ei"
+    assert math.isfinite(float(screened.acquisition_score))
+
+
+def test_surrogate_caps_observations_and_retains_recent_data():
+    surrogate = _make_surrogate(Path("."), max_observations=3)
+    sources = [f"def f(x):\n    return x + {value}\n" for value in range(5)]
+    for index, source in enumerate(sources):
+        surrogate.record(SurrogateObservation(source=source, targets=_scalar_targets(float(index))))
+
+    assert len(surrogate._features) == 3
+    assert surrogate._extractor.source_hash(sources[0]) not in surrogate._source_hash_to_index
+    assert surrogate._extractor.source_hash(sources[-1]) in surrogate._source_hash_to_index
 
 
 def test_orchestrator_create_uses_configured_surrogate_settings(tmp_path: Path):
     settings = JouleSettings(
         project_root=tmp_path,
-        surrogate_acquisition="ucb",
-        surrogate_gp_noise=1e-5,
-        surrogate_gp_length_scale=2.0,
-        surrogate_gp_nu=2.5,
-        surrogate_gp_ucb_beta=1.8,
+        surrogate=SurrogateSettings(
+            model="gp",
+            fallback_model="local_kernel",
+            acquisition="ucb",
+            ucb_beta=1.8,
+            max_observations=77,
+            gp=GPSurrogateSettings(
+                noise=1e-5,
+                length_scale=2.0,
+                nu=2.5,
+            ),
+        ),
     )
     target, _bundle = _target_and_bundle(tmp_path)
     db = JouleDB(settings.db_path)
@@ -440,15 +494,42 @@ def test_orchestrator_create_uses_configured_surrogate_settings(tmp_path: Path):
 
     orchestrator = OptimizationOrchestrator.create(settings, db, oracle)
 
-    assert orchestrator.surrogate.mode == "gp"
+    assert orchestrator.surrogate.model_kind == "gp"
     assert orchestrator.surrogate.acquisition == "ucb"
+    assert orchestrator.surrogate._max_observations == 77
+
+
+def test_orchestrator_create_defaults_to_hist_gbdt(tmp_path: Path):
+    settings = JouleSettings(project_root=tmp_path)
+    target, _bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+    oracle = cast(Any, _FakeOracle({target.source: (1.0, 1.0, 1.0)}))
+
+    orchestrator = OptimizationOrchestrator.create(settings, db, oracle)
+
+    assert orchestrator.surrogate.model_kind == "hist_gbdt"
+    assert orchestrator.surrogate.fallback_model_kind == "local_kernel"
+
+
+def test_orchestrator_create_can_use_local_kernel_surrogate(tmp_path: Path):
+    settings = JouleSettings(
+        project_root=tmp_path,
+        surrogate=SurrogateSettings(model="local_kernel", fallback_model="local_kernel"),
+    )
+    target, _bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+    oracle = cast(Any, _FakeOracle({target.source: (1.0, 1.0, 1.0)}))
+
+    orchestrator = OptimizationOrchestrator.create(settings, db, oracle)
+
+    assert orchestrator.surrogate.model_kind == "local_kernel"
 
 
 def test_operator_composition_generates_chained_metadata(tmp_path: Path):
     settings = JouleSettings(
         project_root=tmp_path,
         search_min_novelty=0.0,
-        surrogate_min_training_points=1,
+        surrogate=SurrogateSettings(min_training_points=1),
         search_branching_factor=2,
         search_composition_enabled=True,
         search_composition_width=1,
@@ -473,7 +554,7 @@ def test_operator_composition_generates_chained_metadata(tmp_path: Path):
         oracle=cast(Any, _FakeOracle(source_metrics)),
         correctness=cast(Any, _AlwaysCorrect()),
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
-        surrogate=GaussianProcessSurrogate(),
+        surrogate=_make_surrogate(tmp_path),
     )
 
     orchestrator.optimize("run-compose", target, bundle, budget=2)
@@ -642,7 +723,7 @@ def test_candidate_metadata_is_versioned_and_typed(tmp_path: Path):
     settings = JouleSettings(
         project_root=tmp_path,
         search_min_novelty=0.0,
-        surrogate_min_training_points=1,
+        surrogate=SurrogateSettings(min_training_points=1),
         search_branching_factor=1,
         search_max_generations=2,
     )
@@ -658,7 +739,7 @@ def test_candidate_metadata_is_versioned_and_typed(tmp_path: Path):
         oracle=cast(Any, _FakeOracle(source_metrics)),
         correctness=cast(Any, _AlwaysCorrect()),
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
-        surrogate=GaussianProcessSurrogate(),
+        surrogate=_make_surrogate(tmp_path),
     )
 
     orchestrator.optimize("run-metadata", target, bundle, budget=1)
@@ -678,7 +759,7 @@ def test_partial_fidelity_rejections_record_explicit_reason(tmp_path: Path):
     settings = JouleSettings(
         project_root=tmp_path,
         search_min_novelty=0.0,
-        surrogate_min_training_points=1,
+        surrogate=SurrogateSettings(min_training_points=1),
         search_branching_factor=1,
         search_max_generations=2,
         search_exploration_fraction=1.0,
@@ -697,21 +778,25 @@ def test_partial_fidelity_rejections_record_explicit_reason(tmp_path: Path):
         oracle=cast(Any, _FakeOracle(source_metrics)),
         correctness=cast(Any, _AlwaysCorrect()),
         registry=cast(Any, _SingleRegistry(_ChainOperator())),
-        surrogate=GaussianProcessSurrogate(),
+        surrogate=_make_surrogate(tmp_path),
     )
 
-    cast(Any, orchestrator.surrogate).screen_candidate = lambda **_kwargs: {
-        "decision": "measure_partial",
-        "reason": "",
-        "predicted_score": 1.0,
-        "uncertainty": 0.0,
-        "novelty": 1.0,
-        "acquisition_score": 0.0,
-        "expected_improvement": 0.0,
-        "model_mode": "forced",
-        "acquisition": "ei",
-        "schema_version": 1,
-    }
+    cast(Any, orchestrator.surrogate).screen_candidate = lambda **_kwargs: SurrogateScreeningDecision(
+        decision="measure_partial",
+        reason="",
+        predicted_score=1.0,
+        uncertainty=0.0,
+        novelty=1.0,
+        acquisition_score=0.0,
+        expected_improvement=0.0,
+        model_kind="forced",
+        acquisition="ei",
+        objective_kind="multi_metric",
+        objective_weights=(0.5, 0.3, 0.2),
+        predicted_metrics=_scalar_targets(1.0),
+        metric_uncertainties=_scalar_targets(0.0),
+        phase=SearchPhase.EXPLORATION,
+    )
 
     orchestrator.optimize("run-partial-fidelity", target, bundle, budget=1)
 
@@ -728,6 +813,52 @@ def test_partial_fidelity_rejections_record_explicit_reason(tmp_path: Path):
     ]
     assert rejected_f1
     assert rejected_f1[-1]["detail"].get("reason") == "partial_fidelity_f1"
+
+
+def test_db_rejects_legacy_schema_versions(tmp_path: Path):
+    db_path = tmp_path / "legacy.db"
+    db = JouleDB(db_path)
+    with db.connect() as conn:
+        conn.execute("DELETE FROM schema_version")
+        conn.execute(
+            "INSERT INTO schema_version(version, applied_at) VALUES(?, ?)",
+            (4, "2026-01-01T00:00:00+00:00"),
+        )
+    with pytest.raises(ValueError, match="incompatible JOULE database schema version"):
+        JouleDB(db_path)
+
+
+def test_restore_checkpoint_rejects_legacy_checkpoint_schema(tmp_path: Path):
+    settings = JouleSettings(project_root=tmp_path)
+    target, _bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle({target.source: (1.0, 1.0, 1.0)})),
+        correctness=cast(Any, _AlwaysCorrect()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=_make_surrogate(tmp_path),
+    )
+    baseline = AggregateMetrics("all", 1, 1.0, 10.0, 10.0, 1_000.0, 10.0, 0.0, 0.0, 0.0, 0.0)
+    report = MeasurementReport(
+        run_id="legacy-checkpoint",
+        candidate_id=None,
+        fidelity=Fidelity.F3,
+        aggregate=baseline,
+        per_workload=[],
+        samples=[],
+        environment={"backend": "fake"},
+    )
+    db.save_checkpoint(
+        run_id="legacy-checkpoint",
+        generation=1,
+        candidate_id="baseline",
+        pareto_front_json="[]",
+        metadata_json=json.dumps({"schema_version": 1, "baseline_report": report.to_record()}),
+    )
+    with pytest.raises(ValueError, match="incompatible checkpoint schema"):
+        orchestrator._restore_checkpoint(run_id="legacy-checkpoint")
 
 
 def test_energy_backend_protocol_requires_parallel_capability_flag():

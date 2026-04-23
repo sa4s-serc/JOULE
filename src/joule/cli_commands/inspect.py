@@ -72,15 +72,20 @@ def run_inspect(
         {
             "source_hash": candidate_source_hash(str(item.get("source", ""))),
             "source_length": len(str(item.get("source", ""))),
-            "score": float(item.get("score", 0.0)),
+            "targets": dict(item.get("targets", {})),
             "feature_hints": dict(item.get("feature_hints", {})),
+            "feature_schema_version": int(item.get("feature_schema_version", 0)),
         }
         for item in surrogate_history
     ]
     payload["surrogate_learning"] = {
         "target_key": target_key,
-        "reuse_enabled": settings.surrogate_reuse_observations,
-        "warm_start_limit": settings.surrogate_warm_start_limit,
+        "model": settings.surrogate.model,
+        "fallback_model": settings.surrogate.fallback_model,
+        "objective": settings.surrogate.objective,
+        "objective_weights": list(settings.pareto_weights.as_tuple()),
+        "reuse_enabled": settings.surrogate.reuse_observations,
+        "warm_start_limit": settings.surrogate.warm_start_limit,
         "stored_observations": db.count_surrogate_observations(target_key=target_key),
         "history_preview": surrogate_preview,
     }
@@ -96,8 +101,10 @@ def run_inspect(
     payload["summary"]["surrogate_learning"] = {
         "stored_observations": payload["surrogate_learning"]["stored_observations"],
         "preview_count": len(surrogate_preview),
-        "reuse_enabled": settings.surrogate_reuse_observations,
-        "warm_start_limit": settings.surrogate_warm_start_limit,
+        "reuse_enabled": settings.surrogate.reuse_observations,
+        "warm_start_limit": settings.surrogate.warm_start_limit,
+        "model": settings.surrogate.model,
+        "fallback_model": settings.surrogate.fallback_model,
     }
     if candidate_id:
         selected = next((item for item in candidates if item["candidate_id"] == candidate_id), None)

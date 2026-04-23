@@ -55,6 +55,45 @@ PROFILE_FIDELITY_DEFAULTS: dict[str, dict[str, Any]] = {
     "ci": {"f1_repetitions": 2, "f2_repetitions": 4, "f3_repetitions": 6},
 }
 
+_LEGACY_SURROGATE_KEYS = {
+    "surrogate_warm_start_limit",
+    "surrogate_reuse_observations",
+    "surrogate_min_training_points",
+    "surrogate_acquisition",
+    "surrogate_gp_noise",
+    "surrogate_gp_length_scale",
+    "surrogate_gp_nu",
+    "surrogate_gp_ucb_beta",
+    "surrogate_max_observations",
+}
+_SURROGATE_SHARED_KEYS = {
+    "model",
+    "fallback_model",
+    "objective",
+    "screening",
+    "acquisition",
+    "ucb_beta",
+    "warm_start_limit",
+    "reuse_observations",
+    "min_training_points",
+    "max_observations",
+    "feature_cache_size",
+}
+_SURROGATE_MODEL_KEYS = {
+    "gp": {"noise", "length_scale", "nu", "max_exact_points"},
+    "local_kernel": {"bandwidth_floor", "min_neighbors"},
+    "hist_gbdt": {
+        "learning_rate",
+        "max_iter",
+        "max_leaf_nodes",
+        "max_depth",
+        "min_samples_leaf",
+        "l2_regularization",
+        "lower_quantile",
+        "upper_quantile",
+    },
+}
+
 
 def _coerce_bool(value: Any, *, default: bool) -> bool:
     if value is None:
@@ -86,6 +125,30 @@ def _coerce_bool_map(value: Any) -> dict[str, bool]:
     return {str(key).strip(): _coerce_bool(raw, default=True) for key, raw in value.items() if str(key).strip()}
 
 
+def _require_mapping(value: Any, *, table_name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"[tool.joule.{table_name}] must be a table")
+    return value
+
+
+def _reject_legacy_surrogate_keys(payload: dict[str, Any]) -> None:
+    for key in sorted(_LEGACY_SURROGATE_KEYS & set(payload)):
+        raise ValueError(
+            f"Unsupported legacy surrogate key [tool.joule].{key}. "
+            "Use [tool.joule.surrogate] and [tool.joule.surrogates.<model>] tables instead."
+        )
+
+
+def _validate_allowed_keys(payload: dict[str, Any], *, allowed: set[str], table_name: str) -> None:
+    unknown = sorted(set(payload) - allowed)
+    if not unknown:
+        return
+    joined = ", ".join(unknown)
+    raise ValueError(f"Unknown key(s) in [tool.joule.{table_name}]: {joined}")
+
+
 @dataclass(slots=True)
 class FidelitySettings:
     f1_repetitions: int = 3
@@ -103,6 +166,53 @@ class ParetoWeights:
     energy: float = 0.5
     latency: float = 0.3
     memory: float = 0.2
+
+    def as_tuple(self) -> tuple[float, float, float]:
+        return (float(self.energy), float(self.latency), float(self.memory))
+
+
+@dataclass(slots=True)
+class GPSurrogateSettings:
+    noise: float = 1e-6
+    length_scale: float = 1.0
+    nu: float = 1.5
+    max_exact_points: int = 120
+
+
+@dataclass(slots=True)
+class LocalKernelSurrogateSettings:
+    bandwidth_floor: float = 1e-6
+    min_neighbors: int = 1
+
+
+@dataclass(slots=True)
+class HistGBDTSurrogateSettings:
+    learning_rate: float = 0.1
+    max_iter: int = 100
+    max_leaf_nodes: int = 31
+    max_depth: int | None = None
+    min_samples_leaf: int = 2
+    l2_regularization: float = 0.0
+    lower_quantile: float = 0.16
+    upper_quantile: float = 0.84
+
+
+@dataclass(slots=True)
+class SurrogateSettings:
+    model: str = "hist_gbdt"
+    fallback_model: str = "local_kernel"
+    objective: str = "multi_metric"
+    screening: str = "scalarized"
+    acquisition: str = "ei"
+    ucb_beta: float = 1.0
+    warm_start_limit: int = 50
+    reuse_observations: bool = True
+    min_training_points: int = 3
+    max_observations: int = 100
+    feature_cache_size: int = 2048
+    gp: GPSurrogateSettings = field(default_factory=GPSurrogateSettings)
+    local_kernel: LocalKernelSurrogateSettings = field(default_factory=LocalKernelSurrogateSettings)
+    hist_gbdt: HistGBDTSurrogateSettings = field(default_factory=HistGBDTSurrogateSettings)
 
 
 @dataclass(slots=True)
@@ -149,17 +259,10 @@ class JouleSettings:
     operator_allowlist: list[str] = field(default_factory=list)
     operator_denylist: list[str] = field(default_factory=list)
     operator_kill_switches: dict[str, bool] = field(default_factory=dict)
-    surrogate_warm_start_limit: int = 50
-    surrogate_reuse_observations: bool = True
-    surrogate_min_training_points: int = 3
-    surrogate_acquisition: str = "ei"
-    surrogate_gp_noise: float = 1e-6
-    surrogate_gp_length_scale: float = 1.0
-    surrogate_gp_nu: float = 1.5
-    surrogate_gp_ucb_beta: float = 1.0
     backends: BackendSettings = field(default_factory=BackendSettings)
     pareto_weights: ParetoWeights = field(default_factory=ParetoWeights)
     fidelity: FidelitySettings = field(default_factory=FidelitySettings)
+    surrogate: SurrogateSettings = field(default_factory=SurrogateSettings)
 
     @property
     def artifact_path(self) -> Path:
@@ -205,6 +308,8 @@ def load_settings(path: str | Path) -> JouleSettings:
     if not isinstance(payload, dict):
         payload = {}
 
+    _reject_legacy_surrogate_keys(payload)
+
     profile = str(payload.get("profile", os.getenv("JOULE_PROFILE", "standard"))).strip().lower()
     if profile not in SUPPORTED_PROFILES:
         supported = ", ".join(sorted(SUPPORTED_PROFILES))
@@ -213,9 +318,31 @@ def load_settings(path: str | Path) -> JouleSettings:
     resolved_payload = {**PROFILE_DEFAULTS.get(profile, {}), **payload}
     fidelity_payload = {
         **PROFILE_FIDELITY_DEFAULTS.get(profile, {}),
-        **(resolved_payload.get("fidelity", {}) if isinstance(resolved_payload.get("fidelity", {}), dict) else {}),
+        **(
+            resolved_payload.get("fidelity", {})
+            if isinstance(resolved_payload.get("fidelity", {}), dict)
+            else {}
+        ),
     }
     backend_payload = resolved_payload.get("backends", {}) if isinstance(resolved_payload, dict) else {}
+    surrogate_payload = _require_mapping(resolved_payload.get("surrogate", {}), table_name="surrogate")
+    model_payload = _require_mapping(resolved_payload.get("surrogates", {}), table_name="surrogates")
+    _validate_allowed_keys(surrogate_payload, allowed=_SURROGATE_SHARED_KEYS, table_name="surrogate")
+    _validate_allowed_keys(model_payload, allowed=set(_SURROGATE_MODEL_KEYS), table_name="surrogates")
+    gp_payload = _require_mapping(model_payload.get("gp", {}), table_name="surrogates.gp")
+    local_kernel_payload = _require_mapping(model_payload.get("local_kernel", {}), table_name="surrogates.local_kernel")
+    hist_gbdt_payload = _require_mapping(model_payload.get("hist_gbdt", {}), table_name="surrogates.hist_gbdt")
+    _validate_allowed_keys(gp_payload, allowed=_SURROGATE_MODEL_KEYS["gp"], table_name="surrogates.gp")
+    _validate_allowed_keys(
+        local_kernel_payload,
+        allowed=_SURROGATE_MODEL_KEYS["local_kernel"],
+        table_name="surrogates.local_kernel",
+    )
+    _validate_allowed_keys(
+        hist_gbdt_payload,
+        allowed=_SURROGATE_MODEL_KEYS["hist_gbdt"],
+        table_name="surrogates.hist_gbdt",
+    )
 
     settings = JouleSettings(
         project_root=project_root,
@@ -263,17 +390,6 @@ def load_settings(path: str | Path) -> JouleSettings:
         operator_allowlist=_coerce_str_list(resolved_payload.get("operator_allowlist", [])),
         operator_denylist=_coerce_str_list(resolved_payload.get("operator_denylist", [])),
         operator_kill_switches=_coerce_bool_map(resolved_payload.get("operator_kill_switches", {})),
-        surrogate_warm_start_limit=int(resolved_payload.get("surrogate_warm_start_limit", 50)),
-        surrogate_reuse_observations=_coerce_bool(
-            resolved_payload.get("surrogate_reuse_observations", True),
-            default=True,
-        ),
-        surrogate_min_training_points=int(resolved_payload.get("surrogate_min_training_points", 3)),
-        surrogate_acquisition=str(resolved_payload.get("surrogate_acquisition", "ei")),
-        surrogate_gp_noise=float(resolved_payload.get("surrogate_gp_noise", 1e-6)),
-        surrogate_gp_length_scale=float(resolved_payload.get("surrogate_gp_length_scale", 1.0)),
-        surrogate_gp_nu=float(resolved_payload.get("surrogate_gp_nu", 1.5)),
-        surrogate_gp_ucb_beta=float(resolved_payload.get("surrogate_gp_ucb_beta", 1.0)),
         backends=BackendSettings(options=backend_payload if isinstance(backend_payload, dict) else {}),
         pareto_weights=ParetoWeights(
             energy=float(resolved_payload.get("pareto_weight_energy", 0.5)),
@@ -284,6 +400,43 @@ def load_settings(path: str | Path) -> JouleSettings:
             f1_repetitions=int(fidelity_payload.get("f1_repetitions", 3)),
             f2_repetitions=int(fidelity_payload.get("f2_repetitions", 7)),
             f3_repetitions=int(fidelity_payload.get("f3_repetitions", 12)),
+        ),
+        surrogate=SurrogateSettings(
+            model=str(surrogate_payload.get("model", "hist_gbdt")).strip().lower(),
+            fallback_model=str(surrogate_payload.get("fallback_model", "local_kernel")).strip().lower(),
+            objective=str(surrogate_payload.get("objective", "multi_metric")).strip().lower(),
+            screening=str(surrogate_payload.get("screening", "scalarized")).strip().lower(),
+            acquisition=str(surrogate_payload.get("acquisition", "ei")).strip().lower(),
+            ucb_beta=float(surrogate_payload.get("ucb_beta", 1.0)),
+            warm_start_limit=int(surrogate_payload.get("warm_start_limit", 50)),
+            reuse_observations=_coerce_bool(surrogate_payload.get("reuse_observations", True), default=True),
+            min_training_points=int(surrogate_payload.get("min_training_points", 3)),
+            max_observations=max(3, int(surrogate_payload.get("max_observations", 100))),
+            feature_cache_size=max(64, int(surrogate_payload.get("feature_cache_size", 2048))),
+            gp=GPSurrogateSettings(
+                noise=float(gp_payload.get("noise", 1e-6)),
+                length_scale=float(gp_payload.get("length_scale", 1.0)),
+                nu=float(gp_payload.get("nu", 1.5)),
+                max_exact_points=max(3, int(gp_payload.get("max_exact_points", 120))),
+            ),
+            local_kernel=LocalKernelSurrogateSettings(
+                bandwidth_floor=float(local_kernel_payload.get("bandwidth_floor", 1e-6)),
+                min_neighbors=max(1, int(local_kernel_payload.get("min_neighbors", 1))),
+            ),
+            hist_gbdt=HistGBDTSurrogateSettings(
+                learning_rate=float(hist_gbdt_payload.get("learning_rate", 0.1)),
+                max_iter=max(1, int(hist_gbdt_payload.get("max_iter", 100))),
+                max_leaf_nodes=max(2, int(hist_gbdt_payload.get("max_leaf_nodes", 31))),
+                max_depth=(
+                    int(hist_gbdt_payload["max_depth"])
+                    if hist_gbdt_payload.get("max_depth") is not None
+                    else None
+                ),
+                min_samples_leaf=max(1, int(hist_gbdt_payload.get("min_samples_leaf", 2))),
+                l2_regularization=float(hist_gbdt_payload.get("l2_regularization", 0.0)),
+                lower_quantile=float(hist_gbdt_payload.get("lower_quantile", 0.16)),
+                upper_quantile=float(hist_gbdt_payload.get("upper_quantile", 0.84)),
+            ),
         ),
     )
     return settings

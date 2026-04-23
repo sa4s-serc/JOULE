@@ -18,7 +18,7 @@ from joule.utils.analysis import (
     json_pretty,
 )
 from joule.utils.artifacts import write_artifact
-from joule.utils.metrics import scalar_score
+from joule.utils.metrics import objective_score
 from joule.utils.reporting import workload_provenance_records
 
 
@@ -71,11 +71,13 @@ def run_optimize(
         hotspot_summary=hotspot_summary,
     )
     write_artifact(context.run_dir, "baseline_analysis.json", json_pretty(baseline_analysis))
-    baseline_score = scalar_score(baseline_report.aggregate)
+    baseline_score = objective_score(baseline_report.aggregate, context.settings.pareto_weights)
     best_scalar_improvement = 0.0
     best_regressed_scalar = False
     if best and best.report and baseline_score > 0:
-        best_scalar_improvement = (baseline_score - scalar_score(best.report.aggregate)) / baseline_score
+        best_scalar_improvement = (
+            baseline_score - objective_score(best.report.aggregate, context.settings.pareto_weights)
+        ) / baseline_score
         if best_scalar_improvement <= 0.0:
             best_regressed_scalar = True
             context.reporter.info(

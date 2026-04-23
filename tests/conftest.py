@@ -12,5 +12,9 @@ collect_ignore_glob = ["fixtures/*"]
 def sample_project(tmp_path: Path) -> Path:
     source = Path(__file__).parent / "fixtures" / "sample_project"
     destination = tmp_path / "sample_project"
-    shutil.copytree(source, destination)
+    shutil.copytree(
+        source,
+        destination,
+        ignore=shutil.ignore_patterns(".joule", ".joule.lock", "__pycache__", ".pytest_cache"),
+    )
     return destination

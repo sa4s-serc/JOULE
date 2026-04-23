@@ -15,6 +15,7 @@ dependencies = [
   "pydantic>=2.0.0",
   "PyYAML>=6.0.0",
   "rich>=13.0.0",
+  "scikit-learn>=1.5.0",
   "scipy>=1.13.0",
   "typer>=0.12.0",
 ]
@@ -74,6 +75,38 @@ inner_repetitions_max = 10000
 adaptive_min_window_s = 0.05
 adaptive_probe_samples = 1
 max_parallel_workers = 1
+
+[tool.joule.surrogate]
+model = "hist_gbdt"
+fallback_model = "local_kernel"
+objective = "multi_metric"
+screening = "scalarized"
+acquisition = "ei"
+ucb_beta = 1.0
+warm_start_limit = 50
+reuse_observations = true
+min_training_points = 3
+max_observations = 100
+feature_cache_size = 2048
+
+[tool.joule.surrogates.gp]
+noise = 1e-6
+length_scale = 1.0
+nu = 1.5
+max_exact_points = 120
+
+[tool.joule.surrogates.local_kernel]
+bandwidth_floor = 1e-6
+min_neighbors = 1
+
+[tool.joule.surrogates.hist_gbdt]
+learning_rate = 0.1
+max_iter = 100
+max_leaf_nodes = 31
+min_samples_leaf = 2
+l2_regularization = 0.0
+lower_quantile = 0.16
+upper_quantile = 0.84
 
 [tool.joule.fidelity]
 f1_repetitions = 3

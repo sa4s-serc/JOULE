@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 from joule.cli import app
@@ -353,6 +354,23 @@ def test_config_show_human_output(sample_project):
     assert "optimization_budget" in result.output
 
 
+def test_config_show_includes_nested_surrogate_settings(sample_project):
+    pyproject = sample_project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + "\n[tool.joule.surrogate]\nmodel = \"gp\"\nacquisition = \"ucb\"\n"
+        + "\n[tool.joule.surrogates.gp]\nnoise = 1e-5\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["config", "show", str(sample_project), "--output", "json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    surrogate = payload["resolved"]["surrogate"]
+    assert surrogate["model"] == "gp"
+    assert surrogate["acquisition"] == "ucb"
+    assert surrogate["gp"]["noise"] == pytest.approx(1e-5)
+
+
 def test_config_show_rejects_unknown_profile(sample_project):
     pyproject = sample_project / "pyproject.toml"
     pyproject.write_text(
@@ -362,3 +380,14 @@ def test_config_show_rejects_unknown_profile(sample_project):
     result = runner.invoke(app, ["config", "show", str(sample_project), "--output", "json"])
     assert result.exit_code != 0
     assert "Unknown JOULE profile" in result.output
+
+
+def test_config_show_rejects_legacy_surrogate_keys(sample_project):
+    pyproject = sample_project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + "\n[tool.joule]\nsurrogate_acquisition = \"ucb\"\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["config", "show", str(sample_project), "--output", "json"])
+    assert result.exit_code != 0
+    assert "Unsupported legacy surrogate key" in result.output

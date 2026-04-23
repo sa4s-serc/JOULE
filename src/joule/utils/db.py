@@ -6,9 +6,12 @@ import hashlib
 from pathlib import Path
 import json
 import sqlite3
+from threading import RLock
 from typing import Any, Iterator, TypedDict
 
 from joule.models import MeasurementReport, RunRecord, RunType, TargetSpec, WorkloadBundle
+
+DB_SCHEMA_VERSION = 5
 
 
 class CandidateRecord(TypedDict):
@@ -118,12 +121,6 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY,
   applied_at TEXT NOT NULL
 );
-"""
-
-MIGRATIONS: list[tuple[int, str]] = [
-    (
-        1,
-        """
 CREATE TABLE IF NOT EXISTS checkpoints (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id TEXT NOT NULL,
@@ -133,11 +130,6 @@ CREATE TABLE IF NOT EXISTS checkpoints (
   metadata_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-""",
-    ),
-    (
-        2,
-        """
 CREATE TABLE IF NOT EXISTS measurements_cache (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source_hash TEXT NOT NULL,
@@ -148,69 +140,85 @@ CREATE TABLE IF NOT EXISTS measurements_cache (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cache_lookup ON measurements_cache(source_hash, workload_id, fidelity);
-""",
-    ),
-    (
-        3,
-        """
 CREATE TABLE IF NOT EXISTS surrogate_observations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id TEXT NOT NULL,
   target_key TEXT NOT NULL,
   source_hash TEXT NOT NULL,
   source_code TEXT NOT NULL,
-  score REAL NOT NULL,
+  targets_json TEXT NOT NULL,
   feature_hints_json TEXT NOT NULL,
+  feature_schema_version INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   UNIQUE(target_key, source_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_surrogate_obs_target_recent ON surrogate_observations(target_key, id DESC);
-""",
-    ),
-    (
-        4,
-        """
-ALTER TABLE operator_stats ADD COLUMN duplicates INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE operator_stats ADD COLUMN correctness_failures INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE operator_stats ADD COLUMN frontier_contributions INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE operator_stats ADD COLUMN precheck_failures INTEGER NOT NULL DEFAULT 0;
-""",
-    ),
-]
+"""
 
 
 class JouleDB:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn: sqlite3.Connection | None = None
+        self._conn_lock = RLock()
+        self._check_schema_compatibility()
         with self.connect() as conn:
             conn.executescript(SCHEMA)
-        self._apply_migrations()
-
-    def _apply_migrations(self) -> None:
-        with self.connect() as conn:
             row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
-            current_version = row[0] if row else 0
-            for version, sql in MIGRATIONS:
-                if version > current_version:
-                    try:
-                        conn.executescript(sql)
-                    except sqlite3.OperationalError as e:
-                        if "duplicate column name" not in str(e).lower():
-                            raise
-                    conn.execute(
-                        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
-                        (version, datetime.now(UTC).isoformat()),
-                    )
+            current_version = int(row[0]) if row else 0
+            if current_version == 0:
+                conn.execute(
+                    "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                    (DB_SCHEMA_VERSION, datetime.now(UTC).isoformat()),
+                )
+
+    def _check_schema_compatibility(self) -> None:
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return
+        conn = sqlite3.connect(self.path)
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            if not tables:
+                return
+            if "schema_version" not in tables:
+                raise ValueError(
+                    "Detected incompatible JOULE database schema. "
+                    "Remove .joule/ and rerun to initialize the clean multi-surrogate schema."
+                )
+            row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
+            current_version = int(row[0]) if row else 0
+            if current_version != 0 and current_version < DB_SCHEMA_VERSION:
+                raise ValueError(
+                    "Detected incompatible JOULE database schema version "
+                    f"{current_version}. Remove .joule/ and rerun to initialize schema version {DB_SCHEMA_VERSION}."
+                )
+        finally:
+            conn.close()
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        with self._conn_lock:
+            conn = self._get_connection()
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+    def _get_connection(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.path, timeout=30.0, check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+        return self._conn
 
     def _fetchall(self, query: str, params: tuple[object, ...] = ()) -> list[tuple[Any, ...]]:
         with self.connect() as conn:
@@ -333,27 +341,37 @@ class JouleDB:
         precheck_failure: bool = False,
     ) -> None:
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT attempts, successes, reward, duplicates, correctness_failures, frontier_contributions, precheck_failures FROM operator_stats WHERE operator_name = ?",
-                (operator_name,),
-            ).fetchone()
-            if row is None:
-                attempts, successes, total_reward, dups, corr_fails, front_contribs, precheck_fails = 0, 0, 0.0, 0, 0, 0, 0
-            else:
-                attempts, successes, total_reward, dups, corr_fails, front_contribs, precheck_fails = row
-            attempts += 1
-            successes += int(success)
-            total_reward += reward
-            dups += int(duplicate)
-            corr_fails += int(correctness_failure)
-            front_contribs += int(frontier_contribution)
-            precheck_fails += int(precheck_failure)
             conn.execute(
                 """
-                INSERT OR REPLACE INTO operator_stats(operator_name, attempts, successes, reward, duplicates, correctness_failures, frontier_contributions, precheck_failures)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO operator_stats(
+                    operator_name,
+                    attempts,
+                    successes,
+                    reward,
+                    duplicates,
+                    correctness_failures,
+                    frontier_contributions,
+                    precheck_failures
+                )
+                VALUES(?, 1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(operator_name) DO UPDATE SET
+                    attempts = operator_stats.attempts + 1,
+                    successes = operator_stats.successes + excluded.successes,
+                    reward = operator_stats.reward + excluded.reward,
+                    duplicates = operator_stats.duplicates + excluded.duplicates,
+                    correctness_failures = operator_stats.correctness_failures + excluded.correctness_failures,
+                    frontier_contributions = operator_stats.frontier_contributions + excluded.frontier_contributions,
+                    precheck_failures = operator_stats.precheck_failures + excluded.precheck_failures
                 """,
-                (operator_name, attempts, successes, total_reward, dups, corr_fails, front_contribs, precheck_fails),
+                (
+                    operator_name,
+                    int(success),
+                    float(reward),
+                    int(duplicate),
+                    int(correctness_failure),
+                    int(frontier_contribution),
+                    int(precheck_failure),
+                ),
             )
 
     def get_operator_stats(self) -> dict[str, dict[str, float]]:
@@ -377,8 +395,9 @@ class JouleDB:
         run_id: str,
         target_key: str,
         source_code: str,
-        score: float,
+        targets: dict[str, float],
         feature_hints: dict[str, float] | None = None,
+        feature_schema_version: int,
     ) -> None:
         created_at = datetime.now(UTC).isoformat()
         source_hash = hashlib.sha256(source_code.encode("utf-8")).hexdigest()
@@ -390,17 +409,19 @@ class JouleDB:
                     target_key,
                     source_hash,
                     source_code,
-                    score,
+                    targets_json,
                     feature_hints_json,
+                    feature_schema_version,
                     created_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(target_key, source_hash)
                 DO UPDATE SET
                     run_id=excluded.run_id,
                     source_code=excluded.source_code,
-                    score=excluded.score,
+                    targets_json=excluded.targets_json,
                     feature_hints_json=excluded.feature_hints_json,
+                    feature_schema_version=excluded.feature_schema_version,
                     created_at=excluded.created_at
                 """,
                 (
@@ -408,8 +429,9 @@ class JouleDB:
                     target_key,
                     source_hash,
                     source_code,
-                    float(score),
+                    json.dumps({str(key): float(value) for key, value in targets.items()}),
                     json.dumps(feature_hints or {}),
+                    int(feature_schema_version),
                     created_at,
                 ),
             )
@@ -418,7 +440,7 @@ class JouleDB:
         if target_key is None:
             rows = self._fetchall(
                 """
-                SELECT source_code, score, feature_hints_json
+                SELECT source_code, targets_json, feature_hints_json, feature_schema_version
                 FROM surrogate_observations
                 ORDER BY id DESC
                 LIMIT ?
@@ -428,7 +450,7 @@ class JouleDB:
         else:
             rows = self._fetchall(
                 """
-                SELECT source_code, score, feature_hints_json
+                SELECT source_code, targets_json, feature_hints_json, feature_schema_version
                 FROM surrogate_observations
                 WHERE target_key = ?
                 ORDER BY id DESC
@@ -439,8 +461,9 @@ class JouleDB:
         return [
             {
                 "source": str(row[0]),
-                "score": float(row[1]),
+                "targets": json.loads(str(row[1])) if row[1] else {},
                 "feature_hints": json.loads(str(row[2])) if row[2] else {},
+                "feature_schema_version": int(row[3]),
             }
             for row in rows
         ]

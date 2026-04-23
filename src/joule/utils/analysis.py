@@ -742,6 +742,8 @@ def human_inspect_summary(payload: dict) -> str:
     if surrogate:
         lines.append(
             "Surrogate learning: "
+            f"model={surrogate.get('model', 'unknown')} "
+            f"fallback={surrogate.get('fallback_model', 'unknown')} "
             f"stored={surrogate.get('stored_observations', 0)} "
             f"preview={surrogate.get('preview_count', 0)} "
             f"reuse={surrogate.get('reuse_enabled', False)} "

@@ -17,3 +17,10 @@ optimization_budget = 4
 promotion_scalar_min = 0.0
 final_improvement_min = 0.0
 terminal_verbosity = "normal"
+
+[tool.joule.surrogate]
+model = "hist_gbdt"
+fallback_model = "local_kernel"
+objective = "multi_metric"
+screening = "scalarized"
+acquisition = "ei"

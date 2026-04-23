@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 import math
 
+from joule.config import ParetoWeights
 from joule.models import AggregateMetrics, MetricSample
 
 
@@ -51,17 +52,24 @@ def aggregate_samples(samples: list[MetricSample]) -> tuple[AggregateMetrics, li
     return overall, per_workload
 
 
-def weighted_score(metrics: AggregateMetrics, weights: tuple[float, float, float]) -> float:
+def resolve_weight_tuple(weights: ParetoWeights | tuple[float, float, float]) -> tuple[float, float, float]:
+    if isinstance(weights, ParetoWeights):
+        return weights.as_tuple()
+    return (float(weights[0]), float(weights[1]), float(weights[2]))
+
+
+def weighted_score(metrics: AggregateMetrics, weights: ParetoWeights | tuple[float, float, float]) -> float:
+    resolved = resolve_weight_tuple(weights)
     memory_mib = metrics.mean_peak_memory_bytes / (1024 * 1024)
     return (
-        (metrics.mean_energy_j * weights[0])
-        + (metrics.mean_wall_time_s * weights[1])
-        + (memory_mib * weights[2])
+        (metrics.mean_energy_j * resolved[0])
+        + (metrics.mean_wall_time_s * resolved[1])
+        + (memory_mib * resolved[2])
     )
 
 
-def scalar_score(metrics: AggregateMetrics) -> float:
-    return weighted_score(metrics, (0.5, 0.3, 0.2))
+def objective_score(metrics: AggregateMetrics, weights: ParetoWeights | tuple[float, float, float]) -> float:
+    return weighted_score(metrics, weights)
 
 
 def improvement_ratio(baseline: AggregateMetrics, candidate: AggregateMetrics) -> dict[str, float]:
