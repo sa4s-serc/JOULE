@@ -1,0 +1,50 @@
+{
+  "function": "simulate",
+  "original_source": "PI = 3.14159265358979323\nSOLAR_MASS = 4 * PI * PI\nDAYS_PER_YEAR = 365.24\n\n# Initial state stored as immutable tuples so each simulate() call gets a fresh copy.\n_INITIAL_BODIES = (\n    ((0.0, 0.0, 0.0),\n     (0.0, 0.0, 0.0),\n     SOLAR_MASS),\n\n    ((4.84143144246472090e+00,\n      -1.16032004402742839e+00,\n      -1.03622044471123109e-01),\n     (1.66007664274403694e-03 * DAYS_PER_YEAR,\n      7.69901118419740425e-03 * DAYS_PER_YEAR,\n      -6.90460016972063023e-05 * DAYS_PER_YEAR),\n     9.54791938424326609e-04 * SOLAR_MASS),\n\n    ((8.34336671824457987e+00,\n      4.12479856412430479e+00,\n      -4.03523417114321381e-01),\n     (-2.76742510726862411e-03 * DAYS_PER_YEAR,\n      4.99852801234917238e-03 * DAYS_PER_YEAR,\n      2.30417297573763929e-05 * DAYS_PER_YEAR),\n     2.85885980666130812e-04 * SOLAR_MASS),\n\n    ((1.28943695621391310e+01,\n      -1.51111514016986312e+01,\n      -2.23307578892655734e-01),\n     (2.96460137564761618e-03 * DAYS_PER_YEAR,\n      2.37847173959480950e-03 * DAYS_PER_YEAR,\n      -2.96589568540237556e-05 * DAYS_PER_YEAR),\n     4.36624404335156298e-05 * SOLAR_MASS),\n\n    ((1.53796971148509165e+01,\n      -2.59193146099879641e+01,\n      1.79258772950371181e-01),\n     (2.68067772490389322e-03 * DAYS_PER_YEAR,\n      1.62824170038242295e-03 * DAYS_PER_YEAR,\n      -9.51592254519715870e-05 * DAYS_PER_YEAR),\n     5.15138902046611451e-05 * SOLAR_MASS),\n)\n\n\ndef _fresh_bodies():\n    return [([r[0], r[1], r[2]], [v[0], v[1], v[2]], m)\n            for r, v, m in _INITIAL_BODIES]\n\n\ndef _combinations(bodies):\n    result = []\n    for i in range(len(bodies) - 1):\n        for j in range(i + 1, len(bodies)):\n            result.append((bodies[i], bodies[j]))\n    return result\n\n\ndef simulate(n):\n    bodies = _fresh_bodies()\n    pairs = _combinations(bodies)\n\n    # Offset momentum so centre-of-mass velocity is zero (applied to sun).\n    px = py = pz = 0.0\n    for (r, v, m) in bodies:\n        px -= v[0] * m\n        py -= v[1] * m\n        pz -= v[2] * m\n    sun_v = bodies[0][1]\n    sun_m = bodies[0][2]\n    sun_v[0] = px / sun_m\n    sun_v[1] = py / sun_m\n    sun_v[2] = pz / sun_m\n\n    # Symplectic integrator.\n    dt = 0.01\n    for _ in range(n):\n        for (([x1, y1, z1], v1, m1),\n             ([x2, y2, z2], v2, m2)) in pairs:\n            dx = x1 - x2\n            dy = y1 - y2\n            dz = z1 - z2\n            mag = dt * ((dx * dx + dy * dy + dz * dz) ** (-1.5))\n            b1m = m1 * mag\n            b2m = m2 * mag\n            v1[0] -= dx * b2m\n            v1[1] -= dy * b2m\n            v1[2] -= dz * b2m\n            v2[0] += dx * b1m\n            v2[1] += dy * b1m\n            v2[2] += dz * b1m\n        for (r, [vx, vy, vz], m) in bodies:\n            r[0] += dt * vx\n            r[1] += dt * vy\n            r[2] += dt * vz\n\n    # Total energy (kinetic + potential).\n    e = 0.0\n    for (((x1, y1, z1), v1, m1),\n         ((x2, y2, z2), v2, m2)) in pairs:\n        dx = x1 - x2\n        dy = y1 - y2\n        dz = z1 - z2\n        e -= (m1 * m2) / ((dx * dx + dy * dy + dz * dz) ** 0.5)\n    for (r, [vx, vy, vz], m) in bodies:\n        e += m * (vx * vx + vy * vy + vz * vz) / 2.0\n    return e",
+  "best_source": "PI = 3.14159265358979323\nSOLAR_MASS = 4 * PI * PI\nDAYS_PER_YEAR = 365.24\n\n# Initial state stored as immutable tuples so each simulate() call gets a fresh copy.\n_INITIAL_BODIES = (\n    ((0.0, 0.0, 0.0),\n     (0.0, 0.0, 0.0),\n     SOLAR_MASS),\n\n    ((4.84143144246472090e+00,\n      -1.16032004402742839e+00,\n      -1.03622044471123109e-01),\n     (1.66007664274403694e-03 * DAYS_PER_YEAR,\n      7.69901118419740425e-03 * DAYS_PER_YEAR,\n      -6.90460016972063023e-05 * DAYS_PER_YEAR),\n     9.54791938424326609e-04 * SOLAR_MASS),\n\n    ((8.34336671824457987e+00,\n      4.12479856412430479e+00,\n      -4.03523417114321381e-01),\n     (-2.76742510726862411e-03 * DAYS_PER_YEAR,\n      4.99852801234917238e-03 * DAYS_PER_YEAR,\n      2.30417297573763929e-05 * DAYS_PER_YEAR),\n     2.85885980666130812e-04 * SOLAR_MASS),\n\n    ((1.28943695621391310e+01,\n      -1.51111514016986312e+01,\n      -2.23307578892655734e-01),\n     (2.96460137564761618e-03 * DAYS_PER_YEAR,\n      2.37847173959480950e-03 * DAYS_PER_YEAR,\n      -2.96589568540237556e-05 * DAYS_PER_YEAR),\n     4.36624404335156298e-05 * SOLAR_MASS),\n\n    ((1.53796971148509165e+01,\n      -2.59193146099879641e+01,\n      1.79258772950371181e-01),\n     (2.68067772490389322e-03 * DAYS_PER_YEAR,\n      1.62824170038242295e-03 * DAYS_PER_YEAR,\n      -9.51592254519715870e-05 * DAYS_PER_YEAR),\n     5.15138902046611451e-05 * SOLAR_MASS),\n)\n\n\ndef _fresh_bodies():\n    return [([r[0], r[1], r[2]], [v[0], v[1], v[2]], m)\n            for r, v, m in _INITIAL_BODIES]\n\n\ndef _combinations(bodies):\n    result = []\n    for i in range(len(bodies) - 1):\n        for j in range(i + 1, len(bodies)):\n            result.append((bodies[i], bodies[j]))\n    return result\n\n\ndef simulate(n):\n    bodies = _fresh_bodies()\n    pairs = _combinations(bodies)\n\n    # Offset momentum so centre-of-mass velocity is zero (applied to sun).\n    px = py = pz = 0.0\n    for (r, v, m) in bodies:\n        px -= v[0] * m\n        py -= v[1] * m\n        pz -= v[2] * m\n    sun_v = bodies[0][1]\n    sun_m = bodies[0][2]\n    sun_v[0] = px / sun_m\n    sun_v[1] = py / sun_m\n    sun_v[2] = pz / sun_m\n\n    # Symplectic integrator.\n    dt = 0.01\n    for _ in range(n):\n        for (([x1, y1, z1], v1, m1),\n             ([x2, y2, z2], v2, m2)) in pairs:\n            dx = x1 - x2\n            dy = y1 - y2\n            dz = z1 - z2\n            mag = dt * ((dx * dx + dy * dy + dz * dz) ** (-1.5))\n            b1m = m1 * mag\n            b2m = m2 * mag\n            v1[0] -= dx * b2m\n            v1[1] -= dy * b2m\n            v1[2] -= dz * b2m\n            v2[0] += dx * b1m\n            v2[1] += dy * b1m\n            v2[2] += dz * b1m\n        for (r, [vx, vy, vz], m) in bodies:\n            r[0] += dt * vx\n            r[1] += dt * vy\n            r[2] += dt * vz\n\n    # Total energy (kinetic + potential).\n    e = 0.0\n    for (((x1, y1, z1), v1, m1),\n         ((x2, y2, z2), v2, m2)) in pairs:\n        dx = x1 - x2\n        dy = y1 - y2\n        dz = z1 - z2\n        e -= (m1 * m2) / ((dx * dx + dy * dy + dz * dz) ** 0.5)\n    for (r, [vx, vy, vz], m) in bodies:\n        e += m * (vx * vx + vy * vy + vz * vz) / 2.0\n    return e",
+  "chain": [],
+  "improvement_pct": 0.0,
+  "baseline_mj": 19332.84545,
+  "baseline_std_mj": 515.673603,
+  "best_mj": 19332.84545,
+  "co2_search_ug": 321741.875,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 5,
+  "ei_top_k": 2,
+  "wall_s": 522.07,
+  "energy_backend": "rapl",
+  "fallback_escapes_used": 0,
+  "llm_retries": 3,
+  "isolation_successes": 16,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 5,
+    "n_f2_f3_pairs": 5,
+    "f1_f3_pearson": 0.4168739892629906,
+    "f2_f3_pearson": -0.053370459914046486,
+    "f1_f3_mae": 0.02466448517540911,
+    "f2_f3_mae": 0.04335282910979872,
+    "f1_f3_bias": -0.007400090192103548,
+    "f2_f3_bias": -0.0023418303900007986,
+    "effective_p_abandon_f1": 0.1,
+    "effective_p_abandon_f2": 0.125
+  },
+  "operator_stats": {
+    "LoopGlobalToLocalHoisting": {
+      "attempts": 1,
+      "confirmations": 0,
+      "rate": 0.0
+    },
+    "ManualReductionToBuiltinsLLM": {
+      "attempts": 3,
+      "confirmations": 1,
+      "rate": 0.3333333333333333
+    },
+    "ItertoolsDelegateLLM": {
+      "attempts": 1,
+      "confirmations": 0,
+      "rate": 0.0
+    }
+  }
+}

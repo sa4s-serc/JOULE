@@ -1,0 +1,447 @@
+{
+  "function_name": "fasta_run",
+  "source_file": "benchmark_game/fasta/target.py",
+  "original_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n\n\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n\n_ALU = sub(r'\\s+', '', \"\"\"\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\"\"\")\n\n_IUB = list(zip_longest('acgtBDHKMNRSVWY', (.27, .12, .12, .27), fillvalue=.02))\n\n_HOMOSAPIENS = list(zip('acgt', (0.3029549426680, 0.1979883004921,\n                                  0.1975473066391, 0.3015094502008)))\n\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate(p * _IM for _, p in alphabet))\n    table = bytearray.maketrans(\n        bytes(chain(range(len(alphabet)), [255])),\n        bytes(chain((ord(c) for c, _ in alphabet), [10])))\n    return probs, table\n\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    out = bytearray()\n    i = 0\n    while i + _WIDTH <= n:\n        out += sequence[i:i + _WIDTH] + newline\n        i += _WIDTH\n    if i < n:\n        out += sequence[i:n] + newline\n    return out.translate(table) if table else bytes(out)\n\n\ndef _lcg_indices(seed, count, probs):\n    vals = bytearray(count)\n    for k in range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return vals, seed\n\n\ndef fasta_run(n):\n    result = bytearray()\n\n    # Section ONE: copy from ALU repeat.\n    alu = bytearray(_ALU, 'utf8')\n    while len(alu) < n * 2:\n        alu.extend(alu)\n    result += b'>ONE Homo sapiens alu\\n'\n    result += _write_lines(alu, n * 2)\n\n    # Section TWO: IUB ambiguity codes (random selection).\n    probs_iub, tbl_iub = _probs_and_table(_IUB)\n    vals, seed = _lcg_indices(42.0, n * 3, probs_iub)\n    result += b'>TWO IUB ambiguity codes\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_iub)\n\n    # Section THREE: Homo sapiens frequency (seed continues from TWO).\n    probs_hs, tbl_hs = _probs_and_table(_HOMOSAPIENS)\n    vals, seed = _lcg_indices(seed, n * 5, probs_hs)\n    result += b'>THREE Homo sapiens frequency\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_hs)\n\n    return bytes(result)",
+  "best_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n\n\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n\n_ALU = sub(r'\\s+', '', \"\"\"\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\"\"\")\n\n_IUB = list(zip_longest('acgtBDHKMNRSVWY', (.27, .12, .12, .27), fillvalue=.02))\n\n_HOMOSAPIENS = list(zip('acgt', (0.3029549426680, 0.1979883004921,\n                                  0.1975473066391, 0.3015094502008)))\n\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate(p * _IM for _, p in alphabet))\n    table = bytearray.maketrans(\n        bytes(chain(range(len(alphabet)), [255])),\n        bytes(chain((ord(c) for c, _ in alphabet), [10])))\n    return probs, table\n\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    out = bytearray()\n    i = 0\n    while i + _WIDTH <= n:\n        out += sequence[i:i + _WIDTH] + newline\n        i += _WIDTH\n    if i < n:\n        out += sequence[i:n] + newline\n    return out.translate(table) if table else bytes(out)\n\n\ndef _lcg_indices(seed, count, probs):\n    vals = bytearray(count)\n    for k in range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return vals, seed\n\n\ndef fasta_run(n):\n    result = bytearray()\n\n    # Section ONE: copy from ALU repeat.\n    alu = bytearray(_ALU, 'utf8')\n    while len(alu) < n * 2:\n        alu.extend(alu)\n    result += b'>ONE Homo sapiens alu\\n'\n    result += _write_lines(alu, n * 2)\n\n    # Section TWO: IUB ambiguity codes (random selection).\n    probs_iub, tbl_iub = _probs_and_table(_IUB)\n    vals, seed = _lcg_indices(42.0, n * 3, probs_iub)\n    result += b'>TWO IUB ambiguity codes\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_iub)\n\n    # Section THREE: Homo sapiens frequency (seed continues from TWO).\n    probs_hs, tbl_hs = _probs_and_table(_HOMOSAPIENS)\n    vals, seed = _lcg_indices(seed, n * 5, probs_hs)\n    result += b'>THREE Homo sapiens frequency\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_hs)\n\n    return bytes(result)",
+  "energy_backend": "rapl",
+  "has_rapl": true,
+  "has_llm": true,
+  "llm_provider": "gemini-2.5-flash",
+  "co2_intensity_g_per_kwh": 475.0,
+  "baseline_mj": 2784.2946500000003,
+  "baseline_std_mj": 74.58471093240927,
+  "baseline_co2_ug": 367.3722107638889,
+  "best_mj": 2784.2946500000003,
+  "improvement_pct": 0.0,
+  "transformation_chain": [],
+  "total_f3_evals": 4,
+  "max_f3_budget": 10,
+  "total_wall_s": 202.18529401099659,
+  "total_co2_search_ug": 42367.240367421466,
+  "total_fallback_escapes_used": 1,
+  "iterations": [
+    {
+      "iteration": 1,
+      "n_candidates_generated": 2,
+      "n_correctness_pass": 2,
+      "n_correctness_fail": 0,
+      "n_surrogate_screened_in": 0,
+      "n_surrogate_screened_out": 2,
+      "selected_operator": "LoopGlobalToLocalHoisting | LoopInvariantHoistingLLM",
+      "selected_tier": "L | M",
+      "wall_clock_s": 55.262757401011186,
+      "best_energy_mj": 2784.2946500000003,
+      "current_baseline_mj": 2784.2946500000003,
+      "improvement_over_baseline_pct": 0.0,
+      "f3_evals_used_so_far": 2,
+      "surrogate_trained": true,
+      "used_fallback_escape": false,
+      "candidates": [
+        {
+          "iteration": 1,
+          "operator": "LoopGlobalToLocalHoisting",
+          "tier": "L",
+          "is_llm": false,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 2870.78125,
+          "f1_improvement_pct": -3.1062301541972204,
+          "f1_abandoned": false,
+          "f2_mj": 2891.205125,
+          "f2_improvement_pct": -3.839768718443648,
+          "f2_abandoned": false,
+          "f3_mj": 2867.5097500000006,
+          "f3_improvement_pct": -2.9887318139982133,
+          "f3_std_mj": 67.02193371919763,
+          "f3_co2_ug": 7567.039618055555,
+          "statistically_significant": false,
+          "confirmed_improvement": false,
+          "transformed_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n_ALU = sub('\\\\s+', '', '\\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA')\n_IUB = list(zip_longest('acgtBDHKMNRSVWY', (0.27, 0.12, 0.12, 0.27), fillvalue=0.02))\n_HOMOSAPIENS = list(zip('acgt', (0.302954942668, 0.1979883004921, 0.1975473066391, 0.3015094502008)))\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate((p * _IM for (_, p) in alphabet)))\n    table = bytearray.maketrans(bytes(chain(range(len(alphabet)), [255])), bytes(chain((ord(c) for (c, _) in alphabet), [10])))\n    return (probs, table)\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    out = bytearray()\n    i = 0\n    while i + _WIDTH <= n:\n        out += sequence[i:i + _WIDTH] + newline\n        i += _WIDTH\n    if i < n:\n        out += sequence[i:n] + newline\n    return out.translate(table) if table else bytes(out)\n\ndef _lcg_indices(seed, count, probs):\n    _local_range = range\n    vals = bytearray(count)\n    for k in _local_range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return (vals, seed)\n\ndef fasta_run(n):\n    result = bytearray()\n    alu = bytearray(_ALU, 'utf8')\n    while len(alu) < n * 2:\n        alu.extend(alu)\n    result += b'>ONE Homo sapiens alu\\n'\n    result += _write_lines(alu, n * 2)\n    (probs_iub, tbl_iub) = _probs_and_table(_IUB)\n    (vals, seed) = _lcg_indices(42.0, n * 3, probs_iub)\n    result += b'>TWO IUB ambiguity codes\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_iub)\n    (probs_hs, tbl_hs) = _probs_and_table(_HOMOSAPIENS)\n    (vals, seed) = _lcg_indices(seed, n * 5, probs_hs)\n    result += b'>THREE Homo sapiens frequency\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_hs)\n    return bytes(result)",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1,
+          "f1_cv": 0.03724464001019793,
+          "f2_cv": 0.024034083619001775,
+          "f3_cv": 0.023372870386647378,
+          "f3_ci_low_mj": 2841.3594000000003,
+          "f3_ci_high_mj": 2899.3609499999993,
+          "f1_p_improvement": 0.8975163304428576,
+          "f2_p_improvement": 0.9985298955325351,
+          "f3_p_improvement": 0.00010308501414163507,
+          "f1_welch_t": -1.5443591355534967,
+          "f2_welch_t": -3.6004601283124855,
+          "f3_welch_t": -3.711333784653409,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=0.898 >= 0.100  CV=0.04",
+          "f2_abandon_reason": "P(better)=0.999 >= 0.250  CV=0.02",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 2844.567,
+          "f2_trimmed_mean_mj": 2888.796833333333,
+          "f3_trimmed_mean_mj": 2862.687277777778,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 1,
+          "f2_outliers_removed": 0,
+          "f3_outliers_removed": 0
+        },
+        {
+          "iteration": 1,
+          "operator": "LoopInvariantHoistingLLM",
+          "tier": "M",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 2805.8522,
+          "f1_improvement_pct": -0.7742553396782093,
+          "f1_abandoned": false,
+          "f2_mj": 2799.2134285714287,
+          "f2_improvement_pct": -0.5358189576461836,
+          "f2_abandoned": false,
+          "f3_mj": 2888.22505,
+          "f3_improvement_pct": -3.7327371224880945,
+          "f3_std_mj": 171.38462076107768,
+          "f3_co2_ug": 7621.704993055555,
+          "statistically_significant": true,
+          "confirmed_improvement": true,
+          "transformed_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n\n\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n\n_ALU = sub(r'\\s+', '', \"\"\"\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\"\"\")\n\n_IUB = list(zip_longest('acgtBDHKMNRSVWY', (.27, .12, .12, .27), fillvalue=.02))\n\n_HOMOSAPIENS = list(zip('acgt', (0.3029549426680, 0.1979883004921,\n                                  0.1975473066391, 0.3015094502008)))\n\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate(p * _IM for _, p in alphabet))\n    table = bytearray.maketrans(\n        bytes(chain(range(len(alphabet)), [255])),\n        bytes(chain((ord(c) for c, _ in alphabet), [10])))\n    return probs, table\n\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    out = bytearray()\n    i = 0\n    while i + _WIDTH <= n:\n        out += sequence[i:i + _WIDTH] + newline\n        i += _WIDTH\n    if i < n:\n        out += sequence[i:n] + newline\n    return out.translate(table) if table else bytes(out)\n\n\ndef _lcg_indices(seed, count, probs):\n    vals = bytearray(count)\n    for k in range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return vals, seed\n\n\ndef fasta_run(n):\n    result = bytearray()\n\n    # Section ONE: copy from ALU repeat.\n    alu = bytearray(_ALU, 'utf8')\n    target_len_alu = n * 2\n    while len(alu) < target_len_alu:\n        alu.extend(alu)\n    result += b'>ONE Homo sapiens alu\\n'\n    result += _write_lines(alu, n * 2)\n\n    # Section TWO: IUB ambiguity codes (random selection).\n    probs_iub, tbl_iub = _probs_and_table(_IUB)\n    vals, seed = _lcg_indices(42.0, n * 3, probs_iub)\n    result += b'>TWO IUB ambiguity codes\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_iub)\n\n    # Section THREE: Homo sapiens frequency (seed continues from TWO).\n    probs_hs, tbl_hs = _probs_and_table(_HOMOSAPIENS)\n    vals, seed = _lcg_indices(seed, n * 5, probs_hs)\n    result += b'>THREE Homo sapiens frequency\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_hs)\n\n    return bytes(result)",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1,
+          "f1_cv": 0.01782356928703312,
+          "f2_cv": 0.012772127222350426,
+          "f3_cv": 0.059339081198356645,
+          "f3_ci_low_mj": 2813.4144,
+          "f3_ci_high_mj": 2964.1770499999993,
+          "f1_p_improvement": 0.770344430665884,
+          "f2_p_improvement": 0.7528512928131377,
+          "f3_p_improvement": 0.9901731847029934,
+          "f1_welch_t": -0.7727018243932933,
+          "f2_welch_t": -0.6950299309206437,
+          "f3_welch_t": -2.4867017294778835,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=0.770 >= 0.100  CV=0.02",
+          "f2_abandon_reason": "P(better)=0.753 >= 0.250  CV=0.01",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 2796.522,
+          "f2_trimmed_mean_mj": 2802.8738,
+          "f3_trimmed_mean_mj": 2891.546722222222,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 1,
+          "f3_outliers_removed": 0
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "n_candidates_generated": 1,
+      "n_correctness_pass": 1,
+      "n_correctness_fail": 0,
+      "n_surrogate_screened_in": 1,
+      "n_surrogate_screened_out": 0,
+      "selected_operator": "GenericSemanticRewriteLLM",
+      "selected_tier": "H",
+      "wall_clock_s": 67.28803943001549,
+      "best_energy_mj": 2784.2946500000003,
+      "current_baseline_mj": 2784.2946500000003,
+      "improvement_over_baseline_pct": 0.0,
+      "f3_evals_used_so_far": 3,
+      "surrogate_trained": true,
+      "used_fallback_escape": true,
+      "candidates": [
+        {
+          "iteration": 2,
+          "operator": "GenericSemanticRewriteLLM",
+          "tier": "H",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": 2846.1762166666667,
+          "surrogate_std_mj": 0.1616924317589598,
+          "ei_score": 0.0,
+          "f1_mj": 2610.0276,
+          "f1_improvement_pct": 6.258929887323528,
+          "f1_abandoned": false,
+          "f2_mj": 2917.935142857143,
+          "f2_improvement_pct": -4.799797063760569,
+          "f2_abandoned": false,
+          "f3_mj": 2747.5210500000003,
+          "f3_improvement_pct": 1.3207510203706252,
+          "f3_std_mj": 376.0639776346118,
+          "f3_co2_ug": 7250.402770833334,
+          "statistically_significant": false,
+          "confirmed_improvement": false,
+          "transformed_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n\n\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n\n_ALU_STR = sub(r'\\s+', '', \"\"\"\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\"\"\")\n\n_ALU_BYTEARRAY = bytearray(_ALU_STR, 'utf8')\n\n_IUB_ALPHABET = list(zip_longest('acgtBDHKMNRSVWY', (.27, .12, .12, .27), fillvalue=.02))\n\n_HOMOSAPIENS_ALPHABET = list(zip('acgt', (0.3029549426680, 0.1979883004921,\n                                  0.1975473066391, 0.3015094502008)))\n\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate(p * _IM for _, p in alphabet))\n    table = bytearray.maketrans(\n        bytes(chain(range(len(alphabet)), [255])),\n        bytes(chain((ord(c) for c, _ in alphabet), [10])))\n    return probs, table\n\n_PROBS_IUB, _TBL_IUB = _probs_and_table(_IUB_ALPHABET)\n_PROBS_HS, _TBL_HS = _probs_and_table(_HOMOSAPIENS_ALPHABET)\n\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    segments = []\n    for i in range(0, n, _WIDTH):\n        segments.append(sequence[i:min(i + _WIDTH, n)])\n        segments.append(newline)\n    \n    out = b''.join(segments)\n    return out.translate(table) if table else out\n\n\ndef _lcg_indices(seed, count, probs):\n    vals = bytearray(count)\n    for k in range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return vals, seed\n\n\ndef fasta_run(n):\n    parts = []\n\n    alu_copy = bytearray(_ALU_BYTEARRAY)\n    while len(alu_copy) < n * 2:\n        alu_copy.extend(alu_copy)\n    parts.append(b'>ONE Homo sapiens alu\\n')\n    parts.append(_write_lines(alu_copy, n * 2))\n\n    vals_iub, seed = _lcg_indices(42.0, n * 3, _PROBS_IUB)\n    parts.append(b'>TWO IUB ambiguity codes\\n')\n    parts.append(_write_lines(vals_iub, len(vals_iub), newline=b'\\xff', table=_TBL_IUB))\n\n    vals_hs, seed = _lcg_indices(seed, n * 5, _PROBS_HS)\n    parts.append(b'>THREE Homo sapiens frequency\\n')\n    parts.append(_write_lines(vals_hs, len(vals_hs), newline=b'\\xff', table=_TBL_HS))\n\n    return b''.join(parts)",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1,
+          "f1_cv": 0.09869928536778878,
+          "f2_cv": 0.03248463986331481,
+          "f3_cv": 0.13687392045080482,
+          "f3_ci_low_mj": 2576.1438999999996,
+          "f3_ci_high_mj": 2905.56195,
+          "f1_p_improvement": 0.8970486356575205,
+          "f2_p_improvement": 0.99578186519284,
+          "f3_p_improvement": 0.6637841488877992,
+          "f1_welch_t": 1.497054210614501,
+          "f2_welch_t": -3.3817501766895868,
+          "f3_welch_t": 0.4289549569938439,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=0.897 >= 0.100  CV=0.10",
+          "f2_abandon_reason": "P(better)=0.996 >= 0.250  CV=0.03",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 2631.4629999999997,
+          "f2_trimmed_mean_mj": 2916.6674000000003,
+          "f3_trimmed_mean_mj": 2747.9211666666665,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 1,
+          "f3_outliers_removed": 0
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "n_candidates_generated": 1,
+      "n_correctness_pass": 1,
+      "n_correctness_fail": 0,
+      "n_surrogate_screened_in": 1,
+      "n_surrogate_screened_out": 0,
+      "selected_operator": "ManualReductionToBuiltinsLLM",
+      "selected_tier": "M",
+      "wall_clock_s": 79.63035051900079,
+      "best_energy_mj": 2784.2946500000003,
+      "current_baseline_mj": 2784.2946500000003,
+      "improvement_over_baseline_pct": 0.0,
+      "f3_evals_used_so_far": 4,
+      "surrogate_trained": true,
+      "used_fallback_escape": false,
+      "candidates": [
+        {
+          "iteration": 3,
+          "operator": "ManualReductionToBuiltinsLLM",
+          "tier": "M",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": 2821.6124541666663,
+          "surrogate_std_mj": 0.19846936594669182,
+          "ei_score": 0.0,
+          "f1_mj": 2864.7754,
+          "f1_improvement_pct": -2.890525613012973,
+          "f1_abandoned": false,
+          "f2_mj": 2845.6871428571435,
+          "f2_improvement_pct": -2.204956751152154,
+          "f2_abandoned": false,
+          "f3_mj": 2814.1376999999998,
+          "f3_improvement_pct": -1.0718351953159733,
+          "f3_std_mj": 61.35058622814325,
+          "f3_co2_ug": 7426.196708333332,
+          "statistically_significant": false,
+          "confirmed_improvement": false,
+          "transformed_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n\n\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n\n_ALU = sub(r'\\s+', '', \"\"\"\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\"\"\")\n\n_IUB = list(zip_longest('acgtBDHKMNRSVWY', (.27, .12, .12, .27), fillvalue=.02))\n\n_HOMOSAPIENS = list(zip('acgt', (0.3029549426680, 0.1979883004921,\n                                  0.1975473066391, 0.3015094502008)))\n\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate(p * _IM for _, p in alphabet))\n    table = bytearray.maketrans(\n        bytes(chain(range(len(alphabet)), [255])),\n        bytes(chain((ord(c) for c, _ in alphabet), [10])))\n    return probs, table\n\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    out = bytearray(b''.join(\n        sequence[i:min(i + _WIDTH, n)] + newline\n        for i in range(0, n, _WIDTH)\n    ))\n    return out.translate(table) if table else bytes(out)\n\n\ndef _lcg_indices(seed, count, probs):\n    vals = bytearray(count)\n    for k in range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return vals, seed\n\n\ndef fasta_run(n):\n    # Section ONE: copy from ALU repeat.\n    alu = bytearray(_ALU, 'utf8')\n    while len(alu) < n * 2:\n        alu.extend(alu)\n\n    # Section TWO: IUB ambiguity codes (random selection).\n    probs_iub, tbl_iub = _probs_and_table(_IUB)\n    vals_iub, seed = _lcg_indices(42.0, n * 3, probs_iub)\n\n    # Section THREE: Homo sapiens frequency (seed continues from TWO).\n    probs_hs, tbl_hs = _probs_and_table(_HOMOSAPIENS)\n    vals_hs, seed = _lcg_indices(seed, n * 5, probs_hs)\n\n    parts = [\n        b'>ONE Homo sapiens alu\\n',\n        _write_lines(alu, n * 2),\n        b'>TWO IUB ambiguity codes\\n',\n        _write_lines(vals_iub, len(vals_iub), newline=b'\\xff', table=tbl_iub),\n        b'>THREE Homo sapiens frequency\\n',\n        _write_lines(vals_hs, len(vals_hs), newline=b'\\xff', table=tbl_hs)\n    ]\n\n    return bytes(b''.join(parts))",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1,
+          "f1_cv": 0.02511294817072197,
+          "f2_cv": 0.010535768699025548,
+          "f3_cv": 0.02180084728197318,
+          "f3_ci_low_mj": 2786.89475,
+          "f3_ci_high_mj": 2843.8711000000003,
+          "f1_p_improvement": 0.967134646801848,
+          "f2_p_improvement": 0.9972301134424366,
+          "f3_p_improvement": 0.08349344966355521,
+          "f1_welch_t": -2.2208015639083993,
+          "f2_welch_t": -3.044770855880286,
+          "f3_welch_t": -1.381950503718556,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=0.967 >= 0.100  CV=0.03",
+          "f2_abandon_reason": "P(better)=0.997 >= 0.250  CV=0.01",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 2843.397,
+          "f2_trimmed_mean_mj": 2840.7278000000006,
+          "f3_trimmed_mean_mj": 2810.956722222222,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 1,
+          "f3_outliers_removed": 0
+        }
+      ]
+    }
+  ],
+  "surrogate_pred_vs_actual": [
+    [
+      2846.1762166666667,
+      2747.5210500000003
+    ],
+    [
+      2821.6124541666663,
+      2814.1376999999998
+    ]
+  ],
+  "operator_stats": {
+    "LoopGlobalToLocalHoisting": {
+      "tier": "L",
+      "is_llm": false,
+      "n_generated": 1,
+      "n_correct": 1,
+      "n_f3": 1,
+      "n_confirmed": 0,
+      "improvements_pct": [],
+      "f3_mj": [
+        2867.5097500000006
+      ],
+      "ei_scores": [
+        1.0
+      ],
+      "inner_loop_multipliers": [],
+      "f1_cvs": [
+        0.03724464001019793
+      ],
+      "f2_cvs": [
+        0.024034083619001775
+      ],
+      "f3_cvs": [
+        0.023372870386647378
+      ],
+      "f1_p_improvements": [
+        0.8975163304428576
+      ],
+      "f2_p_improvements": [
+        0.9985298955325351
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    },
+    "LoopInvariantHoistingLLM": {
+      "tier": "M",
+      "is_llm": true,
+      "n_generated": 1,
+      "n_correct": 1,
+      "n_f3": 1,
+      "n_confirmed": 1,
+      "improvements_pct": [
+        -3.7327371224880945
+      ],
+      "f3_mj": [
+        2888.22505
+      ],
+      "ei_scores": [
+        1.0
+      ],
+      "inner_loop_multipliers": [],
+      "f1_cvs": [
+        0.01782356928703312
+      ],
+      "f2_cvs": [
+        0.012772127222350426
+      ],
+      "f3_cvs": [
+        0.059339081198356645
+      ],
+      "f1_p_improvements": [
+        0.770344430665884
+      ],
+      "f2_p_improvements": [
+        0.7528512928131377
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    },
+    "GenericSemanticRewriteLLM": {
+      "tier": "H",
+      "is_llm": true,
+      "n_generated": 1,
+      "n_correct": 1,
+      "n_f3": 1,
+      "n_confirmed": 0,
+      "improvements_pct": [],
+      "f3_mj": [
+        2747.5210500000003
+      ],
+      "ei_scores": [],
+      "inner_loop_multipliers": [],
+      "f1_cvs": [
+        0.09869928536778878
+      ],
+      "f2_cvs": [
+        0.03248463986331481
+      ],
+      "f3_cvs": [
+        0.13687392045080482
+      ],
+      "f1_p_improvements": [
+        0.8970486356575205
+      ],
+      "f2_p_improvements": [
+        0.99578186519284
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    },
+    "ManualReductionToBuiltinsLLM": {
+      "tier": "M",
+      "is_llm": true,
+      "n_generated": 1,
+      "n_correct": 1,
+      "n_f3": 1,
+      "n_confirmed": 0,
+      "improvements_pct": [],
+      "f3_mj": [
+        2814.1376999999998
+      ],
+      "ei_scores": [],
+      "inner_loop_multipliers": [],
+      "f1_cvs": [
+        0.02511294817072197
+      ],
+      "f2_cvs": [
+        0.010535768699025548
+      ],
+      "f3_cvs": [
+        0.02180084728197318
+      ],
+      "f1_p_improvements": [
+        0.967134646801848
+      ],
+      "f2_p_improvements": [
+        0.9972301134424366
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    }
+  }
+}

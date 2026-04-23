@@ -1,0 +1,50 @@
+{
+  "function": "fasta_run",
+  "original_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n\n\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n\n_ALU = sub(r'\\s+', '', \"\"\"\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\"\"\")\n\n_IUB = list(zip_longest('acgtBDHKMNRSVWY', (.27, .12, .12, .27), fillvalue=.02))\n\n_HOMOSAPIENS = list(zip('acgt', (0.3029549426680, 0.1979883004921,\n                                  0.1975473066391, 0.3015094502008)))\n\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate(p * _IM for _, p in alphabet))\n    table = bytearray.maketrans(\n        bytes(chain(range(len(alphabet)), [255])),\n        bytes(chain((ord(c) for c, _ in alphabet), [10])))\n    return probs, table\n\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    out = bytearray()\n    i = 0\n    while i + _WIDTH <= n:\n        out += sequence[i:i + _WIDTH] + newline\n        i += _WIDTH\n    if i < n:\n        out += sequence[i:n] + newline\n    return out.translate(table) if table else bytes(out)\n\n\ndef _lcg_indices(seed, count, probs):\n    vals = bytearray(count)\n    for k in range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return vals, seed\n\n\ndef fasta_run(n):\n    result = bytearray()\n\n    # Section ONE: copy from ALU repeat.\n    alu = bytearray(_ALU, 'utf8')\n    while len(alu) < n * 2:\n        alu.extend(alu)\n    result += b'>ONE Homo sapiens alu\\n'\n    result += _write_lines(alu, n * 2)\n\n    # Section TWO: IUB ambiguity codes (random selection).\n    probs_iub, tbl_iub = _probs_and_table(_IUB)\n    vals, seed = _lcg_indices(42.0, n * 3, probs_iub)\n    result += b'>TWO IUB ambiguity codes\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_iub)\n\n    # Section THREE: Homo sapiens frequency (seed continues from TWO).\n    probs_hs, tbl_hs = _probs_and_table(_HOMOSAPIENS)\n    vals, seed = _lcg_indices(seed, n * 5, probs_hs)\n    result += b'>THREE Homo sapiens frequency\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_hs)\n\n    return bytes(result)",
+  "best_source": "from bisect import bisect\nfrom itertools import accumulate, chain, zip_longest\nfrom re import sub\n\n\n_IM = 139968.0\n_IA = 3877.0\n_IC = 29573.0\n_WIDTH = 60\n\n_ALU = sub(r'\\s+', '', \"\"\"\nGGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACT\nAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAG\nGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCG\nCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\"\"\")\n\n_IUB = list(zip_longest('acgtBDHKMNRSVWY', (.27, .12, .12, .27), fillvalue=.02))\n\n_HOMOSAPIENS = list(zip('acgt', (0.3029549426680, 0.1979883004921,\n                                  0.1975473066391, 0.3015094502008)))\n\n\ndef _probs_and_table(alphabet):\n    probs = tuple(accumulate(p * _IM for _, p in alphabet))\n    table = bytearray.maketrans(\n        bytes(chain(range(len(alphabet)), [255])),\n        bytes(chain((ord(c) for c, _ in alphabet), [10])))\n    return probs, table\n\n\ndef _write_lines(sequence, n, newline=b'\\n', table=None):\n    out = bytearray()\n    i = 0\n    while i + _WIDTH <= n:\n        out += sequence[i:i + _WIDTH] + newline\n        i += _WIDTH\n    if i < n:\n        out += sequence[i:n] + newline\n    return out.translate(table) if table else bytes(out)\n\n\ndef _lcg_indices(seed, count, probs):\n    vals = bytearray(count)\n    for k in range(count):\n        seed = (seed * _IA + _IC) % _IM\n        vals[k] = bisect(probs, seed)\n    return vals, seed\n\n\ndef fasta_run(n):\n    result = bytearray()\n\n    # Section ONE: copy from ALU repeat.\n    alu = bytearray(_ALU, 'utf8')\n    while len(alu) < n * 2:\n        alu.extend(alu)\n    result += b'>ONE Homo sapiens alu\\n'\n    result += _write_lines(alu, n * 2)\n\n    # Section TWO: IUB ambiguity codes (random selection).\n    probs_iub, tbl_iub = _probs_and_table(_IUB)\n    vals, seed = _lcg_indices(42.0, n * 3, probs_iub)\n    result += b'>TWO IUB ambiguity codes\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_iub)\n\n    # Section THREE: Homo sapiens frequency (seed continues from TWO).\n    probs_hs, tbl_hs = _probs_and_table(_HOMOSAPIENS)\n    vals, seed = _lcg_indices(seed, n * 5, probs_hs)\n    result += b'>THREE Homo sapiens frequency\\n'\n    result += _write_lines(vals, len(vals), newline=b'\\xff', table=tbl_hs)\n\n    return bytes(result)",
+  "chain": [],
+  "improvement_pct": 0.0,
+  "baseline_mj": 2784.29465,
+  "baseline_std_mj": 74.584711,
+  "best_mj": 2784.29465,
+  "co2_search_ug": 42367.24,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 4,
+  "ei_top_k": 2,
+  "wall_s": 204.65,
+  "energy_backend": "rapl",
+  "fallback_escapes_used": 1,
+  "llm_retries": 0,
+  "isolation_successes": 13,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 4,
+    "n_f2_f3_pairs": 4,
+    "f1_f3_pearson": null,
+    "f2_f3_pearson": null,
+    "f1_f3_mae": null,
+    "f2_f3_mae": null,
+    "f1_f3_bias": null,
+    "f2_f3_bias": null,
+    "effective_p_abandon_f1": 0.1,
+    "effective_p_abandon_f2": 0.25
+  },
+  "operator_stats": {
+    "LoopGlobalToLocalHoisting": {
+      "attempts": 1,
+      "confirmations": 0,
+      "rate": 0.0
+    },
+    "ManualReductionToBuiltinsLLM": {
+      "attempts": 1,
+      "confirmations": 0,
+      "rate": 0.0
+    },
+    "LoopInvariantHoistingLLM": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    }
+  }
+}
