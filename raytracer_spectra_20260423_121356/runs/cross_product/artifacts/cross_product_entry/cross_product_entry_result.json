@@ -1,0 +1,42 @@
+{
+  "function": "cross_product_entry",
+  "original_source": "\"\"\"Ray Tracer Challenge - Vector cross product\nSource: ray_tracer_challenge/tuples.py + utilities.py\n\nEntry point: cross_product_entry(ui, uj, uk, vi, vj, vk) -> tuple[float, float, float]\nReturns (i, j, k) components of the cross product as a plain tuple.\n\"\"\"\nfrom __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __sub__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(lambda x: x - v)\n        return self.__map_pair_wise(v, operator.sub)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    return (u * v).sum\n\n\ndef cross_product(u: Vector, v: Vector) -> Vector:\n    \"\"\"Compute the cross product of two vectors.\"\"\"\n    return Vector(\n        u.j * v.k - v.j * u.k,\n        v.i * u.k - u.i * v.k,\n        u.i * v.j - v.i * u.j,\n    )\n\n\ndef cross_product_entry(ui: float, uj: float, uk: float,\n                        vi: float, vj: float, vk: float) -> tuple:\n    \"\"\"Flat entry point: 6 scalars \u2192 (i, j, k) cross product tuple.\"\"\"\n    u = Vector(ui, uj, uk)\n    v = Vector(vi, vj, vk)\n    r = cross_product(u, v)\n    return (r.i, r.j, r.k)",
+  "best_source": "def cross_product_entry(ui: float, uj: float, uk: float,\n                        vi: float, vj: float, vk: float) -> tuple:\n    return (uj * vk - vj * uk,\n            vi * uk - ui * vk,\n            ui * vj - vi * uj)",
+  "chain": [
+    "GenericSemanticRewriteLLM"
+  ],
+  "improvement_pct": 25.649,
+  "baseline_mj": 1.991582,
+  "baseline_std_mj": 0.041069,
+  "best_mj": 1.480759,
+  "co2_search_ug": 3341.62,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 3,
+  "ei_top_k": 2,
+  "wall_s": 67.37,
+  "energy_backend": "rapl",
+  "fallback_escapes_used": 1,
+  "llm_retries": 0,
+  "isolation_successes": 10,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 3,
+    "n_f2_f3_pairs": 3,
+    "f1_f3_pearson": null,
+    "f2_f3_pearson": null,
+    "f1_f3_mae": null,
+    "f2_f3_mae": null,
+    "f1_f3_bias": null,
+    "f2_f3_bias": null,
+    "effective_p_abandon_f1": 0.1,
+    "effective_p_abandon_f2": 0.25
+  },
+  "operator_stats": {
+    "SlotsDelegateLLM": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    }
+  }
+}

@@ -1,0 +1,314 @@
+{
+  "function_name": "dot_product_entry",
+  "source_file": "/home/shailender/Documents/JOULE/raytracer_tasks/dot_product/target.py",
+  "original_source": "\"\"\"Ray Tracer Challenge - Vector dot product\nSource: ray_tracer_challenge/tuples.py + utilities.py\n\nEntry point: dot_product_entry(ui, uj, uk, vi, vj, vk) -> float\nUses flat primitive args to avoid cross-namespace class comparison issues.\n\"\"\"\nfrom __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    \"\"\"Compute dot product of two vectors.\"\"\"\n    return (u * v).sum\n\n\ndef dot_product_entry(ui: float, uj: float, uk: float,\n                      vi: float, vj: float, vk: float) -> float:\n    \"\"\"Flat entry point: 6 scalars \u2192 dot product scalar.\"\"\"\n    u = Vector(ui, uj, uk)\n    v = Vector(vi, vj, vk)\n    return dot_product(u, v)",
+  "best_source": "def dot_product_entry(ui: float, uj: float, uk: float,\n                      vi: float, vj: float, vk: float) -> float:\n    return ui * vi + uj * vj + uk * vk",
+  "energy_backend": "rapl",
+  "has_rapl": true,
+  "has_llm": true,
+  "llm_provider": "gemini-2.5-flash",
+  "co2_intensity_g_per_kwh": 475.0,
+  "baseline_mj": 2.2710053010471207,
+  "baseline_std_mj": 0.06537221250099923,
+  "baseline_co2_ug": 0.29964653277705067,
+  "best_mj": 1.5473360166964818,
+  "improvement_pct": 31.865592036133418,
+  "transformation_chain": [
+    "GenericSemanticRewriteLLM"
+  ],
+  "total_f3_evals": 3,
+  "max_f3_budget": 20,
+  "total_wall_s": 63.743019059998915,
+  "total_co2_search_ug": 3279.753148893085,
+  "total_fallback_escapes_used": 1,
+  "iterations": [
+    {
+      "iteration": 1,
+      "n_candidates_generated": 1,
+      "n_correctness_pass": 1,
+      "n_correctness_fail": 0,
+      "n_surrogate_screened_in": 0,
+      "n_surrogate_screened_out": 1,
+      "selected_operator": "SlotsDelegateLLM",
+      "selected_tier": "M",
+      "wall_clock_s": 13.352251962991431,
+      "best_energy_mj": 2.166369375,
+      "current_baseline_mj": 2.2710053010471207,
+      "improvement_over_baseline_pct": 4.607471677801678,
+      "f3_evals_used_so_far": 1,
+      "surrogate_trained": false,
+      "used_fallback_escape": false,
+      "candidates": [
+        {
+          "iteration": 1,
+          "operator": "SlotsDelegateLLM",
+          "tier": "M",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 2.1801271122320305,
+          "f1_improvement_pct": 4.0016722450268105,
+          "f1_abandoned": false,
+          "f2_mj": 2.132774318463445,
+          "f2_improvement_pct": 6.086774985507082,
+          "f2_abandoned": false,
+          "f3_mj": 2.1664945,
+          "f3_improvement_pct": 4.601962003300142,
+          "f3_std_mj": 0.03555917336073333,
+          "f3_co2_ug": 5.71713826388889,
+          "statistically_significant": true,
+          "confirmed_improvement": true,
+          "transformed_source": "from __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    __slots__ = ('i', 'j', 'k')\n\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    \"\"\"Compute dot product of two vectors.\"\"\"\n    return (u * v).sum\n\n\ndef dot_product_entry(ui: float, uj: float, uk: float,\n                      vi: float, vj: float, vk: float) -> float:\n    \"\"\"Flat entry point: 6 scalars \u2192 dot product scalar.\"\"\"\n    u = Vector(ui, uj, uk)\n    v = Vector(vi, vj, vk)\n    return dot_product(u, v)",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 800,
+          "f1_cv": 0.021301815153568254,
+          "f2_cv": 0.010427459186134639,
+          "f3_cv": 0.016413230387029982,
+          "f3_ci_low_mj": 2.1511289375000007,
+          "f3_ci_high_mj": 2.1822568125,
+          "f1_p_improvement": 0.9967408055757343,
+          "f2_p_improvement": 0.9999999955311212,
+          "f3_p_improvement": 0.9999996483800062,
+          "f1_welch_t": 3.578260346654734,
+          "f2_welch_t": 8.328070297962512,
+          "f3_welch_t": 6.2805900165334245,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=0.997 >= 0.100  CV=0.02",
+          "f2_abandon_reason": "P(better)=1.000 >= 0.250  CV=0.01",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 2.1774022698612856,
+          "f2_trimmed_mean_mj": 2.1297583643122677,
+          "f3_trimmed_mean_mj": 2.166369375,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 0,
+          "f3_outliers_removed": 0
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "n_candidates_generated": 2,
+      "n_correctness_pass": 2,
+      "n_correctness_fail": 0,
+      "n_surrogate_screened_in": 0,
+      "n_surrogate_screened_out": 2,
+      "selected_operator": "GenericSemanticRewriteLLM | GenericSemanticRewriteLLM",
+      "selected_tier": "H | H",
+      "wall_clock_s": 30.264299083006335,
+      "best_energy_mj": 1.5473360166964818,
+      "current_baseline_mj": 2.2710053010471207,
+      "improvement_over_baseline_pct": 31.865592036133418,
+      "f3_evals_used_so_far": 3,
+      "surrogate_trained": true,
+      "used_fallback_escape": true,
+      "candidates": [
+        {
+          "iteration": 2,
+          "operator": "GenericSemanticRewriteLLM",
+          "tier": "H",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 1.5560407566638004,
+          "f1_improvement_pct": 31.48229306438266,
+          "f1_abandoned": false,
+          "f2_mj": 1.5264604763912313,
+          "f2_improvement_pct": 32.78481227289928,
+          "f2_abandoned": false,
+          "f3_mj": 1.5474883273703042,
+          "f3_improvement_pct": 31.858885284997605,
+          "f3_std_mj": 0.028346317249139157,
+          "f3_co2_ug": 4.083649752782747,
+          "statistically_significant": true,
+          "confirmed_improvement": true,
+          "transformed_source": "def dot_product_entry(ui: float, uj: float, uk: float,\n                      vi: float, vj: float, vk: float) -> float:\n    return ui * vi + uj * vj + uk * vk",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1118,
+          "f1_cv": 0.015786928968930403,
+          "f2_cv": 0.011014625291279527,
+          "f3_cv": 0.01831762912054332,
+          "f3_ci_low_mj": 1.5347298300536671,
+          "f3_ci_high_mj": 1.5584203935599283,
+          "f1_p_improvement": 1.0,
+          "f2_p_improvement": 1.0,
+          "f3_p_improvement": 1.0,
+          "f1_welch_t": 39.09974997881856,
+          "f2_welch_t": 47.182420232529516,
+          "f3_welch_t": 45.410724935231464,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=1.000 >= 0.100  CV=0.02",
+          "f2_abandon_reason": "P(better)=1.000 >= 0.250  CV=0.01",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 1.5619466895958727,
+          "f2_trimmed_mean_mj": 1.5237736087689717,
+          "f3_trimmed_mean_mj": 1.5473360166964818,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 0,
+          "f3_outliers_removed": 0
+        },
+        {
+          "iteration": 2,
+          "operator": "GenericSemanticRewriteLLM",
+          "tier": "H",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 1.600374164408311,
+          "f1_improvement_pct": 29.530144043679407,
+          "f1_abandoned": false,
+          "f2_mj": 1.544809005741916,
+          "f2_improvement_pct": 31.97686482591513,
+          "f2_abandoned": false,
+          "f3_mj": 1.576457218309859,
+          "f3_improvement_pct": 30.58328760470167,
+          "f3_std_mj": 0.023558370996403087,
+          "f3_co2_ug": 4.160095437206572,
+          "statistically_significant": true,
+          "confirmed_improvement": true,
+          "transformed_source": "from __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    __slots__ = ('i', 'j', 'k')\n\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    \"\"\"Compute dot product of two vectors.\"\"\"\n    return (u * v).sum\n\n\ndef dot_product_entry(ui: float, uj: float, uk: float,\n                      vi: float, vj: float, vk: float) -> float:\n    \"\"\"Flat entry point: 6 scalars \u2192 dot product scalar.\"\"\"\n    return ui * vi + uj * vj + uk * vk",
+          "chain_depth": 2,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1136,
+          "f1_cv": 0.011176406013812742,
+          "f2_cv": 0.009234511017141258,
+          "f3_cv": 0.014943869534030447,
+          "f3_ci_low_mj": 1.5671544014084506,
+          "f3_ci_high_mj": 1.585865008802817,
+          "f1_p_improvement": 1.0,
+          "f2_p_improvement": 1.0,
+          "f3_p_improvement": 1.0,
+          "f1_welch_t": 40.24631478700156,
+          "f2_welch_t": 46.15130447084292,
+          "f3_welch_t": 44.70027159804291,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=1.000 >= 0.100  CV=0.01",
+          "f2_abandon_reason": "P(better)=1.000 >= 0.250  CV=0.01",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 1.6024953327311053,
+          "f2_trimmed_mean_mj": 1.5481475521305532,
+          "f3_trimmed_mean_mj": 1.5758510367762129,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 2,
+          "f3_outliers_removed": 0
+        }
+      ]
+    }
+  ],
+  "surrogate_pred_vs_actual": [],
+  "operator_stats": {
+    "SlotsDelegateLLM": {
+      "tier": "M",
+      "is_llm": true,
+      "n_generated": 1,
+      "n_correct": 1,
+      "n_f3": 1,
+      "n_confirmed": 1,
+      "improvements_pct": [
+        4.601962003300142
+      ],
+      "f3_mj": [
+        2.1664945
+      ],
+      "ei_scores": [
+        1.0
+      ],
+      "inner_loop_multipliers": [
+        800
+      ],
+      "f1_cvs": [
+        0.021301815153568254
+      ],
+      "f2_cvs": [
+        0.010427459186134639
+      ],
+      "f3_cvs": [
+        0.016413230387029982
+      ],
+      "f1_p_improvements": [
+        0.9967408055757343
+      ],
+      "f2_p_improvements": [
+        0.9999999955311212
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    },
+    "GenericSemanticRewriteLLM": {
+      "tier": "H",
+      "is_llm": true,
+      "n_generated": 2,
+      "n_correct": 2,
+      "n_f3": 2,
+      "n_confirmed": 2,
+      "improvements_pct": [
+        31.858885284997605,
+        30.58328760470167
+      ],
+      "f3_mj": [
+        1.5474883273703042,
+        1.576457218309859
+      ],
+      "ei_scores": [
+        1.0,
+        1.0
+      ],
+      "inner_loop_multipliers": [
+        1118,
+        1136
+      ],
+      "f1_cvs": [
+        0.015786928968930403,
+        0.011176406013812742
+      ],
+      "f2_cvs": [
+        0.011014625291279527,
+        0.009234511017141258
+      ],
+      "f3_cvs": [
+        0.01831762912054332,
+        0.014943869534030447
+      ],
+      "f1_p_improvements": [
+        1.0,
+        1.0
+      ],
+      "f2_p_improvements": [
+        1.0,
+        1.0
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    }
+  }
+}

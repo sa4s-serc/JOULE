@@ -1,0 +1,44 @@
+{
+  "function": "hadamard_product_entry",
+  "original_source": "\"\"\"Ray Tracer Challenge - Color Hadamard (element-wise) product\nSource: ray_tracer_challenge/color.py + utilities.py\n\nhadamard_product(c1, c2) = Color(c1.red*c2.red, c1.green*c2.green, c1.blue*c2.blue)\n\nEntry point: hadamard_product_entry(r1,g1,b1,r2,g2,b2) -> tuple[float,float,float]\n\"\"\"\nfrom __future__ import annotations\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\ndef clamp_number(number: float, minimum: float, maximum: float) -> float:\n    if number >= maximum:\n        return maximum\n    elif number <= minimum:\n        return minimum\n    else:\n        return number\n\n\nclass Color:\n    def __init__(self, red: float, green: float, blue: float) -> None:\n        self.red = red\n        self.green = green\n        self.blue = blue\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Color:\n        return Color(op(self.red), op(self.green), op(self.blue))\n\n    def __map_pair_wise(self, c: Color, op: Callable[[float, float], float]) -> Color:\n        return Color(op(self.red, c.red), op(self.green, c.green), op(self.blue, c.blue))\n\n    def __add__(self, c: Color | float) -> Color:\n        if isinstance(c, (int, float)):\n            return self.__map_element_wise(partial(operator.add, c))\n        return self.__map_pair_wise(c, operator.add)\n\n    def __radd__(self, c: Color | float) -> Color:\n        return self * c\n\n    def __sub__(self, c: Color | float) -> Color:\n        if isinstance(c, (int, float)):\n            return self.__map_element_wise(lambda x: x - c)\n        return self.__map_pair_wise(c, operator.sub)\n\n    def __mul__(self, c: Color | float) -> Color:\n        if isinstance(c, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, c))\n        return self.__map_pair_wise(c, operator.mul)\n\n    def __rmul__(self, c: float) -> Color:\n        return self * c\n\n    def __truediv__(self, c: float) -> Color:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Color:\n        return Color(-self.red, -self.green, -self.blue)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Color):\n            return NotImplemented\n        return (\n            compare_float(self.red, other.red)\n            and compare_float(self.green, other.green)\n            and compare_float(self.blue, other.blue)\n        )\n\n    def clamp(self, minimum: float, maximum: float) -> Color:\n        return self.__map_element_wise(lambda x: clamp_number(x, minimum, maximum))\n\n    def as_rgb_list(self) -> list:\n        def expand_to_byte(value: float) -> int:\n            return int(clamp_number(0, 255, value * 255.0))\n        return [expand_to_byte(self.red), expand_to_byte(self.green), expand_to_byte(self.blue)]\n\n\ndef hadamard_product(c1: Color, c2: Color) -> Color:\n    \"\"\"Element-wise (Schur) product of two colors.\"\"\"\n    return c1 * c2\n\n\ndef hadamard_product_entry(r1: float, g1: float, b1: float,\n                            r2: float, g2: float, b2: float) -> tuple:\n    \"\"\"Flat entry point: two (r,g,b) triples \u2192 (r,g,b) product tuple.\"\"\"\n    c1 = Color(r1, g1, b1)\n    c2 = Color(r2, g2, b2)\n    result = hadamard_product(c1, c2)\n    return (result.red, result.green, result.blue)",
+  "best_source": "from __future__ import annotations\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\ndef clamp_number(number: float, minimum: float, maximum: float) -> float:\n    return max(minimum, min(number, maximum))\n\n\nclass Color:\n    __slots__ = ('red', 'green', 'blue')\n\n    def __init__(self, red: float, green: float, blue: float) -> None:\n        self.red = red\n        self.green = green\n        self.blue = blue\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Color:\n        return Color(op(self.red), op(self.green), op(self.blue))\n\n    def __map_pair_wise(self, c: Color, op: Callable[[float, float], float]) -> Color:\n        return Color(op(self.red, c.red), op(self.green, c.green), op(self.blue, c.blue))\n\n    def __add__(self, c: Color | float) -> Color:\n        if isinstance(c, (int, float)):\n            return self.__map_element_wise(partial(operator.add, c))\n        return self.__map_pair_wise(c, operator.add)\n\n    def __radd__(self, c: Color | float) -> Color:\n        return self + c\n\n    def __sub__(self, c: Color | float) -> Color:\n        if isinstance(c, (int, float)):\n            return self.__map_element_wise(lambda x: x - c)\n        return self.__map_pair_wise(c, operator.sub)\n\n    def __mul__(self, c: Color | float) -> Color:\n        if isinstance(c, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, c))\n        return self.__map_pair_wise(c, operator.mul)\n\n    def __rmul__(self, c: float) -> Color:\n        return self * c\n\n    def __truediv__(self, c: float) -> Color:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Color:\n        return Color(-self.red, -self.green, -self.blue)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Color):\n            return NotImplemented\n        return (\n            compare_float(self.red, other.red)\n            and compare_float(self.green, other.green)\n            and compare_float(self.blue, other.blue)\n        )\n\n    def clamp(self, minimum: float, maximum: float) -> Color:\n        return self.__map_element_wise(lambda x: clamp_number(x, minimum, maximum))\n\n    def as_rgb_list(self) -> list[int]:\n        _255_f = 255.0\n        return [\n            int(clamp_number(val * _255_f, 0.0, _255_f))\n            for val in (self.red, self.green, self.blue)\n        ]\n\n\ndef hadamard_product(c1: Color, c2: Color) -> Color:\n    \"\"\"Element-wise (Schur) product of two colors.\"\"\"\n    return c1 * c2\n\n\ndef hadamard_product_entry(r1: float, g1: float, b1: float,\n                            r2: float, g2: float, b2: float) -> tuple:\n    \"\"\"Flat entry point: two (r,g,b) triples \u2192 (r,g,b) product tuple.\"\"\"\n    return (r1 * r2, g1 * g2, b1 * b2)",
+  "chain": [
+    "SlotsDelegateLLM",
+    "GenericSemanticRewriteLLM",
+    "GenericSemanticRewriteLLM"
+  ],
+  "improvement_pct": 32.231,
+  "baseline_mj": 2.258931,
+  "baseline_std_mj": 0.080901,
+  "best_mj": 1.530857,
+  "co2_search_ug": 8141.902,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 7,
+  "ei_top_k": 2,
+  "wall_s": 212.92,
+  "energy_backend": "rapl",
+  "fallback_escapes_used": 3,
+  "llm_retries": 0,
+  "isolation_successes": 22,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 7,
+    "n_f2_f3_pairs": 7,
+    "f1_f3_pearson": 0.9962576162483233,
+    "f2_f3_pearson": 0.9979521049650664,
+    "f1_f3_mae": 0.00906320875438414,
+    "f2_f3_mae": 0.006769986882813764,
+    "f1_f3_bias": 0.0003163878686064857,
+    "f2_f3_bias": -0.0017175663709100603,
+    "effective_p_abandon_f1": 0.2,
+    "effective_p_abandon_f2": 0.375
+  },
+  "operator_stats": {
+    "SlotsDelegateLLM": {
+      "attempts": 2,
+      "confirmations": 2,
+      "rate": 1.0
+    }
+  }
+}

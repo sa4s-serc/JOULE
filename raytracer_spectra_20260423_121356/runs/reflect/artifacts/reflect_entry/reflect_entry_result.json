@@ -1,0 +1,43 @@
+{
+  "function": "reflect_entry",
+  "original_source": "\"\"\"Ray Tracer Challenge - Vector reflection\nSource: ray_tracer_challenge/tuples.py + utilities.py\n\nreflect(vector, normal) = vector - 2 * dot(vector, normal) * normal\n\nEntry point: reflect_entry(vi, vj, vk, ni, nj, nk) -> tuple[float, float, float]\nBoth inputs are flat scalars; returns the reflected vector as a plain tuple.\n\"\"\"\nfrom __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __sub__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(lambda x: x - v)\n        return self.__map_pair_wise(v, operator.sub)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    return (u * v).sum\n\n\ndef reflect(vector: Vector, normal: Vector) -> Vector:\n    \"\"\"Reflect vector across the normal vector.\"\"\"\n    return vector - 2 * dot_product(vector, normal) * normal\n\n\ndef reflect_entry(vi: float, vj: float, vk: float,\n                  ni: float, nj: float, nk: float) -> tuple:\n    \"\"\"Flat entry point: (vector i,j,k) and (normal i,j,k) \u2192 reflected (i, j, k).\"\"\"\n    vector = Vector(vi, vj, vk)\n    normal = Vector(ni, nj, nk)\n    r = reflect(vector, normal)\n    return (r.i, r.j, r.k)",
+  "best_source": "from __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    __slots__ = ('i', 'j', 'k')\n\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __sub__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(lambda x: x - v)\n        return self.__map_pair_wise(v, operator.sub)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    return (u * v).sum\n\n\ndef reflect(vector: Vector, normal: Vector) -> Vector:\n    \"\"\"Reflect vector across the normal vector.\"\"\"\n    return vector - 2 * dot_product(vector, normal) * normal\n\n\ndef reflect_entry(vi: float, vj: float, vk: float,\n                  ni: float, nj: float, nk: float) -> tuple:\n    \"\"\"Flat entry point: (vector i,j,k) and (normal i,j,k) \u2192 reflected (i, j, k).\"\"\"\n    dp_val = vi * ni + vj * nj + vk * nk\n    scalar_factor = 2 * dp_val\n    ri = vi - scalar_factor * ni\n    rj = vj - scalar_factor * nj\n    rk = vk - scalar_factor * nk\n    return (ri, rj, rk)",
+  "chain": [
+    "SlotsDelegateLLM",
+    "GenericSemanticRewriteLLM"
+  ],
+  "improvement_pct": 48.941,
+  "baseline_mj": 2.784709,
+  "baseline_std_mj": 0.066568,
+  "best_mj": 1.421856,
+  "co2_search_ug": 3268.049,
+  "co2_intensity_g_per_kwh": 475.0,
+  "f3_evals": 3,
+  "ei_top_k": 2,
+  "wall_s": 91.45,
+  "energy_backend": "rapl",
+  "fallback_escapes_used": 1,
+  "llm_retries": 0,
+  "isolation_successes": 10,
+  "isolation_failures": 0,
+  "adaptive_rep_escalations": 0,
+  "calibrator": {
+    "n_f1_f3_pairs": 3,
+    "n_f2_f3_pairs": 3,
+    "f1_f3_pearson": null,
+    "f2_f3_pearson": null,
+    "f1_f3_mae": null,
+    "f2_f3_mae": null,
+    "f1_f3_bias": null,
+    "f2_f3_bias": null,
+    "effective_p_abandon_f1": 0.1,
+    "effective_p_abandon_f2": 0.25
+  },
+  "operator_stats": {
+    "SlotsDelegateLLM": {
+      "attempts": 1,
+      "confirmations": 1,
+      "rate": 1.0
+    }
+  }
+}

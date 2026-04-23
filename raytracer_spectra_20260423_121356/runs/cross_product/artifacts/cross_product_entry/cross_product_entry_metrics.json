@@ -1,0 +1,314 @@
+{
+  "function_name": "cross_product_entry",
+  "source_file": "/home/shailender/Documents/JOULE/raytracer_tasks/cross_product/target.py",
+  "original_source": "\"\"\"Ray Tracer Challenge - Vector cross product\nSource: ray_tracer_challenge/tuples.py + utilities.py\n\nEntry point: cross_product_entry(ui, uj, uk, vi, vj, vk) -> tuple[float, float, float]\nReturns (i, j, k) components of the cross product as a plain tuple.\n\"\"\"\nfrom __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __sub__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(lambda x: x - v)\n        return self.__map_pair_wise(v, operator.sub)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    return (u * v).sum\n\n\ndef cross_product(u: Vector, v: Vector) -> Vector:\n    \"\"\"Compute the cross product of two vectors.\"\"\"\n    return Vector(\n        u.j * v.k - v.j * u.k,\n        v.i * u.k - u.i * v.k,\n        u.i * v.j - v.i * u.j,\n    )\n\n\ndef cross_product_entry(ui: float, uj: float, uk: float,\n                        vi: float, vj: float, vk: float) -> tuple:\n    \"\"\"Flat entry point: 6 scalars \u2192 (i, j, k) cross product tuple.\"\"\"\n    u = Vector(ui, uj, uk)\n    v = Vector(vi, vj, vk)\n    r = cross_product(u, v)\n    return (r.i, r.j, r.k)",
+  "best_source": "def cross_product_entry(ui: float, uj: float, uk: float,\n                        vi: float, vj: float, vk: float) -> tuple:\n    return (uj * vk - vj * uk,\n            vi * uk - ui * vk,\n            ui * vj - vi * uj)",
+  "energy_backend": "rapl",
+  "has_rapl": true,
+  "has_llm": true,
+  "llm_provider": "gemini-2.5-flash",
+  "co2_intensity_g_per_kwh": 475.0,
+  "baseline_mj": 1.991582021857923,
+  "baseline_std_mj": 0.041069397329120544,
+  "baseline_co2_ug": 0.2627781834395871,
+  "best_mj": 1.4807591834879072,
+  "improvement_pct": 25.6490986945883,
+  "transformation_chain": [
+    "GenericSemanticRewriteLLM"
+  ],
+  "total_f3_evals": 3,
+  "max_f3_budget": 20,
+  "total_wall_s": 65.21323603700148,
+  "total_co2_search_ug": 3341.619901254943,
+  "total_fallback_escapes_used": 1,
+  "iterations": [
+    {
+      "iteration": 1,
+      "n_candidates_generated": 1,
+      "n_correctness_pass": 1,
+      "n_correctness_fail": 0,
+      "n_surrogate_screened_in": 0,
+      "n_surrogate_screened_out": 1,
+      "selected_operator": "SlotsDelegateLLM",
+      "selected_tier": "M",
+      "wall_clock_s": 13.388573725009337,
+      "best_energy_mj": 1.8606610286028604,
+      "current_baseline_mj": 1.991582021857923,
+      "improvement_over_baseline_pct": 6.5737183715350085,
+      "f3_evals_used_so_far": 1,
+      "surrogate_trained": false,
+      "used_fallback_escape": false,
+      "candidates": [
+        {
+          "iteration": 1,
+          "operator": "SlotsDelegateLLM",
+          "tier": "M",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 1.8341859110169492,
+          "f1_improvement_pct": 7.903069475097024,
+          "f1_abandoned": false,
+          "f2_mj": 1.8802710627753303,
+          "f2_improvement_pct": 5.589072298350639,
+          "f2_abandoned": false,
+          "f3_mj": 1.8609707920792082,
+          "f3_improvement_pct": 6.558164732621419,
+          "f3_std_mj": 0.0370281113272874,
+          "f3_co2_ug": 4.910895145764577,
+          "statistically_significant": true,
+          "confirmed_improvement": true,
+          "transformed_source": "from __future__ import annotations\nimport math\nimport operator\nfrom functools import partial\nfrom typing import Callable\n\nEPSILON: float = 0.00001\n\n\ndef compare_float(x: float, y: float) -> bool:\n    return abs(x - y) <= EPSILON\n\n\nclass Vector:\n    __slots__ = ('i', 'j', 'k')\n\n    def __init__(self, i: float, j: float, k: float) -> None:\n        self.i = i\n        self.j = j\n        self.k = k\n\n    def __map_element_wise(self, op: Callable[[float], float]) -> Vector:\n        return Vector(op(self.i), op(self.j), op(self.k))\n\n    def __map_pair_wise(self, v: Vector, op: Callable[[float, float], float]) -> Vector:\n        return Vector(op(self.i, v.i), op(self.j, v.j), op(self.k, v.k))\n\n    def __add__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.add, v))\n        return self.__map_pair_wise(v, operator.add)\n\n    def __sub__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(lambda x: x - v)\n        return self.__map_pair_wise(v, operator.sub)\n\n    def __mul__(self, v: Vector | float) -> Vector:\n        if isinstance(v, (int, float)):\n            return self.__map_element_wise(partial(operator.mul, v))\n        return self.__map_pair_wise(v, operator.mul)\n\n    def __rmul__(self, v: float) -> Vector:\n        return self * v\n\n    def __truediv__(self, c: float) -> Vector:\n        return self.__map_element_wise(lambda x: x / c)\n\n    def __neg__(self) -> Vector:\n        return Vector(-self.i, -self.j, -self.k)\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, Vector):\n            return NotImplemented\n        return (\n            compare_float(self.i, other.i)\n            and compare_float(self.j, other.j)\n            and compare_float(self.k, other.k)\n        )\n\n    @property\n    def sum(self) -> float:\n        return self.i + self.j + self.k\n\n    @property\n    def norm(self) -> float:\n        return math.sqrt(dot_product(self, self))\n\n    def normalize(self) -> Vector:\n        return self / self.norm\n\n\ndef dot_product(u: Vector, v: Vector) -> float:\n    return (u * v).sum\n\n\ndef cross_product(u: Vector, v: Vector) -> Vector:\n    \"\"\"Compute the cross product of two vectors.\"\"\"\n    return Vector(\n        u.j * v.k - v.j * u.k,\n        v.i * u.k - u.i * v.k,\n        u.i * v.j - v.i * u.j,\n    )\n\n\ndef cross_product_entry(ui: float, uj: float, uk: float,\n                        vi: float, vj: float, vk: float) -> tuple:\n    \"\"\"Flat entry point: 6 scalars \u2192 (i, j, k) cross product tuple.\"\"\"\n    u = Vector(ui, uj, uk)\n    v = Vector(vi, vj, vk)\n    r = cross_product(u, v)\n    return (r.i, r.j, r.k)",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 808,
+          "f1_cv": 0.009353928030929359,
+          "f2_cv": 0.0378551870005019,
+          "f3_cv": 0.019897201764202316,
+          "f3_ci_low_mj": 1.8467163985148525,
+          "f3_ci_high_mj": 1.875070111386138,
+          "f1_p_improvement": 0.9999999751828492,
+          "f2_p_improvement": 0.9987463239824702,
+          "f3_p_improvement": 1.0,
+          "f1_welch_t": 12.524771513874704,
+          "f2_welch_t": 4.15517779982495,
+          "f3_welch_t": 10.563130674741231,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=1.000 >= 0.100  CV=0.01",
+          "f2_abandon_reason": "P(better)=0.999 >= 0.250  CV=0.04",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 1.8325370762711863,
+          "f2_trimmed_mean_mj": 1.8641552863436122,
+          "f3_trimmed_mean_mj": 1.8606610286028604,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 1,
+          "f2_outliers_removed": 0,
+          "f3_outliers_removed": 0
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "n_candidates_generated": 2,
+      "n_correctness_pass": 2,
+      "n_correctness_fail": 0,
+      "n_surrogate_screened_in": 0,
+      "n_surrogate_screened_out": 2,
+      "selected_operator": "GenericSemanticRewriteLLM | GenericSemanticRewriteLLM",
+      "selected_tier": "H | H",
+      "wall_clock_s": 30.57014355598949,
+      "best_energy_mj": 1.4807591834879072,
+      "current_baseline_mj": 1.991582021857923,
+      "improvement_over_baseline_pct": 25.6490986945883,
+      "f3_evals_used_so_far": 3,
+      "surrogate_trained": true,
+      "used_fallback_escape": true,
+      "candidates": [
+        {
+          "iteration": 2,
+          "operator": "GenericSemanticRewriteLLM",
+          "tier": "H",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 1.4758581024349284,
+          "f1_improvement_pct": 25.895188536693148,
+          "f1_abandoned": false,
+          "f2_mj": 1.4809547502047504,
+          "f2_improvement_pct": 25.63927902787627,
+          "f2_abandoned": false,
+          "f3_mj": 1.5070429334428923,
+          "f3_improvement_pct": 24.329356416011926,
+          "f3_std_mj": 0.020393613065026805,
+          "f3_co2_ug": 3.9769188521409657,
+          "statistically_significant": true,
+          "confirmed_improvement": true,
+          "transformed_source": "def cross_product_entry(ui: float, uj: float, uk: float,\n                        vi: float, vj: float, vk: float) -> tuple:\n    return (\n        uj * vk - vj * uk,\n        vi * uk - ui * vk,\n        ui * vj - vi * uj,\n    )",
+          "chain_depth": 2,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1217,
+          "f1_cv": 0.009619458751758922,
+          "f2_cv": 0.02545099831855192,
+          "f3_cv": 0.01353220443324523,
+          "f3_ci_low_mj": 1.4984217337715695,
+          "f3_ci_high_mj": 1.5159223500410843,
+          "f1_p_improvement": 1.0,
+          "f2_p_improvement": 0.9999999999999906,
+          "f3_p_improvement": 1.0,
+          "f1_welch_t": 46.19330149062304,
+          "f2_welch_t": 31.551564413427993,
+          "f3_welch_t": 47.25698579883774,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=1.000 >= 0.100  CV=0.01",
+          "f2_abandon_reason": "P(better)=1.000 >= 0.250  CV=0.03",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 1.4720999160369437,
+          "f2_trimmed_mean_mj": 1.4758622713622715,
+          "f3_trimmed_mean_mj": 1.5066723728658813,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 0,
+          "f3_outliers_removed": 0
+        },
+        {
+          "iteration": 2,
+          "operator": "GenericSemanticRewriteLLM",
+          "tier": "H",
+          "is_llm": true,
+          "correctness_pass": true,
+          "correctness_reason": "OK",
+          "surrogate_pred_mj": null,
+          "surrogate_std_mj": null,
+          "ei_score": 1.0,
+          "f1_mj": 1.5379457510729615,
+          "f1_improvement_pct": 22.77768456464423,
+          "f1_abandoned": false,
+          "f2_mj": 1.4871127572016465,
+          "f2_improvement_pct": 25.330077251132398,
+          "f2_abandoned": false,
+          "f3_mj": 1.48356759410802,
+          "f3_improvement_pct": 25.508084636955218,
+          "f3_std_mj": 0.03345748258648307,
+          "f3_co2_ug": 3.9149700400072756,
+          "statistically_significant": true,
+          "confirmed_improvement": true,
+          "transformed_source": "def cross_product_entry(ui: float, uj: float, uk: float,\n                        vi: float, vj: float, vk: float) -> tuple:\n    return (uj * vk - vj * uk,\n            vi * uk - ui * vk,\n            ui * vj - vi * uj)",
+          "chain_depth": 1,
+          "used_process_isolation": true,
+          "inner_loop_multiplier": 1222,
+          "f1_cv": 0.045908245136104205,
+          "f2_cv": 0.012454483242707742,
+          "f3_cv": 0.022552044624969743,
+          "f3_ci_low_mj": 1.4708385842880527,
+          "f3_ci_high_mj": 1.497437888707038,
+          "f1_p_improvement": 0.9999721674430165,
+          "f2_p_improvement": 1.0,
+          "f3_p_improvement": 1.0,
+          "f1_welch_t": 13.795215602903022,
+          "f2_welch_t": 44.72670210142158,
+          "f3_welch_t": 42.88837441558861,
+          "f1_adaptive_extra_reps": 0,
+          "f2_adaptive_extra_reps": 0,
+          "f1_abandon_reason": "P(better)=1.000 >= 0.100  CV=0.05",
+          "f2_abandon_reason": "P(better)=1.000 >= 0.250  CV=0.01",
+          "f1_calibrator_f1f3_corr": null,
+          "f2_calibrator_f2f3_corr": null,
+          "f1_trimmed_mean_mj": 1.5245476394849784,
+          "f2_trimmed_mean_mj": 1.4860053497942385,
+          "f3_trimmed_mean_mj": 1.4807591834879072,
+          "f1_noise_uncertain": false,
+          "f2_noise_uncertain": false,
+          "f1_outliers_removed": 0,
+          "f2_outliers_removed": 0,
+          "f3_outliers_removed": 0
+        }
+      ]
+    }
+  ],
+  "surrogate_pred_vs_actual": [],
+  "operator_stats": {
+    "SlotsDelegateLLM": {
+      "tier": "M",
+      "is_llm": true,
+      "n_generated": 1,
+      "n_correct": 1,
+      "n_f3": 1,
+      "n_confirmed": 1,
+      "improvements_pct": [
+        6.558164732621419
+      ],
+      "f3_mj": [
+        1.8609707920792082
+      ],
+      "ei_scores": [
+        1.0
+      ],
+      "inner_loop_multipliers": [
+        808
+      ],
+      "f1_cvs": [
+        0.009353928030929359
+      ],
+      "f2_cvs": [
+        0.0378551870005019
+      ],
+      "f3_cvs": [
+        0.019897201764202316
+      ],
+      "f1_p_improvements": [
+        0.9999999751828492
+      ],
+      "f2_p_improvements": [
+        0.9987463239824702
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    },
+    "GenericSemanticRewriteLLM": {
+      "tier": "H",
+      "is_llm": true,
+      "n_generated": 2,
+      "n_correct": 2,
+      "n_f3": 2,
+      "n_confirmed": 2,
+      "improvements_pct": [
+        24.329356416011926,
+        25.508084636955218
+      ],
+      "f3_mj": [
+        1.5070429334428923,
+        1.48356759410802
+      ],
+      "ei_scores": [
+        1.0,
+        1.0
+      ],
+      "inner_loop_multipliers": [
+        1217,
+        1222
+      ],
+      "f1_cvs": [
+        0.009619458751758922,
+        0.045908245136104205
+      ],
+      "f2_cvs": [
+        0.02545099831855192,
+        0.012454483242707742
+      ],
+      "f3_cvs": [
+        0.01353220443324523,
+        0.022552044624969743
+      ],
+      "f1_p_improvements": [
+        1.0,
+        0.9999721674430165
+      ],
+      "f2_p_improvements": [
+        0.9999999999999906,
+        1.0
+      ],
+      "adaptive_extra_reps_f1": [],
+      "adaptive_extra_reps_f2": [],
+      "n_f1_uncertain": 0,
+      "n_f2_uncertain": 0,
+      "n_f1_abandoned": 0,
+      "n_f2_abandoned": 0
+    }
+  }
+}
