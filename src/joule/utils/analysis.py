@@ -151,13 +151,18 @@ def _normalized_profile_path(path_value: str) -> str:
 
 def _enrich_hotspot_function(entry: dict[str, Any], *, total_cumulative: float) -> dict[str, Any]:
     cumulative_time = float(entry.get("cumulative_time_s", 0.0))
+    total_time = float(entry.get("total_time_s", 0.0))
     total_calls = max(0, int(entry.get("total_calls", 0)))
     avg_cost_us = (cumulative_time / total_calls * 1_000_000.0) if total_calls > 0 else 0.0
+    avg_self_cost_us = (total_time / total_calls * 1_000_000.0) if total_calls > 0 else 0.0
     share = cumulative_time / total_cumulative if total_cumulative > 0 else 0.0
+    self_share = total_time / total_cumulative if total_cumulative > 0 else 0.0
     return {
         **entry,
         "share": round(share, 4),
+        "self_share": round(self_share, 4),
         "avg_cost_us": round(avg_cost_us, 2),
+        "avg_self_cost_us": round(avg_self_cost_us, 2),
     }
 
 
@@ -213,7 +218,15 @@ def _hotspot_recommendations(
             f"Workload {first.get('workload_id', 'unknown')} has low project share; inspect workload scope and trim setup/fixture overhead."
         )
 
-    return recommendations[:6]
+    # Detect high call counts (potential loops/N+1)
+    if target_top_functions:
+        most_called = max(target_top_functions, key=lambda fn: int(fn.get("total_calls", 0)))
+        if int(most_called.get("total_calls", 0)) > 5000:
+             recommendations.append(
+                 f"Hotspot {most_called.get('function')} has {most_called.get('total_calls')} calls; check for redundant loops or N+1 patterns."
+             )
+
+    return recommendations[:8]
 
 
 def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | Path | None = None) -> dict:
@@ -303,7 +316,11 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
 
     total_cumulative = sum(float(item["cumulative_time_s"]) for item in all_functions_raw)
     all_functions = [_enrich_hotspot_function(item, total_cumulative=total_cumulative) for item in all_functions_raw]
-    merged_functions = all_functions[:limit]
+    
+    # Filter harness code from main top_functions by prioritizing project/target code
+    project_merged = [fn for fn in all_functions if str(fn.get("ownership", "")) in project_like_buckets]
+    non_project_merged = [fn for fn in all_functions if str(fn.get("ownership", "")) not in project_like_buckets]
+    merged_functions = (project_merged + non_project_merged)[:limit]
     project_cumulative = sum(float(total) for bucket, total in ownership_totals.items() if bucket in project_like_buckets)
     target_matches = [
         fn
@@ -444,12 +461,13 @@ def human_baseline_summary(report: MeasurementReport, bundle_notes: list[str], h
             )
     if bundle_notes:
         lines.append("Notes: " + "; ".join(bundle_notes))
-    if hotspot_summary and hotspot_summary.get("top_functions"):
-        top = hotspot_summary["top_functions"][0]
+    if hotspot_summary and (hotspot_summary.get("project_top_functions") or hotspot_summary.get("top_functions")):
+        # Prefer showing the top project-specific hotspot to avoid harness code noise
+        top = (hotspot_summary.get("project_top_functions") or hotspot_summary["top_functions"])[0]
         lines.append(
             "Hotspot: "
             f"{Path(top['file']).name}:{top['line']}::{top['function']} "
-            f"cum={top['cumulative_time_s']:.4f}s owner={top['ownership']}"
+            f"cum={top['cumulative_time_s']:.4f}s self={top.get('total_time_s', 0.0):.4f}s owner={top['ownership']}"
         )
         signal_quality = hotspot_summary.get("signal_quality") or {}
         if signal_quality:
@@ -525,7 +543,7 @@ def human_baseline_analysis_summary(payload: dict[str, Any]) -> str:
         lines.append("Aggregate: " + _metrics_text_from_record(aggregate))
     hotspots = payload.get("hotspots") or {}
     if hotspots:
-        top_functions = hotspots.get("top_functions") or []
+        top_functions = hotspots.get("project_top_functions") or hotspots.get("top_functions") or []
         lines.append(f"Hotspots: top_functions={len(top_functions)}")
         signal_quality = hotspots.get("signal_quality") or {}
         if signal_quality:

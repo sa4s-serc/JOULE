@@ -72,6 +72,24 @@ def _discover_pytest_workloads_in_tree(
     target: TargetSpec,
 ) -> list[WorkloadSpec]:
     workloads: list[WorkloadSpec] = []
+    module_parts = set(target.module.split("."))
+    module_score = 0
+    
+    # Pre-calculate module-level relevance (imports at the top level)
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            if node.module == target.module:
+                module_score += 5
+                if any(alias.name == target.function_name for alias in node.names):
+                    module_score += 10
+            elif node.module and set(node.module.split(".")) & module_parts:
+                module_score += 2
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == target.module:
+                    module_score += 3
+                elif alias.name and set(alias.name.split(".")) & module_parts:
+                    module_score += 1
 
     def visit(nodes: list[ast.stmt], class_path: list[str]) -> None:
         for node in nodes:
@@ -82,9 +100,12 @@ def _discover_pytest_workloads_in_tree(
                 continue
             if class_path and not all(name.startswith("Test") for name in class_path):
                 continue
-            score = _test_relevance_score(node, target)
-            if score <= 0:
+            
+            local_score = _test_relevance_score(node, target)
+            if local_score <= 0:
                 continue
+            
+            score = local_score + module_score
             selector_name = "::".join([*class_path, node.name]) if class_path else node.name
             selector = f"{file_path.relative_to(project_root)}::{selector_name}"
             workloads.append(
@@ -118,6 +139,25 @@ def _test_relevance_score(node: ast.AST, target: TargetSpec) -> int:
     score = 0
     module_parts = set(target.module.split("."))
     file_tokens = set(target.file_path.stem.replace("-", "_").split("_"))
+    
+    # Direct name match boost
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        name_lowered = node.name.lower()
+        target_fn_lowered = target.function_name.lower()
+        if target_fn_lowered in name_lowered:
+            if name_lowered == f"test_{target_fn_lowered}" or name_lowered.startswith(f"test_{target_fn_lowered}_"):
+                score += 10
+            else:
+                score += 5
+        
+        # Check decorators/fixtures
+        for decorator in node.decorator_list:
+            for inner in ast.walk(decorator):
+                if isinstance(inner, ast.Name) and (inner.id == target.function_name or inner.id in target.owner_path):
+                    score += 5
+                if isinstance(inner, ast.Attribute) and (inner.attr == target.function_name or inner.attr in target.owner_path):
+                    score += 3
+
     for inner in ast.walk(node):
         if isinstance(inner, ast.Name) and inner.id == target.function_name:
             score += 2
@@ -129,6 +169,9 @@ def _test_relevance_score(node: ast.AST, target: TargetSpec) -> int:
             score += 1
         if isinstance(inner, ast.ImportFrom) and inner.module == target.module:
             score += 3
+            # Explicit import of the target function itself
+            if any(alias.name == target.function_name for alias in inner.names):
+                score += 5
         if isinstance(inner, ast.ImportFrom) and inner.module and set(inner.module.split(".")) & module_parts:
             score += 1
         if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
