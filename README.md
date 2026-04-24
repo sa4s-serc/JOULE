@@ -114,3 +114,4 @@ Not in scope for current v0:
 - [docs/ARTIFACTS.md](docs/ARTIFACTS.md)
 - [docs/EXAMPLES.md](docs/EXAMPLES.md)
 - [docs/TRANSFORMATIONS.md](docs/TRANSFORMATIONS.md)
+- [docs/LLM_CONFIGURATION.md](docs/LLM_CONFIGURATION.md) - LLM setup with LiteLLM
