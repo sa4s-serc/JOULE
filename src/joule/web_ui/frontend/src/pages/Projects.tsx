@@ -1,35 +1,56 @@
-import { useState } from 'react'
-import { FolderOpen, Plus, Settings, CheckCircle, XCircle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { FolderOpen, Plus, Settings, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
+import { apiClient } from '../utils/api'
 
-interface Project {
+interface ProjectData {
   path: string
   name: string
-  health: {
+  config?: Record<string, any>
+  health?: {
     backend_available: boolean
+    backend_name?: string
+    python_version?: string
     dependencies_ok: boolean
     artifact_dir_exists: boolean
+    db_accessible: boolean
     issues: string[]
   }
-  last_activity?: string
 }
 
 export default function Projects() {
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      path: '/home/prakhar/dev/prakhar479/hedge',
-      name: 'hedge',
-      health: {
-        backend_available: true,
-        dependencies_ok: true,
-        artifact_dir_exists: true,
-        issues: [],
-      },
-      last_activity: '2024-04-23T10:30:00Z',
-    },
-  ])
+  const [projects, setProjects] = useState<ProjectData[]>([])
+  const [loading, setLoading] = useState(true)
+  const [doctorRunning, setDoctorRunning] = useState<string | null>(null)
 
-  const healthStatus = (health: Project['health']) => {
-    if (health.issues.length === 0) {
+  const fetchProjects = async () => {
+    try {
+      const data = await apiClient.getProjects()
+      setProjects(data)
+    } catch (err) {
+      console.warn('Failed to fetch projects:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchProjects()
+  }, [])
+
+  const handleRunDoctor = async (projectPath: string) => {
+    setDoctorRunning(projectPath)
+    try {
+      await apiClient.runProjectDoctor(projectPath)
+      await fetchProjects()
+    } catch (err) {
+      console.error('Doctor failed:', err)
+    } finally {
+      setDoctorRunning(null)
+    }
+  }
+
+  const healthStatus = (health: ProjectData['health']) => {
+    if (!health || health.issues.length === 0) {
       return {
         icon: CheckCircle,
         text: 'Healthy',
@@ -38,9 +59,21 @@ export default function Projects() {
     }
     return {
       icon: XCircle,
-      text: 'Issues Found',
+      text: `${health.issues.length} Issue${health.issues.length > 1 ? 's' : ''} Found`,
       className: 'text-red-600',
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold text-joule-ink">Projects</h1>
+          <p className="text-joule-muted mt-2">Loading projects…</p>
+        </div>
+        <div className="animate-pulse joule-panel h-48" />
+      </div>
+    )
   }
 
   return (
@@ -52,9 +85,12 @@ export default function Projects() {
             Manage your JOULE projects and configurations
           </p>
         </div>
-        <button className="joule-button joule-button-primary flex items-center">
-          <Plus className="w-4 h-4 mr-2" />
-          Add Project
+        <button
+          className="joule-button joule-button-secondary flex items-center"
+          onClick={fetchProjects}
+        >
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Refresh
         </button>
       </div>
 
@@ -78,9 +114,6 @@ export default function Projects() {
                     </p>
                   </div>
                 </div>
-                <button className="p-2 hover:bg-joule-chip rounded-lg">
-                  <Settings className="w-4 h-4 text-joule-muted" />
-                </button>
               </div>
 
               {/* Health Status */}
@@ -92,29 +125,45 @@ export default function Projects() {
               </div>
 
               {/* Health Details */}
-              <div className="space-y-2 mb-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-joule-muted">Backend</span>
-                  <span className={project.health.backend_available ? 'text-green-600' : 'text-red-600'}>
-                    {project.health.backend_available ? 'Available' : 'Not Available'}
-                  </span>
+              {project.health && (
+                <div className="space-y-2 mb-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-joule-muted">Backend</span>
+                    <span className={project.health.backend_available ? 'text-green-600' : 'text-red-600'}>
+                      {project.health.backend_available
+                        ? `${project.health.backend_name || 'Available'}`
+                        : 'Not Available'}
+                    </span>
+                  </div>
+                  {project.health.python_version && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-joule-muted">Python</span>
+                      <span className="font-mono text-joule-ink">{project.health.python_version}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-joule-muted">Dependencies</span>
+                    <span className={project.health.dependencies_ok ? 'text-green-600' : 'text-red-600'}>
+                      {project.health.dependencies_ok ? 'OK' : 'Issues'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-joule-muted">Artifacts</span>
+                    <span className={project.health.artifact_dir_exists ? 'text-green-600' : 'text-red-600'}>
+                      {project.health.artifact_dir_exists ? 'Exists' : 'Not initialized'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-joule-muted">Database</span>
+                    <span className={project.health.db_accessible ? 'text-green-600' : 'text-red-600'}>
+                      {project.health.db_accessible ? 'Accessible' : 'Not accessible'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-joule-muted">Dependencies</span>
-                  <span className={project.health.dependencies_ok ? 'text-green-600' : 'text-red-600'}>
-                    {project.health.dependencies_ok ? 'OK' : 'Issues'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-joule-muted">Artifacts</span>
-                  <span className={project.health.artifact_dir_exists ? 'text-green-600' : 'text-red-600'}>
-                    {project.health.artifact_dir_exists ? 'Exists' : 'Missing'}
-                  </span>
-                </div>
-              </div>
+              )}
 
               {/* Issues */}
-              {project.health.issues.length > 0 && (
+              {project.health && project.health.issues.length > 0 && (
                 <div className="mb-4">
                   <h4 className="text-sm font-medium text-joule-ink mb-2">Issues:</h4>
                   <ul className="space-y-1">
@@ -127,24 +176,35 @@ export default function Projects() {
                 </div>
               )}
 
-              {/* Actions */}
-              <div className="flex space-x-2">
-                <button className="joule-button joule-button-primary text-sm">
-                  Open Project
-                </button>
-                <button className="joule-button joule-button-secondary text-sm">
-                  Run Doctor
-                </button>
-              </div>
-
-              {/* Last Activity */}
-              {project.last_activity && (
-                <div className="mt-4 pt-4 border-t border-joule-border">
-                  <p className="text-xs text-joule-muted">
-                    Last activity: {new Date(project.last_activity).toLocaleString()}
-                  </p>
+              {/* Config highlights */}
+              {project.config && (
+                <div className="mb-4 p-3 bg-joule-bg rounded-lg">
+                  <h4 className="text-xs font-medium text-joule-muted mb-2 uppercase tracking-wide">Configuration</h4>
+                  <div className="grid grid-cols-2 gap-1 text-xs">
+                    <span className="text-joule-muted">Profile:</span>
+                    <span className="font-mono">{project.config.profile || 'standard'}</span>
+                    <span className="text-joule-muted">Backend:</span>
+                    <span className="font-mono">{project.config.default_backend || 'mock'}</span>
+                    <span className="text-joule-muted">Budget:</span>
+                    <span>{project.config.optimization_budget || 6} candidates</span>
+                  </div>
                 </div>
               )}
+
+              {/* Actions */}
+              <div className="flex space-x-2">
+                <button
+                  className="joule-button joule-button-secondary text-sm flex items-center"
+                  onClick={() => handleRunDoctor(project.path)}
+                  disabled={doctorRunning === project.path}
+                >
+                  {doctorRunning === project.path ? (
+                    <><RefreshCw className="w-3 h-3 mr-1 animate-spin" /> Running…</>
+                  ) : (
+                    'Run Doctor'
+                  )}
+                </button>
+              </div>
             </div>
           )
         })}
@@ -155,15 +215,11 @@ export default function Projects() {
         <div className="joule-panel text-center py-12">
           <FolderOpen className="w-12 h-12 text-joule-muted mx-auto mb-4" />
           <h3 className="text-lg font-medium text-joule-ink mb-2">
-            No projects yet
+            No project detected
           </h3>
           <p className="text-joule-muted mb-4">
-            Add your first JOULE project to get started
+            Make sure you started the UI with a valid project path containing a pyproject.toml with [tool.joule] config.
           </p>
-          <button className="joule-button joule-button-primary">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Project
-          </button>
         </div>
       )}
     </div>

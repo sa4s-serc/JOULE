@@ -1,291 +1,272 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios'
-import { 
-  Project, 
-  TargetSpec, 
-  WorkloadSpec, 
-  Run, 
-  BaselineConfig,
-  OptimizationConfig,
-  ApplyConfig,
-  WebSocketMessage 
-} from '../types'
+/**
+ * JOULE Web UI – API Client & WebSocket Client
+ *
+ * Centralises all backend communication so every React page/hook
+ * imports from a single place.
+ */
 
-// API base configuration
-const API_BASE_URL = 'http://localhost:8000'
+import axios, { AxiosInstance } from 'axios'
 
-class ApiClient {
-  private client: AxiosInstance
+// ---------------------------------------------------------------------------
+//  Axios instance
+// ---------------------------------------------------------------------------
 
-  constructor() {
-    this.client = axios.create({
-      baseURL: API_BASE_URL,
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    })
+const API_BASE_URL = '/api'
 
-    // Request interceptor for error handling
-    this.client.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        console.error('API Error:', error.response?.data || error.message)
-        throw error
-      }
-    )
-  }
+const api: AxiosInstance = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 120_000, // 2 min for long-running discovery
+  headers: { 'Content-Type': 'application/json' },
+})
 
-  // Projects API
-  async getProjects(): Promise<Project[]> {
-    const response: AxiosResponse<Project[]> = await this.client.get('/api/projects')
-    return response.data
-  }
+// ---------------------------------------------------------------------------
+//  API Client
+// ---------------------------------------------------------------------------
 
-  async getProject(projectPath: string): Promise<Project> {
-    const response: AxiosResponse<Project> = await this.client.get(`/api/projects/${encodeURIComponent(projectPath)}`)
-    return response.data
-  }
+export const apiClient = {
+  // ---- Projects ----
+  async getProjects(): Promise<any[]> {
+    const { data } = await api.get('/projects')
+    return data
+  },
+
+  async getProject(projectPath: string): Promise<any> {
+    const { data } = await api.get(`/projects/${encodeURIComponent(projectPath)}`)
+    return data
+  },
 
   async runProjectDoctor(projectPath: string): Promise<any> {
-    const response: AxiosResponse<any> = await this.client.post(`/api/projects/${encodeURIComponent(projectPath)}/doctor`)
-    return response.data
-  }
+    const { data } = await api.post(`/projects/${encodeURIComponent(projectPath)}/doctor`)
+    return data
+  },
 
-  // Discovery API
-  async discoverTargets(projectPath: string): Promise<TargetSpec[]> {
-    const response: AxiosResponse<TargetSpec[]> = await this.client.get(
-      `/api/projects/${encodeURIComponent(projectPath)}/discover/targets`
+  // ---- Discovery ----
+  async discoverTargets(projectPath: string): Promise<any[]> {
+    const { data } = await api.get(`/projects/${encodeURIComponent(projectPath)}/discover/targets`)
+    return data
+  },
+
+  async discoverWorkloads(projectPath: string, targetQualname: string): Promise<any[]> {
+    const { data } = await api.get(
+      `/projects/${encodeURIComponent(projectPath)}/discover/workloads/${encodeURIComponent(targetQualname)}`
     )
-    return response.data
-  }
+    return data
+  },
 
-  async discoverWorkloads(projectPath: string, targetQualname: string): Promise<WorkloadSpec[]> {
-    const response: AxiosResponse<WorkloadSpec[]> = await this.client.get(
-      `/api/projects/${encodeURIComponent(projectPath)}/discover/workloads/${encodeURIComponent(targetQualname)}`
-    )
-    return response.data
-  }
+  // ---- Runs ----
+  async getRuns(): Promise<any[]> {
+    const { data } = await api.get('/runs')
+    return data
+  },
 
-  // Baseline API
-  async runBaseline(projectPath: string, config: BaselineConfig): Promise<any> {
-    const response: AxiosResponse<any> = await this.client.post(
-      `/api/projects/${encodeURIComponent(projectPath)}/baseline`,
-      config
-    )
-    return response.data
-  }
+  async getRun(runId: string): Promise<any> {
+    const { data } = await api.get(`/runs/${runId}`)
+    return data
+  },
 
-  // Optimization API
-  async runOptimization(projectPath: string, config: OptimizationConfig): Promise<any> {
-    const response: AxiosResponse<any> = await this.client.post(
-      `/api/projects/${encodeURIComponent(projectPath)}/optimize`,
-      config
-    )
-    return response.data
-  }
+  async getActiveRuns(): Promise<any> {
+    const { data } = await api.get('/runs/active')
+    return data
+  },
 
-  // Runs API
-  async getRuns(projectPath: string = '.'): Promise<Run[]> {
-    const response: AxiosResponse<Run[]> = await this.client.get('/api/runs', {
-      params: { project_path: projectPath }
-    })
-    return response.data
-  }
+  async getRunArtifacts(runId: string): Promise<any[]> {
+    const { data } = await api.get(`/runs/${runId}/artifacts`)
+    return data
+  },
 
-  async getRun(runId: string, projectPath: string = '.'): Promise<any> {
-    const response: AxiosResponse<any> = await this.client.get(`/api/runs/${runId}`, {
-      params: { project_path: projectPath }
-    })
-    return response.data
-  }
-
-  async applyCandidate(runId: string, config: ApplyConfig, projectPath: string = '.'): Promise<any> {
-    const response: AxiosResponse<any> = await this.client.post(
-      `/api/runs/${runId}/apply`,
+  // ---- Baseline ----
+  async runBaseline(projectPath: string, config: any): Promise<any> {
+    const { data } = await api.post(
+      `/projects/${encodeURIComponent(projectPath)}/baseline`,
       config,
-      { params: { project_path: projectPath } }
     )
-    return response.data
-  }
+    return data
+  },
 
-  async getRunArtifacts(runId: string, projectPath: string = '.'): Promise<any[]> {
-    const response: AxiosResponse<any[]> = await this.client.get(
-      `/api/runs/${runId}/artifacts`,
-      { params: { project_path: projectPath } }
+  // ---- Optimization ----
+  async runOptimization(projectPath: string, config: any): Promise<any> {
+    const { data } = await api.post(
+      `/projects/${encodeURIComponent(projectPath)}/optimize`,
+      config,
     )
-    return response.data
-  }
+    return data
+  },
 
-  async downloadArtifact(runId: string, artifactName: string, projectPath: string = '.'): Promise<Blob> {
-    const response: AxiosResponse<Blob> = await this.client.get(
-      `/api/runs/${runId}/artifacts/${artifactName}`,
-      { 
-        params: { project_path: projectPath },
-        responseType: 'blob'
-      }
-    )
-    return response.data
-  }
+  // ---- Apply ----
+  async applyCandidate(runId: string, config: any): Promise<any> {
+    const { data } = await api.post(`/runs/${runId}/apply`, config)
+    return data
+  },
 }
 
-// Create singleton instance
-export const apiClient = new ApiClient()
+// ---------------------------------------------------------------------------
+//  WebSocket Client
+// ---------------------------------------------------------------------------
 
-// WebSocket client for real-time updates
-export class WebSocketClient {
+type WebSocketMessageHandler = (message: any) => void
+
+class WebSocketClient {
   private ws: WebSocket | null = null
-  private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectDelay = 1000
-  private subscriptions: Set<string> = new Set()
-  private messageHandlers: Map<string, ((data: any) => void)[]> = new Map()
+  private subscribers: Map<string, Set<WebSocketMessageHandler>> = new Map()
+  private globalSubscribers: Set<WebSocketMessageHandler> = new Set()
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private pingTimer: ReturnType<typeof setInterval> | null = null
 
-  constructor(private url: string = 'ws://localhost:8000/ws') {}
+  constructor() {}
 
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.url)
 
-        this.ws.onopen = () => {
-          console.log('WebSocket connected')
-          this.reconnectAttempts = 0
-          resolve()
-        }
+  connect(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) return
 
-        this.ws.onmessage = (event) => {
-          try {
-            const message: WebSocketMessage = JSON.parse(event.data)
-            this.handleMessage(message)
-          } catch (error) {
-            console.error('Failed to parse WebSocket message:', error)
-          }
-        }
+    try {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws`
+      this.ws = new WebSocket(wsUrl)
 
-        this.ws.onclose = () => {
-          console.log('WebSocket disconnected')
-          this.attemptReconnect()
-        }
-
-        this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          reject(error)
-        }
-      } catch (error) {
-        reject(error)
+      this.ws.onopen = () => {
+        console.log('[WS] Connected')
+        this.startPing()
       }
-    })
+
+      this.ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data)
+          this.dispatch(message)
+        } catch {
+          console.warn('[WS] Failed to parse message', event.data)
+        }
+      }
+
+      this.ws.onclose = () => {
+        console.log('[WS] Disconnected')
+        this.stopPing()
+        this.scheduleReconnect()
+      }
+
+      this.ws.onerror = (error) => {
+        console.error('[WS] Error', error)
+      }
+    } catch (error) {
+      console.error('[WS] Connection failed', error)
+      this.scheduleReconnect()
+    }
   }
 
-  disconnect() {
+  disconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.stopPing()
     if (this.ws) {
       this.ws.close()
       this.ws = null
     }
   }
 
-  subscribeToRun(runId: string, callback: (data: any) => void) {
-    this.subscriptions.add(runId)
-    
-    // Add callback for this run
-    if (!this.messageHandlers.has(runId)) {
-      this.messageHandlers.set(runId, [])
-    }
-    this.messageHandlers.get(runId)!.push(callback)
-
-    // Send subscription message
-    this.send({
-      type: 'subscribe_run',
-      run_id: runId
-    })
-  }
-
-  unsubscribeFromRun(runId: string, callback?: (data: any) => void) {
-    this.subscriptions.delete(runId)
-    
-    if (callback) {
-      const handlers = this.messageHandlers.get(runId)
-      if (handlers) {
-        const index = handlers.indexOf(callback)
-        if (index > -1) {
-          handlers.splice(index, 1)
-        }
-      }
-    } else {
-      this.messageHandlers.delete(runId)
-    }
-
-    // Send unsubscription message
-    this.send({
-      type: 'unsubscribe_run',
-      run_id: runId
-    })
-  }
-
-  send(message: any) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+  send(message: any): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message))
     }
   }
 
-  private handleMessage(message: WebSocketMessage) {
-    const { type, run_id, data } = message
-    
-    if (type === 'run_update' && run_id) {
-      const handlers = this.messageHandlers.get(run_id)
-      if (handlers) {
-        handlers.forEach(callback => callback(data))
+  subscribeRun(runId: string, handler: WebSocketMessageHandler): () => void {
+    if (!this.subscribers.has(runId)) {
+      this.subscribers.set(runId, new Set())
+    }
+    this.subscribers.get(runId)!.add(handler)
+
+    // Ask the server to subscribe us
+    this.send({ type: 'subscribe_run', run_id: runId })
+
+    return () => {
+      const subs = this.subscribers.get(runId)
+      if (subs) {
+        subs.delete(handler)
+        if (subs.size === 0) {
+          this.subscribers.delete(runId)
+          this.send({ type: 'unsubscribe_run', run_id: runId })
+        }
       }
     }
   }
 
-  private attemptReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++
-      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
-      
-      setTimeout(() => {
-        this.connect().catch(() => {
-          // Reconnect failed, will try again
-        })
-      }, this.reconnectDelay * this.reconnectAttempts)
+  onMessage(handler: WebSocketMessageHandler): () => void {
+    this.globalSubscribers.add(handler)
+    return () => { this.globalSubscribers.delete(handler) }
+  }
+
+  // ---- Private ----
+
+  private dispatch(message: any): void {
+    // Global handlers
+    for (const handler of this.globalSubscribers) {
+      try { handler(message) } catch { /* ignore */ }
+    }
+
+    // Run-specific handlers
+    if (message.run_id) {
+      const subs = this.subscribers.get(message.run_id)
+      if (subs) {
+        for (const handler of subs) {
+          try { handler(message) } catch { /* ignore */ }
+        }
+      }
     }
   }
 
-  isConnected(): boolean {
-    return this.ws !== null && this.ws.readyState === WebSocket.OPEN
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.connect()
+    }, 3000)
+  }
+
+  private startPing(): void {
+    this.pingTimer = setInterval(() => {
+      this.send({ type: 'ping', timestamp: Date.now() })
+    }, 30_000)
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer)
+      this.pingTimer = null
+    }
   }
 }
 
-// Create singleton WebSocket client
 export const wsClient = new WebSocketClient()
 
-// Utility functions
-export const formatBytes = (bytes: number): string => {
-  const mb = bytes / (1024 * 1024)
-  return `${mb.toFixed(1)} MB`
+// Auto-connect on module load
+if (typeof window !== 'undefined') {
+  wsClient.connect()
 }
 
-export const formatImprovement = (ratio: number): string => {
+// ---------------------------------------------------------------------------
+//  Utility helpers
+// ---------------------------------------------------------------------------
+
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const k = 1024
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${units[i]}`
+}
+
+export function formatImprovement(ratio: number): string {
   const improvement = (1 - ratio) * 100
   const sign = improvement > 0 ? '-' : '+'
   return `${sign}${Math.abs(improvement).toFixed(1)}%`
 }
 
-export const formatDuration = (start: string, end?: string): string => {
-  if (!end) return 'Running...'
-  const duration = new Date(end).getTime() - new Date(start).getTime()
-  const minutes = Math.floor(duration / 60000)
-  const seconds = Math.floor((duration % 60000) / 1000)
-  return `${minutes}m ${seconds}s`
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}m ${secs.toFixed(0)}s`
 }
 
-export const getStatusColor = (status: string): string => {
-  switch (status) {
-    case 'completed': return 'joule-status-completed'
-    case 'running': return 'joule-status-running'
-    case 'failed': return 'joule-status-failed'
-    case 'cancelled': return 'joule-status-failed'
-    default: return ''
-  }
-}
+export default api

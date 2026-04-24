@@ -110,7 +110,7 @@ function ConnectionStatus() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const response = await fetch('/api/projects', { method: 'HEAD' })
+        const response = await fetch('/api/health')
         setIsConnected(response.ok)
       } catch {
         setIsConnected(false)

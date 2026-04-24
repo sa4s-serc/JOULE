@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { Zap, Play, Settings, BarChart3, TrendingUp, AlertCircle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Zap, Play, Settings, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react'
+import { apiClient } from '../utils/api'
 
 interface OptimizationConfig {
   target: string
@@ -14,8 +16,12 @@ interface OptimizationConfig {
 }
 
 export default function Optimize() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const initialTarget = (location.state as any)?.target || ''
+
   const [config, setConfig] = useState<OptimizationConfig>({
-    target: '',
+    target: initialTarget,
     workloads: [],
     backend: 'mock',
     budget: 6,
@@ -25,56 +31,54 @@ export default function Optimize() {
     parallel: 1,
     improvement_threshold: 0.05,
   })
-  
-  const [isRunning, setIsRunning] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [currentPhase, setCurrentPhase] = useState('')
 
-  const mockTargets = [
-    'example.process_data',
-    'ExampleClass.analyze',
-    'utils.async_transform',
-  ]
+  const [surrogateModel, setSurrogateModel] = useState<string>('hist_gbdt')
 
-  const mockBackends = [
+  const [targets, setTargets] = useState<string[]>([])
+  const [backends] = useState([
     { name: 'mock', description: 'Mock backend for testing' },
     { name: 'rapl', description: 'Intel RAPL energy measurement' },
-  ]
+  ])
+  const [isRunning, setIsRunning] = useState(false)
+  const [runResult, setRunResult] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const optimizationPhases = [
-    'Initializing optimization...',
-    'Running baseline measurement...',
-    'Building surrogate model...',
-    'Generating candidates...',
-    'Evaluating candidates...',
-    'Updating surrogate model...',
-    'Finalizing results...',
-  ]
+  useEffect(() => {
+    const fetchTargets = async () => {
+      try {
+        const projects = await apiClient.getProjects()
+        if (projects.length > 0) {
+          const discovered = await apiClient.discoverTargets(projects[0].path)
+          setTargets(discovered.map((t: any) => t.qualname))
+          if (projects[0].config?.default_backend) {
+            setConfig(c => ({ ...c, backend: projects[0].config.default_backend }))
+          }
+          if (projects[0].config?.optimization_budget) {
+            setConfig(c => ({ ...c, budget: projects[0].config.optimization_budget }))
+          }
+          if (projects[0].config?.surrogate?.model) {
+            setSurrogateModel(projects[0].config.surrogate.model)
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    fetchTargets()
+  }, [])
 
-  const handleStartOptimization = () => {
+  const handleStartOptimization = async () => {
     setIsRunning(true)
-    setProgress(0)
-    
-    let phaseIndex = 0
-    const phaseProgress = 100 / optimizationPhases.length
-    
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        const newProgress = prev + phaseProgress / 10
-        if (newProgress >= (phaseIndex + 1) * phaseProgress && phaseIndex < optimizationPhases.length - 1) {
-          phaseIndex++
-          setCurrentPhase(optimizationPhases[phaseIndex])
-        }
-        
-        if (newProgress >= 100) {
-          clearInterval(interval)
-          setIsRunning(false)
-          setCurrentPhase('Optimization complete!')
-          return 100
-        }
-        return newProgress
-      })
-    }, 200)
+    setError(null)
+    setRunResult(null)
+    try {
+      const projects = await apiClient.getProjects()
+      const projectPath = projects[0]?.path || '.'
+      const result = await apiClient.runOptimization(projectPath, config)
+      setRunResult(result)
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Failed to start optimization')
+    } finally {
+      setIsRunning(false)
+    }
   }
 
   return (
@@ -90,53 +94,37 @@ export default function Optimize() {
         {/* Configuration Panel */}
         <div className="joule-panel">
           <h2 className="text-xl font-semibold text-joule-ink mb-6">Configuration</h2>
-          
+
           <div className="space-y-6">
             {/* Target Selection */}
             <div>
-              <label className="block text-sm font-medium text-joule-ink mb-2">
-                Target Function
-              </label>
+              <label className="block text-sm font-medium text-joule-ink mb-2">Target Function</label>
               <select
                 value={config.target}
                 onChange={(e) => setConfig({ ...config, target: e.target.value })}
                 className="w-full px-3 py-2 border border-joule-border rounded-lg focus:outline-none focus:ring-2 focus:ring-joule-accent"
               >
                 <option value="">Select a target...</option>
-                {mockTargets.map((target) => (
-                  <option key={target} value={target}>
-                    {target}
-                  </option>
+                {targets.map((target) => (
+                  <option key={target} value={target}>{target}</option>
                 ))}
               </select>
             </div>
 
             {/* Backend Selection */}
             <div>
-              <label className="block text-sm font-medium text-joule-ink mb-2">
-                Energy Backend
-              </label>
+              <label className="block text-sm font-medium text-joule-ink mb-2">Energy Backend</label>
               <div className="space-y-2">
-                {mockBackends.map((backend) => (
-                  <label
-                    key={backend.name}
-                    className="flex items-center p-3 border border-joule-border rounded-lg cursor-pointer hover:bg-joule-bg"
-                  >
-                    <input
-                      type="radio"
-                      name="backend"
-                      value={backend.name}
+                {backends.map((backend) => (
+                  <label key={backend.name} className="flex items-center p-3 border border-joule-border rounded-lg cursor-pointer hover:bg-joule-bg">
+                    <input type="radio" name="backend" value={backend.name}
                       checked={config.backend === backend.name}
                       onChange={(e) => setConfig({ ...config, backend: e.target.value })}
                       className="mr-3"
                     />
                     <div>
-                      <div className="font-medium text-joule-ink">
-                        {backend.name}
-                      </div>
-                      <div className="text-sm text-joule-muted">
-                        {backend.description}
-                      </div>
+                      <div className="font-medium text-joule-ink">{backend.name}</div>
+                      <div className="text-sm text-joule-muted">{backend.description}</div>
                     </div>
                   </label>
                 ))}
@@ -148,17 +136,11 @@ export default function Optimize() {
               <label className="block text-sm font-medium text-joule-ink mb-2">
                 Candidate Budget: {config.budget}
               </label>
-              <input
-                type="range"
-                min="1"
-                max="20"
-                value={config.budget}
+              <input type="range" min="1" max="20" value={config.budget}
                 onChange={(e) => setConfig({ ...config, budget: parseInt(e.target.value) })}
                 className="w-full"
               />
-              <p className="text-xs text-joule-muted mt-1">
-                Maximum number of candidates to evaluate
-              </p>
+              <p className="text-xs text-joule-muted mt-1">Maximum number of candidates to evaluate</p>
             </div>
 
             {/* Parallel Workers */}
@@ -166,11 +148,7 @@ export default function Optimize() {
               <label className="block text-sm font-medium text-joule-ink mb-2">
                 Parallel Workers: {config.parallel}
               </label>
-              <input
-                type="range"
-                min="1"
-                max="8"
-                value={config.parallel}
+              <input type="range" min="1" max="8" value={config.parallel}
                 onChange={(e) => setConfig({ ...config, parallel: parseInt(e.target.value) })}
                 className="w-full"
               />
@@ -181,121 +159,79 @@ export default function Optimize() {
               <label className="block text-sm font-medium text-joule-ink mb-2">
                 Improvement Threshold: {(config.improvement_threshold * 100).toFixed(1)}%
               </label>
-              <input
-                type="range"
-                min="0"
-                max="20"
+              <input type="range" min="0" max="20"
                 value={config.improvement_threshold * 100}
                 onChange={(e) => setConfig({ ...config, improvement_threshold: parseInt(e.target.value) / 100 })}
                 className="w-full"
               />
-              <p className="text-xs text-joule-muted mt-1">
-                Minimum improvement required for candidate acceptance
-              </p>
+              <p className="text-xs text-joule-muted mt-1">Minimum improvement required for candidate acceptance</p>
             </div>
 
-            {/* Options */}
+            {/* Toggle Options */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-joule-ink">
-                  Deep Analysis
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setConfig({ ...config, analysis: !config.analysis })}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    config.analysis ? 'bg-joule-accent' : 'bg-joule-border'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      config.analysis ? 'translate-x-6' : 'translate-x-1'
+              {[
+                { label: 'Deep Analysis', key: 'analysis' as const },
+                { label: 'Use Cache', key: 'cache' as const },
+                { label: 'Fresh Surrogate', key: 'fresh_surrogate' as const },
+              ].map(({ label, key }) => (
+                <div key={key} className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-joule-ink">{label}</label>
+                  <button type="button"
+                    onClick={() => setConfig({ ...config, [key]: !config[key] })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      config[key] ? 'bg-joule-accent' : 'bg-joule-border'
                     }`}
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-joule-ink">
-                  Use Cache
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setConfig({ ...config, cache: !config.cache })}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    config.cache ? 'bg-joule-accent' : 'bg-joule-border'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      config.cache ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-joule-ink">
-                  Fresh Surrogate
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setConfig({ ...config, fresh_surrogate: !config.fresh_surrogate })}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    config.fresh_surrogate ? 'bg-joule-accent' : 'bg-joule-border'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      config.fresh_surrogate ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      config[key] ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
 
           {/* Action Button */}
-          <button
-            onClick={handleStartOptimization}
+          <button onClick={handleStartOptimization}
             disabled={!config.target || isRunning}
             className="w-full mt-6 joule-button joule-button-primary flex items-center justify-center"
           >
             {isRunning ? (
-              <>
-                <Zap className="w-4 h-4 mr-2 animate-pulse" />
-                Optimizing...
-              </>
+              <><Zap className="w-4 h-4 mr-2 animate-pulse" /> Starting Optimization…</>
             ) : (
-              <>
-                <Play className="w-4 h-4 mr-2" />
-                Start Optimization
-              </>
+              <><Play className="w-4 h-4 mr-2" /> Start Optimization</>
             )}
           </button>
         </div>
 
-        {/* Progress & Results Panel */}
+        {/* Right Panel */}
         <div className="space-y-6">
-          {/* Progress */}
-          {isRunning && (
-            <div className="joule-panel">
-              <h3 className="text-lg font-semibold text-joule-ink mb-4">Progress</h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-joule-muted">Completion</span>
-                  <span className="font-medium">{Math.round(progress)}%</span>
-                </div>
-                <div className="w-full bg-joule-border rounded-full h-2">
-                  <div
-                    className="bg-joule-accent h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-                <div className="text-sm text-joule-italic text-joule-accent">
-                  {currentPhase}
-                </div>
+          {/* Error */}
+          {error && (
+            <div className="joule-panel border-red-200 bg-red-50">
+              <div className="flex items-center text-red-700">
+                <AlertCircle className="w-5 h-5 mr-2" />
+                <span>{error}</span>
               </div>
+            </div>
+          )}
+
+          {/* Run Result */}
+          {runResult && (
+            <div className="joule-panel border-green-200 bg-green-50">
+              <div className="flex items-center text-green-700 mb-3">
+                <CheckCircle className="w-5 h-5 mr-2" />
+                <span className="font-medium">Optimization started!</span>
+              </div>
+              <div className="text-sm text-green-800 space-y-1">
+                <p>Run ID: <span className="font-mono">{runResult.run_id}</span></p>
+                <p>Status: {runResult.status}</p>
+              </div>
+              <button className="mt-3 joule-button joule-button-secondary text-sm"
+                onClick={() => navigate('/results')}
+              >
+                View in Results →
+              </button>
             </div>
           )}
 
@@ -306,61 +242,27 @@ export default function Optimize() {
               Configuration Summary
             </h3>
             <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-joule-muted">Target:</span>
-                <span className="font-mono">{config.target || 'Not selected'}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-joule-muted">Backend:</span>
-                <span>{config.backend}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-joule-muted">Budget:</span>
-                <span>{config.budget} candidates</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-joule-muted">Parallel:</span>
-                <span>{config.parallel} workers</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-joule-muted">Threshold:</span>
-                <span>{(config.improvement_threshold * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-joule-muted">Analysis:</span>
-                <span>{config.analysis ? 'Enabled' : 'Disabled'}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Expected Outcomes */}
-          <div className="joule-panel">
-            <h3 className="text-lg font-semibold text-joule-ink mb-4 flex items-center">
-              <TrendingUp className="w-5 h-5 mr-2" />
-              Expected Outcomes
-            </h3>
-            <div className="space-y-3">
-              <div className="p-3 bg-joule-bg rounded-lg">
-                <div className="text-sm text-joule-muted">Candidates Generated</div>
-                <div className="text-lg font-semibold text-joule-ink">{config.budget}</div>
-              </div>
-              <div className="p-3 bg-joule-bg rounded-lg">
-                <div className="text-sm text-joule-muted">Expected Improvements</div>
-                <div className="text-lg font-semibold text-joule-ink">2-4 candidates</div>
-              </div>
-              <div className="p-3 bg-joule-bg rounded-lg">
-                <div className="text-sm text-joule-muted">Est. Duration</div>
-                <div className="text-lg font-semibold text-joule-ink">
-                  {~(config.budget * 2 / config.parallel)} min
+              {[
+                ['Target', config.target || 'Not selected'],
+                ['Backend', config.backend],
+                ['Surrogate', surrogateModel],
+                ['Budget', `${config.budget} candidates`],
+                ['Parallel', `${config.parallel} workers`],
+                ['Threshold', `${(config.improvement_threshold * 100).toFixed(1)}%`],
+                ['Analysis', config.analysis ? 'Enabled' : 'Disabled'],
+              ].map(([label, value]) => (
+                <div key={label as string} className="flex justify-between text-sm">
+                  <span className="text-joule-muted">{label}:</span>
+                  <span>{value}</span>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
 
           {/* Optimization Tips */}
           <div className="joule-panel">
             <h3 className="text-lg font-semibold text-joule-ink mb-4 flex items-center">
-              <AlertCircle className="w-5 h-5 mr-2" />
+              <TrendingUp className="w-5 h-5 mr-2" />
               Optimization Tips
             </h3>
             <ul className="space-y-2 text-sm text-joule-muted">

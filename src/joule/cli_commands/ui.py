@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,99 +23,113 @@ def run_ui(
 ) -> None:
     """Launch the JOULE web interface."""
     console = Console()
-    
+
     try:
-        # Load settings to get default port
+        # Load settings to resolve defaults
         settings = load_settings(path)
-        default_port = settings.dashboard_port if port is None else port
-        
+        backend_port = port if port is not None else settings.dashboard_port
+        project_path = str(Path(path).resolve())
+
         if backend_only and frontend_only:
             console.print("[red]Error: Cannot specify both --backend-only and --frontend-only[/red]")
             raise typer.Exit(1)
-        
-        # Get the web UI directory
+
+        # Locate frontend/backend dirs relative to the web_ui package
         current_file = Path(__file__)
         web_ui_dir = current_file.parent.parent / "web_ui"
         backend_dir = web_ui_dir / "backend"
         frontend_dir = web_ui_dir / "frontend"
-        
-        if not backend_dir.exists():
+
+        if not frontend_only and not backend_dir.exists():
             console.print(f"[red]Error: Web UI backend not found at {backend_dir}[/red]")
             console.print("[yellow]Please ensure the web UI is properly installed.[/yellow]")
             raise typer.Exit(1)
-        
-        if not frontend_only and not frontend_dir.exists():
+
+        if not backend_only and not frontend_dir.exists():
             console.print(f"[red]Error: Web UI frontend not found at {frontend_dir}[/red]")
             console.print("[yellow]Please ensure the web UI is properly installed.[/yellow]")
             raise typer.Exit(1)
-        
-        # Start servers
-        processes = []
-        
+
+        # Build env with project path for the backend
+        env = {
+            **os.environ, 
+            "JOULE_PROJECT_PATH": project_path,
+            "VITE_BACKEND_PORT": str(backend_port),
+        }
+
+        processes: list[tuple[str, subprocess.Popen]] = []
+
         try:
+            # ---------------------------------------------------------------
+            # Backend
+            # ---------------------------------------------------------------
             if not frontend_only:
-                # Start backend server
-                console.print(f"[blue]Starting JOULE API server on {host}:{default_port}...[/blue]")
+                console.print(f"[blue]Starting JOULE API server on {host}:{backend_port}...[/blue]")
                 backend_cmd = [
                     sys.executable, "-m", "uvicorn",
-                    "main:app",
+                    "joule.web_ui.backend.main:app",
                     "--host", host,
-                    "--port", str(default_port),
-                    "--reload" if verbose else "",
+                    "--port", str(backend_port),
                 ]
-                backend_cmd = [cmd for cmd in backend_cmd if cmd]  # Remove empty strings
-                
+                if verbose:
+                    backend_cmd.append("--reload")
+
                 backend_process = subprocess.Popen(
                     backend_cmd,
-                    cwd=backend_dir,
+                    env=env,
                     stdout=subprocess.PIPE if quiet else None,
                     stderr=subprocess.PIPE if quiet else None,
                 )
                 processes.append(("backend", backend_process))
-                
+
                 if not quiet:
-                    console.print(f"[green]✓ API server started at http://{host}:{default_port}[/green]")
-            
+                    console.print(f"[green]✓ API server started at http://{host}:{backend_port}[/green]")
+
+            # ---------------------------------------------------------------
+            # Frontend
+            # ---------------------------------------------------------------
             if not backend_only:
-                # Check if frontend dependencies are installed
                 node_modules = frontend_dir / "node_modules"
                 if not node_modules.exists():
                     if not quiet:
                         console.print("[yellow]Installing frontend dependencies...[/yellow]")
-                    install_process = subprocess.run(
+                    install = subprocess.run(
                         ["npm", "install"],
                         cwd=frontend_dir,
                         capture_output=quiet,
                     )
-                    if install_process.returncode != 0:
+                    if install.returncode != 0:
                         console.print("[red]Error: Failed to install frontend dependencies[/red]")
                         raise typer.Exit(1)
-                
-                # Start frontend dev server
-                frontend_port = 3000  # Default frontend port
+
+                frontend_port = 3000
                 console.print(f"[blue]Starting frontend dev server on port {frontend_port}...[/blue]")
-                
-                frontend_cmd = ["npm", "run", "dev"]
+
                 frontend_process = subprocess.Popen(
-                    frontend_cmd,
+                    ["npm", "run", "dev"],
                     cwd=frontend_dir,
+                    env=env,
                     stdout=subprocess.PIPE if quiet else None,
                     stderr=subprocess.PIPE if quiet else None,
                 )
                 processes.append(("frontend", frontend_process))
-                
+
                 if not quiet:
                     console.print(f"[green]✓ Frontend server started at http://localhost:{frontend_port}[/green]")
-            
+
+            # ---------------------------------------------------------------
+            # Status banner
+            # ---------------------------------------------------------------
             if not quiet:
                 console.print("\n[bold green]JOULE Web UI is running![/bold green]")
+                console.print(f"    📁 Project: {project_path}")
                 if not backend_only:
-                    console.print(f"🌐 Frontend: [link]http://localhost:3000[/link]")
+                    console.print(f"    🌐 Frontend: [link]http://localhost:3000[/link]")
                 if not frontend_only:
-                    console.print(f"🔧 Backend API: [link]http://{host}:{default_port}[/link]")
+                    console.print(f"    🔧 Backend API: [link]http://{host}:{backend_port}[/link]")
                 console.print("\n[yellow]Press Ctrl+C to stop the servers[/yellow]")
-            
-            # Wait for processes
+
+            # Wait
             try:
                 for name, process in processes:
                     process.wait()
@@ -127,20 +142,18 @@ def run_ui(
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         process.kill()
-                
                 if not quiet:
                     console.print("[green]✓ All servers stopped[/green]")
-        
+
         except Exception as e:
-            # Clean up processes on error
             for name, process in processes:
                 try:
                     process.terminate()
                     process.wait(timeout=5)
-                except:
+                except Exception:
                     process.kill()
             raise e
-            
+
     except Exception as e:
         console.print(f"[red]Error starting web UI: {e}[/red]")
         raise typer.Exit(1)
