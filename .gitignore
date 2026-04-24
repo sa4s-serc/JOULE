@@ -1,15 +1,128 @@
+# ----------------------
+# Project-specific
+# ----------------------
 .joule/
 .joule.lock
-
 joule_optimizer.egg-info/
-
-__pycache__/
-.pytest_cache/
-*.pyc
-
-.env
-.venv/
 .todo
 extra/
 
+# ----------------------
+# Python
+# ----------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache/
+nosetests.xml
+coverage.xml
+
+# Type checkers / linters
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# IDE / Editor (Python)
+.vscode/
+.idea/
+
+# ----------------------
+# Node.js
+# ----------------------
 node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+jspm_packages/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+.nuxt/
+.svelte-kit/
+coverage/
+
+# Environment variables
+.env.*
+!.env.example
+
+# Package managers
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Optional caches
+.npm/
+.eslintcache
+.stylelintcache
+
+# ----------------------
+# OS-specific
+# ----------------------
+.DS_Store
+Thumbs.db
+
+# ----------------------
+# Misc
+# ----------------------
+*.tgz
+*.gz
+*.zip
+*.tar
+*.rar
