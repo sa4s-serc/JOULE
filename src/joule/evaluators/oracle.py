@@ -379,6 +379,7 @@ class PerformanceOracle:
         target: TargetSpec,
         bundle: WorkloadBundle,
         candidate_source: str | None = None,
+        granular: bool = False,
     ) -> list[dict]:
         overlay_context = tempfile.TemporaryDirectory(prefix="joule-overlay-") if candidate_source else None
         overlay_root = Path(overlay_context.name) if overlay_context else None
@@ -393,6 +394,7 @@ class PerformanceOracle:
                     overlay_root=overlay_root,
                     inner_repetitions=1,
                     timeout_s=self.settings.workload_timeout_s,
+                    profile_mode="granular" if granular else "hotspots",
                 )
                 profile = profiled.get("profile", {"functions": [], "ownership": []})
                 records.append(

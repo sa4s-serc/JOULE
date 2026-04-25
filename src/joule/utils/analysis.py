@@ -166,6 +166,272 @@ def _enrich_hotspot_function(entry: dict[str, Any], *, total_cumulative: float) 
     }
 
 
+def _extract_granular_analysis(records: list[dict]) -> dict | None:
+    """Extract and aggregate granular profiling data from records with rich metrics."""
+    granular_data: list[dict] = []
+
+    for item in records:
+        profile = item.get("profile", {})
+        granular = profile.get("granular")
+        if granular and isinstance(granular, dict):
+            if "error" in granular:
+                continue
+            granular_data.append({
+                "workload_id": item.get("workload_id", "unknown"),
+                "function_name": granular.get("function_name", "unknown"),
+                "file": granular.get("file", ""),
+                "line_range": granular.get("line_range", [0, 0]),
+                "total_time_s": granular.get("total_time_s", 0.0),
+                "total_hits": granular.get("total_hits", 0),
+                "code_blocks": granular.get("code_blocks", []),
+                "raw_line_count": granular.get("raw_line_count", 0),
+            })
+
+    if not granular_data:
+        return None
+
+    # Aggregate code blocks across workloads
+    block_totals: dict[tuple[str, int, int], dict] = defaultdict(
+        lambda: {"type": "", "line_range": [0, 0], "description": "", "total_hits": 0, "total_time_s": 0.0, "count": 0, "nesting_level": 0}
+    )
+
+    for data in granular_data:
+        for block in data.get("code_blocks", []):
+            key = (block.get("type", ""), block.get("line_range", [0, 0])[0], block.get("line_range", [0, 0])[1])
+            agg = block_totals[key]
+            agg["type"] = block.get("type", "")
+            agg["line_range"] = block.get("line_range", [0, 0])
+            agg["description"] = block.get("description", "")
+            agg["total_hits"] += block.get("hits", 0)
+            agg["total_time_s"] += block.get("time_s", 0.0)
+            agg["count"] += 1
+            agg["nesting_level"] = block.get("nesting_level", 0)
+
+    # Calculate averages and enrich with metrics
+    total_function_time = sum(d.get("total_time_s", 0.0) for d in granular_data) / max(len(granular_data), 1)
+    enriched_blocks = []
+
+    for agg in block_totals.values():
+        count = agg["count"]
+        time_s = agg["total_time_s"] / max(count, 1)
+        hits = agg["total_hits"] // max(count, 1)
+        block_type = agg["type"]
+
+        # Calculate efficiency score (higher is worse - more time per hit)
+        efficiency_score = time_s / max(hits, 1) * 1000  # ms per hit
+
+        # Calculate loop complexity indicator
+        loop_complexity = 0
+        if block_type in ("for_loop", "while_loop"):
+            # High hit count with low time per hit = efficient loop
+            # Low hit count with high time per hit = expensive loop body
+            loop_complexity = min(10, int(efficiency_score * 2))
+
+        enriched = {
+            "type": block_type,
+            "line_range": agg["line_range"],
+            "description": agg["description"],
+            "nesting_level": agg["nesting_level"],
+            "hits": hits,
+            "time_s": round(time_s, 6),
+            "time_per_hit_ms": round((time_s / max(hits, 1)) * 1000, 4),
+            "share_of_function": round(time_s / max(total_function_time, 0.0001), 4),
+            "workloads_profiled": count,
+            "efficiency_score": round(efficiency_score, 4),
+            "loop_complexity": loop_complexity,
+        }
+        enriched_blocks.append(enriched)
+
+    # Sort by time (descending)
+    enriched_blocks.sort(key=lambda x: x["time_s"], reverse=True)
+
+    # Calculate summary by block type
+    type_totals: dict[str, float] = defaultdict(float)
+    type_counts: dict[str, int] = defaultdict(int)
+    for block in enriched_blocks:
+        type_totals[block["type"]] += block["time_s"]
+        type_counts[block["type"]] += 1
+
+    # Build nested structure for visualization
+    nested_blocks = _build_nested_block_structure(enriched_blocks)
+
+    # Generate visual hotspot tree
+    hotspot_tree = _generate_hotspot_tree(enriched_blocks, total_function_time)
+
+    # Get function info from first record
+    first = granular_data[0]
+
+    # Calculate comprehensions metrics
+    comprehension_types = ["list_comprehension", "dict_comprehension", "set_comprehension", "generator_expression"]
+    comprehension_time = sum(type_totals.get(ct, 0.0) for ct in comprehension_types)
+
+    return {
+        "target_function": first.get("function_name", "unknown"),
+        "file": first.get("file", ""),
+        "line_range": first.get("line_range", [0, 0]),
+        "total_time_s": round(total_function_time, 6),
+        "workloads_profiled": len(granular_data),
+        "code_blocks": enriched_blocks[:20],  # Limit to top 20 blocks
+        "nested_structure": nested_blocks,
+        "hotspot_tree": hotspot_tree,
+        "hotspot_summary": {
+            "hottest_block": enriched_blocks[0].get("description", "") if enriched_blocks else None,
+            "hottest_block_share": enriched_blocks[0].get("share_of_function", 0.0) if enriched_blocks else 0.0,
+            "loop_time_total_s": round(type_totals.get("for_loop", 0.0) + type_totals.get("while_loop", 0.0), 6),
+            "loop_count": type_counts.get("for_loop", 0) + type_counts.get("while_loop", 0),
+            "branch_time_total_s": round(type_totals.get("if_branch", 0.0) + type_totals.get("elif_branch", 0.0) + type_totals.get("else_branch", 0.0), 6),
+            "branch_count": type_counts.get("if_branch", 0) + type_counts.get("elif_branch", 0) + type_counts.get("else_branch", 0),
+            "call_time_total_s": round(type_totals.get("function_call", 0.0), 6),
+            "call_count": type_counts.get("function_call", 0),
+            "assignment_time_total_s": round(type_totals.get("assignment", 0.0) + type_totals.get("augmented_assignment", 0.0), 6),
+            "comprehension_time_total_s": round(comprehension_time, 6),
+            "comprehension_count": sum(type_counts.get(ct, 0) for ct in comprehension_types),
+        },
+        "insights": _generate_granular_insights(enriched_blocks, type_totals, total_function_time),
+    }
+
+
+def _build_nested_block_structure(blocks: list[dict]) -> list[dict]:
+    """Build a nested structure of code blocks based on line ranges."""
+    if not blocks:
+        return []
+
+    # Sort by nesting level and line start
+    sorted_blocks = sorted(blocks, key=lambda b: (b.get("nesting_level", 0), b["line_range"][0]))
+
+    # Build parent-child relationships
+    root_blocks: list[dict] = []
+    block_stack: list[dict] = []
+
+    for block in sorted_blocks:
+        block_copy = {**block, "children": []}
+        nesting = block.get("nesting_level", 0)
+
+        # Pop stack until we find the parent or empty
+        while block_stack and block_stack[-1].get("nesting_level", 0) >= nesting:
+            block_stack.pop()
+
+        if block_stack:
+            block_stack[-1].setdefault("children", []).append(block_copy)
+        else:
+            root_blocks.append(block_copy)
+
+        block_stack.append(block_copy)
+
+    return root_blocks
+
+
+def _generate_hotspot_tree(blocks: list[dict], total_time: float) -> list[dict]:
+    """Generate a visual tree representation of hotspots."""
+    if not blocks or total_time <= 0:
+        return []
+
+    tree_lines = []
+    top_blocks = blocks[:10]  # Top 10 for tree
+
+    for i, block in enumerate(top_blocks):
+        share = block.get("share_of_function", 0.0)
+        nesting = block.get("nesting_level", 0)
+        prefix = "  " * nesting
+        indicator = "🔥" if share > 0.3 else "⚡" if share > 0.1 else "•"
+
+        tree_lines.append({
+            "line": f"{prefix}{indicator} {block['description'][:50]}",
+            "time_s": block["time_s"],
+            "share": share,
+            "nesting_level": nesting,
+        })
+
+    return tree_lines
+
+
+def _generate_granular_insights(blocks: list[dict], type_totals: dict, total_time: float) -> list[str]:
+    """Generate insights from granular analysis."""
+    insights: list[str] = []
+
+    if not blocks:
+        return insights
+
+    # Top hotspot insight
+    top_block = blocks[0]
+    if top_block.get("share_of_function", 0) > 0.3:
+        insights.append(
+            f"🎯 Critical hotspot: '{top_block['description'][:40]}' consumes "
+            f"{top_block['share_of_function']*100:.1f}% of function time"
+        )
+    elif top_block.get("share_of_function", 0) > 0.1:
+        insights.append(
+            f"🔥 Hotspot: '{top_block['description'][:40]}' takes "
+            f"{top_block['share_of_function']*100:.1f}% of function time"
+        )
+
+    # Loop insights
+    loop_time = type_totals.get("for_loop", 0.0) + type_totals.get("while_loop", 0.0)
+    if loop_time / max(total_time, 0.0001) > 0.5:
+        insights.append(f"🔄 Loops dominate: {loop_time/max(total_time, 0.0001)*100:.1f}% of time in loops")
+
+    # High complexity blocks
+    complex_blocks = [b for b in blocks if b.get("loop_complexity", 0) > 5]
+    if complex_blocks:
+        insights.append(
+            f"⚠️  {len(complex_blocks)} loop(s) with high per-iteration cost detected"
+        )
+
+    # Nesting depth warning
+    deep_nesting = [b for b in blocks if b.get("nesting_level", 0) >= 3]
+    if deep_nesting:
+        insights.append(f"📊 Deep nesting: {len(deep_nesting)} block(s) at nesting level 3+")
+
+    # Comprehension usage
+    comprehension_time = (
+        type_totals.get("list_comprehension", 0.0) +
+        type_totals.get("dict_comprehension", 0.0) +
+        type_totals.get("set_comprehension", 0.0)
+    )
+    if comprehension_time > 0:
+        insights.append(f"✨ Comprehensions contribute {comprehension_time/max(total_time, 0.0001)*100:.1f}% of time")
+
+    return insights
+
+
+def _summarize_harness(
+    all_functions: list[dict],
+    ownership_totals: dict[str, float],
+    project_like_buckets: set[str],
+    limit: int = 5,
+) -> dict:
+    """Create a condensed summary of harness/external code."""
+    # Filter to non-project code
+    non_project = [
+        fn for fn in all_functions
+        if str(fn.get("ownership", "")) not in project_like_buckets
+    ]
+    
+    harness_total = sum(
+        total for bucket, total in ownership_totals.items()
+        if bucket not in project_like_buckets
+    )
+    total_all = sum(ownership_totals.values())
+    
+    # Get top non-project calls
+    top_calls = [
+        {
+            "function": fn.get("function", "unknown"),
+            "file": Path(fn.get("file", "unknown")).name,
+            "time_s": round(fn.get("cumulative_time_s", 0.0), 4),
+            "calls": fn.get("total_calls", 0),
+        }
+        for fn in non_project[:limit]
+    ]
+    
+    return {
+        "total_time_s": round(harness_total, 4),
+        "share": round(harness_total / max(total_all, 0.0001), 4),
+        "top_calls": top_calls,
+        "total_external_functions": len(non_project),
+    }
+
+
 def _hotspot_recommendations(
     *,
     signal_quality: dict[str, Any],
@@ -229,7 +495,7 @@ def _hotspot_recommendations(
     return recommendations[:8]
 
 
-def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | Path | None = None) -> dict:
+def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | Path | None = None, granular: bool = False) -> dict:
     by_workload: list[dict[str, Any]] = []
     aggregate_functions: defaultdict[tuple[str, int, str, str], dict] = defaultdict(
         lambda: {
@@ -367,6 +633,17 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
         "low_signal_reasons": low_signal_reasons,
         "dominant_ownership_bucket": aggregate_dominant_bucket,
     }
+    
+    # Extract granular analysis if available
+    granular_analysis = None
+    if granular:
+        granular_analysis = _extract_granular_analysis(records)
+    
+    # Summarize harness/external code
+    harness_summary = _summarize_harness(
+        all_functions, dict(ownership_totals), project_like_buckets, limit=5
+    )
+    
     recommendations = _hotspot_recommendations(
         signal_quality=signal_quality,
         target_top_functions=target_top_functions,
@@ -390,8 +667,8 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
             "target_share": (weakest_workload.get("signal") or {}).get("target_share", 0.0),
         }
 
-    return {
-        "schema_version": 2,
+    result: dict[str, Any] = {
+        "schema_version": 3,
         "by_workload": by_workload,
         "top_functions": merged_functions,
         "target_top_functions": target_top_functions,
@@ -406,8 +683,14 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
             "weakest_signal_workload": weakest_signal,
             "profiled_workload_count": len(by_workload),
         },
+        "harness_summary": harness_summary,
         "recommendations": recommendations,
     }
+    
+    if granular_analysis:
+        result["granular_analysis"] = granular_analysis
+    
+    return result
 
 
 def build_optimization_analysis(

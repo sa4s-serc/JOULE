@@ -13,6 +13,14 @@ import sys
 from typing import Any
 
 from joule.models import TargetSpec, WorkloadKind, WorkloadSpec
+
+# Optional line_profiler for granular analysis
+try:
+    from line_profiler import LineProfiler
+    LINE_PROFILER_AVAILABLE = True
+except ImportError:
+    LineProfiler = None  # type: ignore
+    LINE_PROFILER_AVAILABLE = False
 from joule.runtime_helpers.worker import (
     execute_golden_trace_workload,
     execute_harness_workload,
@@ -117,13 +125,14 @@ def invoke_profile_worker(
     *,
     inner_repetitions: int = 1,
     timeout_s: float = 30.0,
+    profile_mode: str = "hotspots",
 ) -> dict:
     command = worker_command(
         target,
         workload,
         overlay_root=overlay_root,
         inner_repetitions=inner_repetitions,
-        profile_mode="hotspots",
+        profile_mode=profile_mode,
     )
     return invoke_worker_process(
         command=command,
@@ -210,6 +219,169 @@ def execute_workload_with_profile(
     return payload
 
 
+def execute_workload_with_granular_profile(
+    target: TargetSpec,
+    workload: WorkloadSpec,
+    project_root: Path,
+    overlay_root: Path | None = None,
+    *,
+    inner_repetitions: int = 1,
+) -> dict:
+    """
+    Execute workload with both function-level (cProfile) and line-level profiling.
+
+    Line profiling is applied specifically to the target function to identify
+    hotspots within loops, branches, and other code blocks.
+    """
+    if not LINE_PROFILER_AVAILABLE:
+        # Fall back to standard profiling with warning
+        payload = execute_workload_with_profile(
+            target,
+            workload,
+            project_root=project_root,
+            overlay_root=overlay_root,
+            inner_repetitions=inner_repetitions,
+        )
+        payload["profile"] = payload.get("profile", {})
+        payload["profile"]["granular_warning"] = (
+            "line_profiler not available. "
+            "Install with: pip install line_profiler"
+        )
+        return payload
+
+    # Load the target object for line profiling
+    target_obj = None
+    line_profiler = LineProfiler()
+    try:
+        extend_runtime_import_paths(project_root, overlay_root)
+        if ".py::" in target.selector:
+            module, object_name = load_module_for_file_selector(
+                target.selector, project_root
+            )
+            target_obj = resolve_attr_path(module, object_name)
+        else:
+            module_name, object_name = target.selector.replace("::", ":").split(":", 1)
+            module = importlib.import_module(module_name)
+            target_obj = resolve_attr_path(module, object_name)
+
+        # Add target function to line profiler
+        if callable(target_obj):
+            line_profiler.add_function(target_obj)
+    except Exception as exc:
+        # If we can't load target, continue with function-level only
+        line_profiler = None  # type: ignore
+
+    # Enable both profilers
+    cprofiler = cProfile.Profile()
+    cprofiler.enable()
+    if line_profiler:
+        line_profiler.enable()
+
+    payload = execute_workload(
+        target,
+        workload,
+        project_root=project_root,
+        overlay_root=overlay_root,
+        inner_repetitions=inner_repetitions,
+    )
+
+    # Disable profilers
+    cprofiler.disable()
+    if line_profiler:
+        line_profiler.disable()
+
+    # Serialize cProfile results (function-level)
+    profile_data = _serialize_profile(cprofiler, project_root, overlay_root)
+
+    # Serialize line profiler results (granular)
+    if line_profiler and target_obj:
+        granular_data = _serialize_line_profile(line_profiler, target_obj)
+        profile_data["granular"] = granular_data
+
+    payload["profile"] = profile_data
+    return payload
+
+
+def _serialize_line_profile(
+    line_profiler: Any, target_obj: Callable[..., Any]
+) -> dict:
+    """Serialize line profiler statistics for the target function."""
+    try:
+        from joule.utils.code_analysis import (
+            analyze_function_ast,
+            map_line_profiler_to_blocks,
+            get_function_line_range,
+        )
+    except ImportError:
+        return {"error": "code_analysis module not available"}
+
+    # Get raw stats from line profiler
+    stats = line_profiler.get_stats()
+    if not stats or not stats.timings:
+        return {"error": "No line profile data available"}
+
+    # Extract timings for target function
+    target_code = getattr(target_obj, "__code__", None)
+    if not target_code:
+        return {"error": "Could not get code object for target"}
+
+    # Build line stats dict: {line_num: (hits, time_s)}
+    line_stats: dict[int, tuple[int, float]] = {}
+    for key, timings in stats.timings.items():
+        # key is (filename, line_number, function_name)
+        if len(key) >= 2:
+            line_num = key[1]
+            # timings is list of (hits, time) in profiler units
+            total_hits = 0
+            total_time = 0.0
+            for hits, time in timings:
+                total_hits += hits
+                # Convert to seconds (line_profiler uses different units)
+                total_time += time / 1e6  # Convert from microseconds to seconds
+            line_stats[line_num] = (total_hits, total_time)
+
+    # Analyze function structure with AST
+    try:
+        code_blocks = analyze_function_ast(target_obj)
+    except Exception as exc:
+        # If AST analysis fails, return raw line stats
+        return {
+            "function_name": getattr(target_obj, "__name__", "unknown"),
+            "line_stats": [
+                {"line": ln, "hits": h, "time_s": round(t, 6)}
+                for ln, (h, t) in sorted(line_stats.items())
+            ],
+            "ast_error": str(exc),
+        }
+
+    # Map line stats to code blocks
+    try:
+        block_metrics = map_line_profiler_to_blocks(line_stats, code_blocks)
+    except Exception as exc:
+        block_metrics = []
+
+    # Get function line range
+    try:
+        line_start, line_end = get_function_line_range(target_obj)
+    except Exception:
+        line_start = min(line_stats.keys()) if line_stats else 0
+        line_end = max(line_stats.keys()) if line_stats else 0
+
+    # Calculate summary
+    total_time = sum(t for _, (_, t) in line_stats.items())
+    total_hits = sum(h for _, (h, _) in line_stats.items())
+
+    return {
+        "function_name": getattr(target_obj, "__name__", "unknown"),
+        "file": getattr(target_code, "co_filename", "unknown"),
+        "line_range": [line_start, line_end],
+        "total_time_s": round(total_time, 6),
+        "total_hits": total_hits,
+        "code_blocks": block_metrics,
+        "raw_line_count": len(line_stats),
+    }
+
+
 def _serialize_profile(profiler: cProfile.Profile, project_root: Path, overlay_root: Path | None) -> dict:
     stats = pstats.Stats(profiler)
     functions = []
@@ -263,7 +435,15 @@ def main(argv: list[str] | None = None) -> int:
     target = TargetSpec.from_record(json.loads(args.target_json))
     workload = WorkloadSpec.from_record(json.loads(args.workload_json))
     try:
-        if args.profile_mode == "hotspots":
+        if args.profile_mode == "granular":
+            payload = execute_workload_with_granular_profile(
+                target,
+                workload,
+                project_root=target.project_root,
+                overlay_root=Path(args.overlay_root) if args.overlay_root else None,
+                inner_repetitions=max(1, args.inner_repetitions),
+            )
+        elif args.profile_mode == "hotspots":
             payload = execute_workload_with_profile(
                 target,
                 workload,

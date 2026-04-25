@@ -63,6 +63,7 @@ def run_optimize(
         reporter=context.reporter,
         enabled=analysis,
         limit=context.settings.hotspot_limit,
+        granular=context.settings.granular_hotspot_analysis,
     )
     baseline_analysis = build_baseline_analysis(
         run_id=context.run_id,

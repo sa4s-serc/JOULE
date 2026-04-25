@@ -40,11 +40,15 @@ def collect_hotspot_analysis(
     reporter: Reporter,
     enabled: bool,
     limit: int,
+    granular: bool = False,
 ) -> dict | None:
     if not enabled:
         return None
-    reporter.info("hotspots", "Profiling workloads for hotspot analysis")
-    records = oracle.profile_bundle_hotspots(target=target, bundle=bundle)
+    if granular:
+        reporter.info("hotspots", "Profiling workloads for granular hotspot analysis (line-level)")
+    else:
+        reporter.info("hotspots", "Profiling workloads for hotspot analysis")
+    records = oracle.profile_bundle_hotspots(target=target, bundle=bundle, granular=granular)
     created_at = datetime.now(UTC).isoformat()
     for item in records:
         db.record_hotspot_profile(
@@ -56,7 +60,7 @@ def collect_hotspot_analysis(
         )
     from joule.utils.analysis import summarize_hotspots, json_pretty
 
-    summary = summarize_hotspots(records, limit=limit, target_file=target.file_path)
+    summary = summarize_hotspots(records, limit=limit, target_file=target.file_path, granular=granular)
     db.record_hotspot_profile(
         run_id=run_id,
         workload_id="all",

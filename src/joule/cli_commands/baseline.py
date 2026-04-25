@@ -30,6 +30,7 @@ def run_baseline(context: ExecutionContext, *, output: str, repetitions: int | N
         reporter=context.reporter,
         enabled=hotspots,
         limit=hotspot_limit if hotspot_limit is not None else context.settings.hotspot_limit,
+        granular=context.settings.granular_hotspot_analysis,
     )
     baseline_analysis = build_baseline_analysis(
         run_id=context.run_id,

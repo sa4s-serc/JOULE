@@ -229,6 +229,7 @@ class JouleSettings:
     optimization_budget: int = 6
     workload_discovery_limit: int = 8
     hotspot_limit: int = 12
+    granular_hotspot_analysis: bool = False
     dashboard_port: int = 8501
     dependency_energy_threshold: float = 0.15
     dependency_latency_threshold: float = 0.20
@@ -357,6 +358,7 @@ def load_settings(path: str | Path) -> JouleSettings:
         optimization_budget=int(resolved_payload.get("optimization_budget", 6)),
         workload_discovery_limit=int(resolved_payload.get("workload_discovery_limit", 8)),
         hotspot_limit=int(resolved_payload.get("hotspot_limit", 12)),
+        granular_hotspot_analysis=_coerce_bool(resolved_payload.get("granular_hotspot_analysis", False), default=False),
         dashboard_port=int(resolved_payload.get("dashboard_port", 8501)),
         dependency_energy_threshold=float(resolved_payload.get("dependency_energy_threshold", 0.15)),
         dependency_latency_threshold=float(resolved_payload.get("dependency_latency_threshold", 0.20)),
