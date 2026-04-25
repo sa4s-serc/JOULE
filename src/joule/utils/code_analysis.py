@@ -475,6 +475,41 @@ class LineProfilerMapper:
         return result
 
 
+def _dedent_source(source: str) -> str:
+    """Remove common leading whitespace from source code.
+
+    This is essential for parsing nested methods and classes where the
+    function source has additional indentation from its containing scope.
+    """
+    lines = source.splitlines()
+    if not lines:
+        return source
+
+    # Find the minimum indentation of non-blank lines
+    indent_levels = []
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped:  # Non-blank line
+            indent_levels.append(len(line) - len(stripped))
+
+    if not indent_levels:
+        return source
+
+    min_indent = min(indent_levels)
+    if min_indent == 0:
+        return source
+
+    # Remove common leading whitespace
+    dedented_lines = []
+    for line in lines:
+        if line.strip():  # Non-blank line
+            dedented_lines.append(line[min_indent:])
+        else:  # Blank line - preserve as is or keep minimal
+            dedented_lines.append(line.lstrip())
+
+    return "\n".join(dedented_lines)
+
+
 def analyze_function_ast(func: Callable[..., Any]) -> list[CodeBlock]:
     """
     Analyze a function using AST to identify code blocks.
@@ -501,6 +536,9 @@ def analyze_function_ast(func: Callable[..., Any]) -> list[CodeBlock]:
                 dedent_source = "\n".join(source_lines[i:])
                 break
 
+    # Dedent the source for proper AST parsing of nested methods/classes
+    dedent_source = _dedent_source(dedent_source)
+
     try:
         tree = ast.parse(dedent_source)
     except SyntaxError as exc:
@@ -516,8 +554,9 @@ def analyze_function_ast(func: Callable[..., Any]) -> list[CodeBlock]:
     if func_def is None:
         raise ValueError("No function definition found in source")
 
-    # Analyze the function body
-    analyzer = FunctionAnalyzer(source_lines)
+    # Use dedented source lines for line number calculations
+    dedented_lines = dedent_source.splitlines()
+    analyzer = FunctionAnalyzer(dedented_lines)
 
     # Calculate offset from original source
     base_lineno = getattr(func, "__code__", None)

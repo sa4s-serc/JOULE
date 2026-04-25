@@ -406,13 +406,13 @@ def _summarize_harness(
         fn for fn in all_functions
         if str(fn.get("ownership", "")) not in project_like_buckets
     ]
-    
+
     harness_total = sum(
         total for bucket, total in ownership_totals.items()
         if bucket not in project_like_buckets
     )
     total_all = sum(ownership_totals.values())
-    
+
     # Get top non-project calls
     top_calls = [
         {
@@ -423,7 +423,7 @@ def _summarize_harness(
         }
         for fn in non_project[:limit]
     ]
-    
+
     return {
         "total_time_s": round(harness_total, 4),
         "share": round(harness_total / max(total_all, 0.0001), 4),
@@ -495,7 +495,39 @@ def _hotspot_recommendations(
     return recommendations[:8]
 
 
-def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | Path | None = None, granular: bool = False) -> dict:
+def summarize_hotspots(
+    records: list[dict],
+    limit: int = 12,
+    target_file: str | Path | None = None,
+    granular: bool = False,
+) -> dict:
+    """Summarize hotspot profiling data.
+
+    Args:
+        records: List of profile records from workloads
+        limit: Maximum number of top functions to include
+        target_file: Path to the target file for filtering
+        granular: Whether to include deep granular (line-level) analysis
+
+    Returns:
+        Hotspot summary dictionary with hardened schema v2
+    """
+    # Use hardened schema v2 implementation
+    try:
+        from joule.profiling.schema import create_hotspot_summary, ProfileLevel
+
+        level = ProfileLevel.GRANULAR if granular else ProfileLevel.BASIC
+        return create_hotspot_summary(
+            records,
+            limit=limit,
+            target_file=target_file,
+            level=level,
+        )
+    except ImportError:
+        # Fall back to legacy implementation if profiling module not available
+        pass
+
+    # Legacy implementation fallback
     by_workload: list[dict[str, Any]] = []
     aggregate_functions: defaultdict[tuple[str, int, str, str], dict] = defaultdict(
         lambda: {
@@ -582,7 +614,7 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
 
     total_cumulative = sum(float(item["cumulative_time_s"]) for item in all_functions_raw)
     all_functions = [_enrich_hotspot_function(item, total_cumulative=total_cumulative) for item in all_functions_raw]
-    
+
     # Filter harness code from main top_functions by prioritizing project/target code
     project_merged = [fn for fn in all_functions if str(fn.get("ownership", "")) in project_like_buckets]
     non_project_merged = [fn for fn in all_functions if str(fn.get("ownership", "")) not in project_like_buckets]
@@ -633,17 +665,17 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
         "low_signal_reasons": low_signal_reasons,
         "dominant_ownership_bucket": aggregate_dominant_bucket,
     }
-    
+
     # Extract granular analysis if available
     granular_analysis = None
     if granular:
         granular_analysis = _extract_granular_analysis(records)
-    
+
     # Summarize harness/external code
     harness_summary = _summarize_harness(
         all_functions, dict(ownership_totals), project_like_buckets, limit=5
     )
-    
+
     recommendations = _hotspot_recommendations(
         signal_quality=signal_quality,
         target_top_functions=target_top_functions,
@@ -686,10 +718,10 @@ def summarize_hotspots(records: list[dict], limit: int = 12, target_file: str | 
         "harness_summary": harness_summary,
         "recommendations": recommendations,
     }
-    
+
     if granular_analysis:
         result["granular_analysis"] = granular_analysis
-    
+
     return result
 
 

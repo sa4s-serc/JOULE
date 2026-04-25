@@ -2,6 +2,38 @@
 
 This guide answers: where should I look first when something succeeds, fails, or behaves unexpectedly?
 
+## Granular Hotspot Analysis
+
+Joule supports optional granular (line-level) hotspot profiling using `line_profiler`. This provides detailed insights into specific code blocks (loops, branches, comprehensions) within the target function.
+
+### Two Profiling Levels
+
+1. **BASIC** (default): Function-level profiling with cProfile
+   - Hotspots by function ownership (project, stdlib, external)
+   - Signal quality metrics
+   - Harness summary
+
+2. **GRANULAR**: Deep line-level profiling with `line_profiler`
+   - Code block metrics (loops, branches, comprehensions)
+   - Stable block IDs
+   - Structured insights (not emoji strings)
+   - Raw line-level timings
+
+### Enabling Granular Profiling
+
+Add to your `pyproject.toml`:
+
+```toml
+[tool.joule]
+granular_hotspot_analysis = true
+```
+
+Or install with the profiling extra:
+
+```bash
+pip install joule-optimizer[profiling]
+```
+
 ## Artifact Flow
 
 ```mermaid
@@ -88,6 +120,57 @@ Quick interpretation guide:
 - `target_share < 0.20`: hotspot signal is likely diluted by harness/setup overhead.
 - dominant owner is not `project` or `candidate-overlay`: optimize workload scope before code rewrites.
 - empty `target_top_functions`: target may not be exercised strongly enough in current workload set.
+
+## Granular Analysis Structure (Schema v2)
+
+When `granular_analysis` is present in `hotspots.json` (GRANULAR level):
+
+### Code Blocks
+
+Each block has:
+- `block_id`: Stable identifier based on file, function, line range, and type
+- `type`: Block type (e.g., `for_loop`, `if_branch`, `list_comprehension`)
+- `line_range`: [start, end] line numbers
+- `description`: Human-readable description from AST
+- `nesting_level`: Nesting depth in the function
+- `parent_block_id`/`child_block_ids`: Parent-child relationships
+
+### Metrics
+
+Per-block timing metrics:
+- `hits`: Average execution count across workloads
+- `time_s`: Average time in seconds
+- `time_per_hit_ms`: Average time per hit in milliseconds
+- `share_of_function`: Proportion of total function time
+- `workload_count`: Number of workloads aggregated
+- `time_min_s`/`time_max_s`: Min/max time across workloads (when >1 workload)
+
+### Structured Insights
+
+Insights are structured records (not emoji strings):
+
+```json
+{
+  "kind": "critical_hotspot|loop_dominant|high_complexity|deep_nesting|comprehension_usage",
+  "severity": "critical|warning|info",
+  "message": "Human-readable description",
+  "evidence": {
+    "share_of_function": 0.45,
+    "time_s": 0.123,
+    "hits": 1000
+  },
+  "line_range": [15, 25],
+  "block_type": "for_loop",
+  "block_id": "block:abc123def456"
+}
+```
+
+### Profiler Capability Metadata
+
+`profiler_capability` field indicates:
+- `function_level`: Always `true` for cProfile-based data
+- `granular_level`: `true` if line-level data is present
+- `line_profiler_available`: Whether line_profiler is installed
 
 ## Artifact Layout
 

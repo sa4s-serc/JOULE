@@ -55,8 +55,8 @@ def test_summarize_hotspots_without_granular() -> None:
 
     result = summarize_hotspots(records, limit=12, target_file="/path/to/module.py", granular=False)
 
-    # Check basic structure
-    assert result["schema_version"] == 3
+    # Check basic structure (hardened schema v2)
+    assert result["schema_version"] == 2
     assert "by_workload" in result
     assert "top_functions" in result
     assert "harness_summary" in result
@@ -130,7 +130,7 @@ def test_summarize_hotspots_with_granular() -> None:
     assert granular["total_time_s"] == 1.5
     assert len(granular["code_blocks"]) == 2
 
-    # Check code block structure
+    # Check code block structure (hardened schema v2 includes block_id)
     first_block = granular["code_blocks"][0]
     assert "type" in first_block
     assert "line_range" in first_block
@@ -138,13 +138,17 @@ def test_summarize_hotspots_with_granular() -> None:
     assert "hits" in first_block
     assert "time_s" in first_block
     assert "share_of_function" in first_block
+    # Hardened schema adds stable block_id
+    assert "block_id" in first_block
 
-    # Check hotspot summary
-    assert "hotspot_summary" in granular
-    summary = granular["hotspot_summary"]
-    assert "hottest_block" in summary
-    assert "loop_time_total_s" in summary
-    assert "branch_time_total_s" in summary
+    # Hardened schema uses structured insights instead of hotspot_summary
+    assert "insights" in granular
+    # Insights are structured records, not emoji strings
+    if granular["insights"]:
+        first_insight = granular["insights"][0]
+        assert "kind" in first_insight
+        assert "severity" in first_insight
+        assert "message" in first_insight
 
 
 def test_extract_granular_analysis_empty() -> None:
@@ -339,3 +343,86 @@ def test_hotspot_recommendations_with_granular() -> None:
     # Check for high call count warning in recommendations
     high_call_rec = [r for r in result["recommendations"] if "6000 calls" in r]
     assert len(high_call_rec) == 1
+
+
+def test_profiler_capability_metadata() -> None:
+    """Test that profiler capability metadata is present."""
+    records = [
+        {
+            "workload_id": "test-1",
+            "workload_kind": "pytest",
+            "workload_label": "test_basic",
+            "profile": {
+                "functions": [
+                    {
+                        "file": "/path/to/module.py",
+                        "line": 10,
+                        "function": "target_func",
+                        "ownership": "project",
+                        "cumulative_time_s": 1.5,
+                        "total_time_s": 0.8,
+                        "total_calls": 100,
+                    },
+                ],
+                "ownership": [
+                    {"bucket": "project", "cumulative_time_s": 1.5},
+                ],
+            },
+            "success": True,
+            "return_code": 0,
+            "stderr": "",
+        }
+    ]
+
+    # Basic level should have function_level=True, granular_level=False
+    result = summarize_hotspots(records, limit=12, target_file="/path/to/module.py", granular=False)
+    assert "profiler_capability" in result
+    assert result["profiler_capability"]["function_level"] is True
+    assert result["profiler_capability"]["granular_level"] is False
+
+
+def test_granular_profiling_error_missing_line_profiler() -> None:
+    """Test that ProfilingError is raised when line_profiler is missing."""
+    from joule.profiling import ProfilingError, execute_granular_profiling, LINE_PROFILER_AVAILABLE
+
+    if LINE_PROFILER_AVAILABLE:
+        # Skip test if line_profiler is available - we can't test the error path
+        pytest.skip("line_profiler is available, cannot test missing profiler error")
+
+    # Mock a target and workload - this should raise ProfilingError
+    # Note: This test will only run if line_profiler is NOT installed
+    with pytest.raises(ProfilingError) as exc_info:
+        from unittest.mock import MagicMock
+        from pathlib import Path
+        from joule.models import TargetSpec, WorkloadSpec, WorkloadKind
+
+        target = MagicMock(spec=TargetSpec)
+        target.selector = "test_module::test_func"
+        target.project_root = Path("/tmp")
+
+        workload = MagicMock(spec=WorkloadSpec)
+        workload.kind = WorkloadKind.HARNESS
+        workload.selector = "test_harness"
+
+        execute_granular_profiling(
+            target=target,
+            workload=workload,
+            project_root=Path("/tmp"),
+            inner_repetitions=1,
+        )
+
+    assert exc_info.value.reason == "line_profiler_missing"
+    assert "line_profiler not available" in str(exc_info.value)
+
+
+def test_profiling_error_to_dict() -> None:
+    """Test that ProfilingError can be serialized to dict."""
+    from joule.profiling import ProfilingError
+
+    error = ProfilingError("Test message", reason="test_reason")
+    error_dict = error.to_dict()
+
+    assert error_dict["error"] is True
+    assert error_dict["error_type"] == "ProfilingError"
+    assert error_dict["message"] == "Test message"
+    assert error_dict["reason"] == "test_reason"
