@@ -11,6 +11,10 @@ import sys
 from typing import Any
 
 from joule.models import TargetSpec, WorkloadKind, WorkloadSpec
+from joule.profiling.core import (
+    execute_workload,
+    load_object,
+)
 from joule.runtime_helpers.worker import (
     execute_golden_trace_workload,
     execute_harness_workload,
@@ -21,74 +25,6 @@ from joule.runtime_helpers.worker import (
     load_module_for_file_selector,
     resolve_attr_path,
 )
-
-
-def load_object(selector: str, project_root: Path, overlay_root: Path | None = None) -> Any:
-    """Load a target object by selector."""
-    extend_runtime_import_paths(project_root, overlay_root)
-    if ".py::" in selector:
-        module, object_name = load_module_for_file_selector(selector, project_root)
-        return resolve_attr_path(module, object_name)
-    module_name, object_name = selector.replace("::", ":").split(":", 1)
-    module = importlib.import_module(module_name)
-    return resolve_attr_path(module, object_name)
-
-
-def execute_workload(
-    target: TargetSpec,
-    workload: WorkloadSpec,
-    project_root: Path,
-    overlay_root: Path | None = None,
-    *,
-    inner_repetitions: int = 1,
-) -> dict:
-    captured_stdout = io.StringIO()
-    captured_stderr = io.StringIO()
-    logical_invocations = 0
-    payload: dict[str, Any]
-    with redirect_stdout(captured_stdout), redirect_stderr(captured_stderr):
-        if workload.kind is WorkloadKind.PYTEST:
-            payload, logical_invocations = execute_pytest_workload(
-                selector=workload.selector,
-                project_root=project_root,
-                inner_repetitions=inner_repetitions,
-                normalize_selector=_normalize_pytest_selector,
-            )
-        elif workload.kind is WorkloadKind.PROPERTY:
-            payload, logical_invocations = execute_property_workload(
-                selector=workload.selector,
-                project_root=project_root,
-                overlay_root=overlay_root,
-                inner_repetitions=inner_repetitions,
-                load_object_fn=load_object,
-            )
-        elif workload.kind is WorkloadKind.HARNESS:
-            payload, logical_invocations = execute_harness_workload(
-                target=target,
-                selector=workload.selector,
-                project_root=project_root,
-                overlay_root=overlay_root,
-                inner_repetitions=inner_repetitions,
-                load_object_fn=load_object,
-            )
-        elif workload.kind is WorkloadKind.GOLDEN_TRACE:
-            payload, logical_invocations = execute_golden_trace_workload(
-                target=target,
-                project_root=project_root,
-                overlay_root=overlay_root,
-                inner_repetitions=inner_repetitions,
-            )
-        else:
-            raise ValueError(f"Unsupported workload kind: {workload.kind}")
-    payload.update(
-        {
-            "stdout": captured_stdout.getvalue(),
-            "stderr": captured_stderr.getvalue(),
-            "logical_invocations": logical_invocations,
-            "inner_repetitions": inner_repetitions,
-        }
-    )
-    return payload
 
 
 def invoke_worker(
@@ -176,16 +112,6 @@ def subprocess_env(project_root: Path, overlay_root: Path | None) -> dict[str, s
         pythonpath.append(existing)
     env["PYTHONPATH"] = os.pathsep.join(pythonpath)
     return env
-
-
-def _normalize_pytest_selector(selector: str, project_root: Path) -> str:
-    if "::" not in selector:
-        return selector
-    file_part, rest = selector.split("::", 1)
-    file_path = Path(file_part)
-    if not file_path.is_absolute():
-        file_path = project_root / file_path
-    return f"{file_path}::{rest}"
 
 
 def execute_workload_with_profile(

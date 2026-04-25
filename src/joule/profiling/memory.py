@@ -11,13 +11,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
-# Optional tracemalloc support
-try:
-    import tracemalloc as _tracemalloc
-    TRACEMALLOC_AVAILABLE = True
-except ImportError:
-    TRACEMALLOC_AVAILABLE = False  # Should always be available in Python 3.4+
-
 from joule.profiling.core import ProfilingError
 from joule.profiling.schema import MemoryMetrics
 
@@ -41,11 +34,6 @@ class MemoryProfiler:
 
     def __enter__(self) -> MemoryProfiler:
         """Start memory profiling."""
-        if not TRACEMALLOC_AVAILABLE:
-            raise ProfilingError(
-                "tracemalloc not available (requires Python 3.4+)",
-                reason="tracemalloc_missing",
-            )
         tracemalloc.start()
         self._started = True
         self._snapshot_start = tracemalloc.take_snapshot()

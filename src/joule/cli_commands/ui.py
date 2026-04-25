@@ -4,8 +4,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
-
 import typer
 from rich.console import Console
 
@@ -15,7 +13,7 @@ from joule.config import load_settings
 def run_ui(
     path: Path = typer.Argument(..., help="Path to project root"),
     host: str = typer.Option("127.0.0.1", "--host", help="UI server host"),
-    port: Optional[int] = typer.Option(None, "--port", help="UI server port"),
+    port: int | None = typer.Option(None, "--port", help="UI server port"),
     backend_only: bool = typer.Option(False, "--backend-only", help="Start only the backend API server"),
     frontend_only: bool = typer.Option(False, "--frontend-only", help="Start only the frontend dev server"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed events"),

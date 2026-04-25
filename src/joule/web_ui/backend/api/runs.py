@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -29,7 +29,7 @@ router = APIRouter(tags=["runs"])
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="joule-run")
 
 # In-memory registry of active background runs
-_active_runs: Dict[str, Dict[str, Any]] = {}
+_active_runs: dict[str, dict[str, Any]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ _active_runs: Dict[str, Dict[str, Any]] = {}
 
 class BaselineConfig(BaseModel):
     target: str
-    workloads: List[str] = []
+    workloads: list[str] = []
     backend: str = "mock"
     repetitions: int = 5
     hotspots: bool = True
@@ -48,7 +48,7 @@ class BaselineConfig(BaseModel):
 
 class OptimizationConfig(BaseModel):
     target: str
-    workloads: List[str] = []
+    workloads: list[str] = []
     backend: str = "mock"
     budget: int = 6
     analysis: bool = True
@@ -60,7 +60,7 @@ class OptimizationConfig(BaseModel):
 
 class ApplyConfig(BaseModel):
     run_id: str
-    candidate_id: Optional[str] = None
+    candidate_id: str | None = None
     branch: bool = False
     commit_changes: bool = False
 
@@ -85,7 +85,7 @@ def _load(project_path: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/runs")
-async def list_runs(request: Request, project_path: Optional[str] = None) -> List[Dict[str, Any]]:
+async def list_runs(request: Request, project_path: str | None = None) -> list[dict[str, Any]]:
     pp = project_path or _project_path(request)
     try:
         settings, db = _load(pp)
@@ -119,7 +119,7 @@ async def list_runs(request: Request, project_path: Optional[str] = None) -> Lis
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str, request: Request, project_path: Optional[str] = None) -> Dict[str, Any]:
+async def get_run(run_id: str, request: Request, project_path: str | None = None) -> dict[str, Any]:
     pp = project_path or _project_path(request)
     try:
         settings, db = _load(pp)
@@ -449,7 +449,7 @@ def _run_optimize_sync(project_path: str, config: OptimizationConfig, run_id: st
 # ---------------------------------------------------------------------------
 
 @router.post("/runs/{run_id}/apply")
-async def apply_candidate_endpoint(run_id: str, config: ApplyConfig, request: Request, project_path: Optional[str] = None):
+async def apply_candidate_endpoint(run_id: str, config: ApplyConfig, request: Request, project_path: str | None = None):
     pp = project_path or _project_path(request)
     try:
         settings, db = _load(pp)
@@ -484,7 +484,7 @@ async def apply_candidate_endpoint(run_id: str, config: ApplyConfig, request: Re
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/{run_id}/artifacts")
-async def get_run_artifacts(run_id: str, request: Request, project_path: Optional[str] = None) -> List[Dict[str, Any]]:
+async def get_run_artifacts(run_id: str, request: Request, project_path: str | None = None) -> list[dict[str, Any]]:
     pp = project_path or _project_path(request)
     try:
         settings, db = _load(pp)
@@ -527,7 +527,7 @@ async def get_run_artifacts(run_id: str, request: Request, project_path: Optiona
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/{run_id}/artifacts/{artifact_name:path}")
-async def download_artifact(run_id: str, artifact_name: str, request: Request, project_path: Optional[str] = None):
+async def download_artifact(run_id: str, artifact_name: str, request: Request, project_path: str | None = None):
     pp = project_path or _project_path(request)
     from fastapi.responses import FileResponse
 
@@ -548,7 +548,7 @@ async def download_artifact(run_id: str, artifact_name: str, request: Request, p
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/active")
-async def list_active_runs() -> Dict[str, Any]:
+async def list_active_runs() -> dict[str, Any]:
     return {
         "active_runs": {
             k: {"status": v["status"], "run_type": v.get("run_type"), "error": v.get("error")}

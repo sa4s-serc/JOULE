@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from joule.profiling import TRACEMALLOC_AVAILABLE, MemoryMetrics, MemoryProfiler, create_memory_metrics
+from joule.profiling import MemoryMetrics, MemoryProfiler, create_memory_metrics
 
 
-def test_tracemalloc_available() -> None:
-    """Test that tracemalloc is available (should always be true in Python 3.4+)."""
-    assert TRACEMALLOC_AVAILABLE is True
 
 
 def test_memory_metrics_defaults() -> None:
@@ -50,8 +47,6 @@ def test_memory_metrics_to_dict() -> None:
 
 def test_memory_profiler_context_manager() -> None:
     """Test MemoryProfiler context manager."""
-    if not TRACEMALLOC_AVAILABLE:
-        pytest.skip("tracemalloc not available")
 
     with MemoryProfiler() as profiler:
         # Allocate some memory
@@ -63,8 +58,6 @@ def test_memory_profiler_context_manager() -> None:
 
 def test_memory_profiler_line_stats() -> None:
     """Test that line stats can be retrieved."""
-    if not TRACEMALLOC_AVAILABLE:
-        pytest.skip("tracemalloc not available")
 
     with MemoryProfiler() as profiler:
         # Allocate some memory
@@ -98,8 +91,6 @@ def test_create_memory_metrics_empty() -> None:
 
 def test_memory_profiler_get_memory_diff() -> None:
     """Test memory diff functionality."""
-    if not TRACEMALLOC_AVAILABLE:
-        pytest.skip("tracemalloc not available")
 
     with MemoryProfiler() as profiler:
         # Get initial diff

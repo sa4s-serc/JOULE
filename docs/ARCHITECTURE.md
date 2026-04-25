@@ -78,6 +78,7 @@ Responsibilities:
 Primary files:
 
 - [src/joule/runtime.py](../src/joule/runtime.py)
+- [src/joule/profiling/core.py](../src/joule/profiling/core.py)
 - [src/joule/runtime_helpers/worker.py](../src/joule/runtime_helpers/worker.py)
 - [src/joule/evaluators/correctness.py](../src/joule/evaluators/correctness.py)
 
@@ -86,6 +87,7 @@ Responsibilities:
 - subprocess workload execution
 - overlay materialization for candidate correctness checks
 - profile payload extraction for hotspot analysis
+- shared workload execution utilities (`load_object`, `execute_workload`)
 
 ### Measurement and Backends
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import importlib
 import io
 from pathlib import Path
 from typing import Any
@@ -55,7 +56,7 @@ def load_object(selector: str, project_root: Path, overlay_root: Path | None = N
         module, object_name = load_module_for_file_selector(selector, project_root)
         return resolve_attr_path(module, object_name)
     module_name, object_name = selector.replace("::", ":").split(":", 1)
-    module = __import__(module_name, fromlist=[object_name.split(".")[0]])
+    module = importlib.import_module(module_name)
     return resolve_attr_path(module, object_name)
 
 

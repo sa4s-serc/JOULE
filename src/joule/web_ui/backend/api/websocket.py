@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -24,8 +24,8 @@ class ConnectionManager:
     """Manages WebSocket connections and per-run subscriptions."""
 
     def __init__(self) -> None:
-        self.active_connections: List[WebSocket] = []
-        self.run_subscribers: Dict[str, List[WebSocket]] = {}
+        self.active_connections: list[WebSocket] = []
+        self.run_subscribers: dict[str, list[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -44,13 +44,13 @@ class ConnectionManager:
                 del self.run_subscribers[run_id]
         logger.info("WebSocket disconnected (%d total)", len(self.active_connections))
 
-    async def send_personal(self, message: Dict[str, Any], websocket: WebSocket) -> None:
+    async def send_personal(self, message: dict[str, Any], websocket: WebSocket) -> None:
         try:
             await websocket.send_text(json.dumps(message))
         except Exception:
             self.disconnect(websocket)
 
-    async def broadcast(self, message: Dict[str, Any]) -> None:
+    async def broadcast(self, message: dict[str, Any]) -> None:
         dead: list[WebSocket] = []
         for conn in self.active_connections:
             try:
@@ -60,7 +60,7 @@ class ConnectionManager:
         for d in dead:
             self.disconnect(d)
 
-    async def send_run_update(self, run_id: str, data: Dict[str, Any]) -> None:
+    async def send_run_update(self, run_id: str, data: dict[str, Any]) -> None:
         subs = self.run_subscribers.get(run_id, [])
         dead: list[WebSocket] = []
         msg = json.dumps({"type": "run_update", "run_id": run_id, "data": data})

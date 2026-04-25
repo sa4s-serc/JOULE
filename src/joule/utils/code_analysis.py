@@ -4,7 +4,7 @@ import ast
 import inspect
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 
 class CodeBlockType(Enum):
@@ -38,9 +38,9 @@ class CodeBlock:
     line_end: int
     description: str
     nesting_level: int = 0
-    parent_block: Optional[CodeBlock] = None
+    parent_block: CodeBlock | None = None
     child_blocks: list[CodeBlock] = field(default_factory=list)
-    ast_node: Optional[ast.AST] = None
+    ast_node: ast.AST | None = None
 
     def contains_line(self, line_num: int) -> bool:
         """Check if a line number falls within this block."""
@@ -69,7 +69,7 @@ class FunctionAnalyzer(ast.NodeVisitor):
     def __init__(self, source_lines: list[str]) -> None:
         self.source_lines = source_lines
         self.blocks: list[CodeBlock] = []
-        self.current_parent: Optional[CodeBlock] = None
+        self.current_parent: CodeBlock | None = None
         self.nesting_level = 0
 
     def _get_description(self, node: ast.AST) -> str:

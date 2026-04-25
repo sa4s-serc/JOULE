@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -43,7 +43,7 @@ def _load(project_path: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/projects")
-async def list_projects(request: Request) -> List[Dict[str, Any]]:
+async def list_projects(request: Request) -> list[dict[str, Any]]:
     """Return the currently-loaded project."""
     pp = _project_path(request)
     try:
@@ -53,7 +53,7 @@ async def list_projects(request: Request) -> List[Dict[str, Any]]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-async def _get_project_info(project_path: str) -> Dict[str, Any]:
+async def _get_project_info(project_path: str) -> dict[str, Any]:
     path = Path(project_path)
     try:
         settings = load_settings(path)
@@ -78,7 +78,7 @@ async def _get_project_info(project_path: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @router.post("/projects/{project_path:path}/doctor")
-async def run_project_doctor(project_path: str) -> Dict[str, Any]:
+async def run_project_doctor(project_path: str) -> dict[str, Any]:
     settings, db = _load(project_path)
     health = await _get_project_health(project_path, settings)
     return {"status": "success" if not health["issues"] else "issues", "checks": health}
@@ -89,7 +89,7 @@ async def run_project_doctor(project_path: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @router.get("/projects/{project_path:path}/discover/targets")
-async def discover_targets(project_path: str) -> List[Dict[str, Any]]:
+async def discover_targets(project_path: str) -> list[dict[str, Any]]:
     """Run the real joule target-discovery pipeline."""
     try:
         from joule.discovery.resolver import discover_targets as _discover
@@ -132,7 +132,7 @@ async def discover_targets(project_path: str) -> List[Dict[str, Any]]:
 
 
 @router.get("/projects/{project_path:path}/discover/workloads/{target_qualname}")
-async def discover_workloads(project_path: str, target_qualname: str) -> List[Dict[str, Any]]:
+async def discover_workloads(project_path: str, target_qualname: str) -> list[dict[str, Any]]:
     """Return workloads for a specific target."""
     try:
         from joule.discovery.resolver import discover_targets as _discover
@@ -160,7 +160,7 @@ async def discover_workloads(project_path: str, target_qualname: str) -> List[Di
 # Health check helper
 # ---------------------------------------------------------------------------
 
-async def _get_project_health(project_path: str, settings=None) -> Dict[str, Any]:
+async def _get_project_health(project_path: str, settings=None) -> dict[str, Any]:
     path = Path(project_path)
     if settings is None:
         try:
@@ -204,5 +204,5 @@ async def _get_project_health(project_path: str, settings=None) -> Dict[str, Any
     }
 
 @router.get("/projects/{project_path:path}")
-async def get_project(project_path: str) -> Dict[str, Any]:
+async def get_project(project_path: str) -> dict[str, Any]:
     return await _get_project_info(project_path)
