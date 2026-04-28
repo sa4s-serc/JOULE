@@ -15,11 +15,13 @@ from joule.utils.reporting import measurement_to_json
 from joule.utils.artifacts import write_artifact
 
 
-def run_baseline(context: ExecutionContext, *, output: str, repetitions: int | None, hotspots: bool, hotspot_limit: int | None, no_dashboard: bool, no_cache: bool = False) -> None:
+def run_baseline(context: ExecutionContext, *, output: str, repetitions: int | None, hotspots: bool, hotspot_limit: int | None, no_dashboard: bool, no_cache: bool = False, granular: bool | None = None) -> None:
     from typer import echo
 
     output_mode = resolve_output_mode(output)
     report = context.orchestrator.baseline(context.run_id, context.target, context.bundle, repetitions=repetitions, use_cache=not no_cache)
+    # Use explicit granular flag if provided, otherwise fall back to settings
+    use_granular = granular if granular is not None else context.settings.granular_hotspot_analysis
     hotspot_summary = collect_hotspot_analysis(
         oracle=context.oracle,
         db=context.db,
@@ -30,7 +32,7 @@ def run_baseline(context: ExecutionContext, *, output: str, repetitions: int | N
         reporter=context.reporter,
         enabled=hotspots,
         limit=hotspot_limit if hotspot_limit is not None else context.settings.hotspot_limit,
-        granular=context.settings.granular_hotspot_analysis,
+        granular=use_granular,
     )
     baseline_analysis = build_baseline_analysis(
         run_id=context.run_id,

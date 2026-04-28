@@ -100,13 +100,16 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
         return default
     if isinstance(value, bool):
         return value
+    if isinstance(value, int):
+        return value != 0
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"1", "true", "yes", "on"}:
             return True
         if normalized in {"0", "false", "no", "off"}:
             return False
-    return bool(value)
+        raise ValueError(f"Cannot coerce string {value!r} to bool; expected true/false/yes/no/on/off/1/0")
+    raise ValueError(f"Cannot coerce {type(value).__name__} value {value!r} to bool; expected a boolean")
 
 
 def _coerce_str_list(value: Any) -> list[str]:
@@ -233,13 +236,13 @@ class JouleSettings:
     hotspot_limit: int = 12
     granular_hotspot_analysis: bool = False
     dashboard_port: int = 8501
-    dependency_energy_threshold: float = 0.15
-    dependency_latency_threshold: float = 0.20
+    # Minimum improvement ratio required for a candidate to be accepted into the frontier.
+    # Also used as the default CI threshold when --improvement-threshold is not specified.
+    final_improvement_min: float = 0.05
+    # Maximum allowed memory regression ratio before a candidate is rejected.
     memory_regression_limit: float = 0.10
     terminal_verbosity: str = "normal"
     promotion_scalar_min: float = 0.03
-    final_improvement_min: float = 0.05
-    candidate_memory_regression_limit: float = 0.10
     workload_timeout_s: float = 30.0
     inner_repetitions_mode: str = "adaptive"
     inner_repetitions_fixed: int = 1
@@ -435,13 +438,10 @@ def load_settings(path: str | Path) -> JouleSettings:
         hotspot_limit=int(resolved_payload.get("hotspot_limit", 12)),
         granular_hotspot_analysis=_coerce_bool(resolved_payload.get("granular_hotspot_analysis", False), default=False),
         dashboard_port=int(resolved_payload.get("dashboard_port", 8501)),
-        dependency_energy_threshold=float(resolved_payload.get("dependency_energy_threshold", 0.15)),
-        dependency_latency_threshold=float(resolved_payload.get("dependency_latency_threshold", 0.20)),
+        final_improvement_min=float(resolved_payload.get("final_improvement_min", 0.05)),
         memory_regression_limit=float(resolved_payload.get("memory_regression_limit", 0.10)),
         terminal_verbosity=str(resolved_payload.get("terminal_verbosity", "normal")),
         promotion_scalar_min=float(resolved_payload.get("promotion_scalar_min", 0.03)),
-        final_improvement_min=float(resolved_payload.get("final_improvement_min", 0.05)),
-        candidate_memory_regression_limit=float(resolved_payload.get("candidate_memory_regression_limit", 0.10)),
         workload_timeout_s=float(resolved_payload.get("workload_timeout_s", 30.0)),
         inner_repetitions_mode=str(resolved_payload.get("inner_repetitions_mode", "adaptive")),
         inner_repetitions_fixed=int(resolved_payload.get("inner_repetitions_fixed", 1)),

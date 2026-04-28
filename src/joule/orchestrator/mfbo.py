@@ -136,7 +136,7 @@ class OptimizationOrchestrator:
         target_key = self._target_key(target)
         self._warm_start_surrogate(target_key=target_key, fresh_start=fresh_surrogate)
 
-        restored = self._restore_checkpoint(run_id=resume or run_id)
+        restored = self._restore_checkpoint(run_id=resume or run_id, target=target)
         if restored:
             baseline = restored["baseline"]
             pareto = restored["pareto"]
@@ -186,6 +186,9 @@ class OptimizationOrchestrator:
                 max_parent_expansions=max(1, self.settings.search_branching_factor)
                 * max(1, len(self.registry.operators)),
             )
+            # escape_used tracks whether the escape operator has fired during the current
+            # stagnation streak. It resets to False when any candidate is accepted, allowing
+            # the escape operator to fire again if stagnation recurs.
             escape_used = False
 
         baseline_score = self._objective_score(baseline.aggregate)
@@ -487,7 +490,8 @@ class OptimizationOrchestrator:
                         duplicate=str(screening.reason) == "low_novelty",
                     )
                     parent.rejection_history.append(str(screening.reason))
-                    state.no_frontier_gain += 1
+                    # Surrogate rejections do not count toward convergence patience —
+                    # no measurement was performed so this is not a true frontier miss.
                     self._save_checkpoint(
                         run_id=run_id,
                         candidate_id=candidate_id,
@@ -852,7 +856,7 @@ class OptimizationOrchestrator:
             encoding="utf-8",
         )
 
-    def _restore_checkpoint(self, *, run_id: str) -> dict[str, Any] | None:
+    def _restore_checkpoint(self, *, run_id: str, target: TargetSpec | None = None) -> dict[str, Any] | None:
         checkpoint = self.db.get_latest_checkpoint(run_id)
         if checkpoint is None:
             return None
@@ -924,9 +928,14 @@ class OptimizationOrchestrator:
                 )
 
         if "baseline" not in parent_snapshots:
+            # Recover baseline source from the live target spec if available,
+            # otherwise fall back to the stored baseline report metadata.
+            fallback_source = (target.source if target is not None else "") or str(
+                metadata.get("baseline_source", "")
+            )
             parent_snapshots["baseline"] = _ParentSnapshot(
                 candidate_id="baseline",
-                source="",
+                source=fallback_source,
                 operator_name="baseline",
                 generation_depth=0,
             )
@@ -1068,7 +1077,12 @@ class OptimizationOrchestrator:
             correctness_failure=correctness_failure,
             frontier_contribution=frontier_contribution,
         )
-        self.db.bump_operator(result.operator_name, success=success, reward=reward)
+        try:
+            self.db.bump_operator(result.operator_name, success=success, reward=reward)
+        except Exception:
+            # DB write failure must not abort the optimization loop.
+            # In-memory registry stats remain authoritative for the current run.
+            pass
 
     def _should_promote(
         self,
@@ -1082,10 +1096,13 @@ class OptimizationOrchestrator:
         if candidate.success_rate < 1.0:
             return False, "success_rate"
         memory_delta = improvement_ratio(baseline, candidate)["memory"]
-        if memory_delta < -self.settings.candidate_memory_regression_limit:
+        if memory_delta < -self.settings.memory_regression_limit:
             return False, "memory_regression"
+        # If not dominated by any existing frontier point, promote unconditionally.
         if not dominance_summary.get("dominated"):
             return True, ""
+        # Dominated — apply uncertainty-adjusted optimistic score as a fallback.
+        # A higher uncertainty factor gives more benefit of the doubt in early phases.
         uncertainty_factor = {
             SearchPhase.EXPLORATION: 1.0,
             SearchPhase.EXPLOITATION: 0.7,
@@ -1101,10 +1118,18 @@ class OptimizationOrchestrator:
             return False, "success_rate"
         improvements = improvement_ratio(baseline, candidate)
         memory_delta = improvements["memory"]
-        if memory_delta < -self.settings.candidate_memory_regression_limit:
+        if memory_delta < -self.settings.memory_regression_limit:
             return False, "memory_regression"
         if dominance_summary.get("dominated"):
             return False, "frontier_dominated"
+        # Require a minimum scalar improvement over the baseline to avoid accepting
+        # noise-level changes. Uses the weighted objective score for comparison.
+        baseline_score = self._objective_score(baseline)
+        candidate_score = self._objective_score(candidate)
+        if baseline_score > 0:
+            scalar_improvement = (baseline_score - candidate_score) / baseline_score
+            if scalar_improvement < self.settings.final_improvement_min:
+                return False, "below_improvement_min"
         return True, ""
 
     def _phase_for_index(self, index: int, total_budget: int) -> SearchPhase:
@@ -1278,6 +1303,9 @@ class OptimizationOrchestrator:
                     dependencies=sorted(set([*current_proposal.dependencies, *next_proposal.dependencies])),
                     operator_family=next_proposal.operator_family,
                     operator_tier=next_proposal.operator_tier,
+                    # Composed proposals are intentionally ranked after base proposals
+                    # (multiplied by 1000) so they are only evaluated when the base
+                    # proposals have been exhausted within the branching factor budget.
                     proposal_rank=(base_proposal.proposal_rank * 1000) + next_proposal.proposal_rank + (hop * 500),
                     feature_hints=merged_hints,
                     metadata={

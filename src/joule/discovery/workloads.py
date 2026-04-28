@@ -128,7 +128,7 @@ def _discover_pytest_workloads_in_tree(
 
 def _iter_test_files(project_root: Path):
     seen: set[Path] = set()
-    for pattern in ("tests/**/*.py", "test_*.py", "**/*_test.py"):
+    for pattern in ("**/test_*.py", "**/*_test.py"):
         for path in project_root.glob(pattern):
             if path.is_file() and path not in seen:
                 seen.add(path)

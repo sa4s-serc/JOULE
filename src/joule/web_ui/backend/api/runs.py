@@ -43,6 +43,8 @@ class BaselineConfig(BaseModel):
     repetitions: int = 5
     hotspots: bool = True
     hotspot_limit: int = 12
+    granular_profiling: bool = False
+    memory_profiling: bool = False
     cache: bool = True
 
 
@@ -318,6 +320,7 @@ def _run_baseline_sync(project_path: str, config: BaselineConfig, run_id: str):
             repetitions=config.repetitions,
             hotspots=config.hotspots,
             hotspot_limit=config.hotspot_limit,
+            granular=config.granular_profiling,
             no_dashboard=True,
             no_cache=not config.cache,
         )

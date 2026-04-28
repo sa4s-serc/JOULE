@@ -77,8 +77,14 @@ def test_baseline_hotspots_json_output_includes_hotspots(sample_project):
     assert "recommendations" in hotspots
     assert hotspots["recommendations"]
     assert hotspots["by_workload"][0]["workload_kind"] == "pytest"
-    assert 0.0 <= hotspots["by_workload"][0]["signal"]["project_share"] <= 1.0
-    assert 0.0 <= hotspots["by_workload"][0]["signal"]["target_share"] <= 1.0
+    # Support both schema v2 (flat: project_share at top level) and legacy (nested under "signal").
+    workload_entry = hotspots["by_workload"][0]
+    if "signal" in workload_entry:
+        assert 0.0 <= workload_entry["signal"]["project_share"] <= 1.0
+        assert 0.0 <= workload_entry["signal"]["target_share"] <= 1.0
+    else:
+        assert 0.0 <= workload_entry["project_share"] <= 1.0
+        assert 0.0 <= workload_entry["target_share"] <= 1.0
     if hotspots["top_functions"]:
         assert 0.0 <= hotspots["top_functions"][0]["share"] <= 1.0
         assert hotspots["top_functions"][0]["avg_cost_us"] >= 0.0

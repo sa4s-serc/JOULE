@@ -289,7 +289,7 @@ export default function Discover() {
             <div className="flex space-x-3">
               <button
                 className="joule-button joule-button-secondary"
-                onClick={() => navigate('/baseline', { state: { target: selectedTarget.qualname } })}
+                onClick={() => navigate('/baseline', { state: { target: selectedTarget.qualname, workloads: Array.from(selectedWorkloads) } })}
               >
                 Run Baseline
               </button>

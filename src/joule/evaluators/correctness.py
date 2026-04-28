@@ -26,16 +26,18 @@ class CorrectnessEngine:
         except SyntaxError as exc:
             return False, [f"candidate syntax error: {exc}"]
 
-        overlay_root: Path | None = None
         if candidate_source is not None:
-            with tempfile.TemporaryDirectory(prefix="joule-correctness-") as temp_dir:
-                overlay_root = Path(temp_dir)
+            overlay_context = tempfile.TemporaryDirectory(prefix="joule-correctness-")
+            try:
+                overlay_root = Path(overlay_context.name)
                 _materialize_overlay(target, overlay_root, candidate_source)
                 for workload in bundle.workloads:
                     sample = invoke_worker(target, workload, overlay_root=overlay_root, timeout_s=timeout_s)
                     if not sample["success"]:
                         reasons.append(f"{workload.identifier} failed: {sample['stderr'].strip() or sample['stdout'].strip()}")
                         return False, reasons
+            finally:
+                overlay_context.cleanup()
             return True, reasons
 
         for workload in bundle.workloads:

@@ -6,6 +6,10 @@ import math
 from joule.config import ParetoWeights
 from joule.models import AggregateMetrics, MetricSample
 
+# Sentinel workload_id used for the cross-workload aggregate in MeasurementReport.aggregate.
+# Distinct from any real workload identifier to avoid collisions.
+AGGREGATE_WORKLOAD_ID = "__aggregate__"
+
 
 def mean(values: list[float]) -> float:
     if not values:
@@ -48,7 +52,7 @@ def aggregate_samples(samples: list[MetricSample]) -> tuple[AggregateMetrics, li
         grouped[sample.workload_id].append(sample)
 
     per_workload = [_aggregate_group(workload_id, group) for workload_id, group in grouped.items()]
-    overall = _aggregate_group("all", samples)
+    overall = _aggregate_group(AGGREGATE_WORKLOAD_ID, samples)
     return overall, per_workload
 
 
@@ -60,6 +64,8 @@ def resolve_weight_tuple(weights: ParetoWeights | tuple[float, float, float]) ->
 
 def weighted_score(metrics: AggregateMetrics, weights: ParetoWeights | tuple[float, float, float]) -> float:
     resolved = resolve_weight_tuple(weights)
+    # Memory is converted to MiB so its scale is comparable to energy (joules) and
+    # latency (seconds) when applying weights. Dominance checks use raw bytes instead.
     memory_mib = metrics.mean_peak_memory_bytes / (1024 * 1024)
     return (
         (metrics.mean_energy_j * resolved[0])

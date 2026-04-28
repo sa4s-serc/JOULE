@@ -35,6 +35,9 @@ class ParetoFront:
             }
         survivors.append(point)
         self._points = survivors
+        # Remove stale expansion counts for candidates that are no longer on the frontier.
+        for dominated_id in dominated_ids:
+            self._expansions.pop(dominated_id, None)
         self._expansions.setdefault(point.candidate_id, 0)
         return {
             "accepted": True,
@@ -101,6 +104,8 @@ class ParetoFront:
 
 
 def _dominates(left: AggregateMetrics, right: AggregateMetrics) -> bool:
+    # All comparisons use raw bytes for memory — unit-agnostic for dominance checks.
+    # weighted_score() converts to MiB for scoring, but dominance only needs consistent units.
     return (
         left.mean_energy_j <= right.mean_energy_j
         and left.mean_wall_time_s <= right.mean_wall_time_s

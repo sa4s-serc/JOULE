@@ -613,7 +613,7 @@ def create_hotspot_summary(
         non_project_top_functions,
         ownership,
         workload_kind_counts,
-    ) = aggregate_function_hotspots(records, limit=limit)
+    ) = aggregate_function_hotspots(records, limit=limit, target_file=target_file)
 
     # Build signal quality
     signal_quality = build_signal_quality(
@@ -652,9 +652,11 @@ def create_hotspot_summary(
         "profiled_workload_count": len(by_workload),
     }
 
-    # Summarize harness
+    # Summarize harness — pass project + non-project combined so non-project
+    # functions excluded from the top_functions slice are still accounted for.
+    all_profiled_functions = project_top_functions + non_project_top_functions
     harness_summary = summarize_harness(
-        [fn for fn in top_functions],  # All functions
+        all_profiled_functions,
         {o["bucket"]: o["cumulative_time_s"] for o in ownership},
     )
 

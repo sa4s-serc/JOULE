@@ -109,7 +109,7 @@ def build_workload_signals(
                 total_cumulative_time_s=workload_total_time,
                 low_signal=workload_total_time > 0 and workload_project_share < LOW_SIGNAL_THRESHOLD,
                 success=item.get("success", False),
-                stderr=str(item.get("stderr", "")),
+                stderr=item.get("stderr") or "",
             )
         )
 
@@ -121,6 +121,7 @@ def build_workload_signals(
 def aggregate_function_hotspots(
     records: list[dict],
     limit: int = DEFAULT_TOP_FUNCTIONS_LIMIT,
+    target_file: Path | str | None = None,
 ) -> tuple[
     list[dict[str, Any]],
     list[dict[str, Any]],
@@ -179,7 +180,13 @@ def aggregate_function_hotspots(
         for bucket, total in sorted(ownership_totals.items(), key=lambda item: item[1], reverse=True)
     ]
 
-    total_cumulative = sum(float(item["cumulative_time_s"]) for item in all_functions_raw)
+    # Normalize shares against total ownership time to avoid double-counting
+    # cumulative times from cProfile stack frames. Using the sum of per-bucket
+    # ownership totals gives a stable, non-inflated denominator.
+    total_cumulative = sum(ownership_totals.values())
+    if total_cumulative <= 0:
+        # Fall back to function sum if ownership data is missing
+        total_cumulative = sum(float(item["cumulative_time_s"]) for item in all_functions_raw)
     all_functions = [_enrich_hotspot_function(item, total_cumulative=total_cumulative) for item in all_functions_raw]
 
     # Split into project and non-project
@@ -189,12 +196,17 @@ def aggregate_function_hotspots(
     # Top functions prioritizing project code
     merged_functions = (project_merged + non_project_merged)[:limit]
 
-    # Target functions
-    target_functions = [
-        fn
-        for fn in all_functions
-        if str(fn.get("ownership", "")) in PROJECT_LIKE_BUCKETS
-    ][:limit]
+    # Target functions: filter by actual target file path, not just ownership bucket
+    normalized_target_file = _normalized_profile_path(str(target_file)) if target_file else ""
+    if normalized_target_file:
+        target_functions = [
+            fn
+            for fn in all_functions
+            if _normalized_profile_path(str(fn.get("file", ""))) == normalized_target_file
+        ][:limit]
+    else:
+        # No target file specified — fall back to project-owned functions
+        target_functions = project_merged[:limit]
 
     return (
         merged_functions,

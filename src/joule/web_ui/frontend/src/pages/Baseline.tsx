@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Activity, Play, Settings, BarChart3, Clock, AlertCircle, CheckCircle } from 'lucide-react'
+import { Activity, Play, Settings, BarChart3, Clock, AlertCircle, CheckCircle, TestTube, Code, Wrench } from 'lucide-react'
 import { apiClient } from '../utils/api'
+
+interface Workload {
+  id: string
+  kind: 'test' | 'property' | 'harness' | 'default'
+  description: string
+  file_path?: string
+  node_id?: string
+}
 
 interface BaselineConfig {
   target: string
@@ -10,6 +18,8 @@ interface BaselineConfig {
   repetitions: number
   hotspots: boolean
   hotspot_limit: number
+  granular_profiling: boolean
+  memory_profiling: boolean
   cache: boolean
 }
 
@@ -17,18 +27,22 @@ export default function Baseline() {
   const location = useLocation()
   const navigate = useNavigate()
   const initialTarget = (location.state as any)?.target || ''
+  const initialWorkloads = (location.state as any)?.workloads || []
 
   const [config, setConfig] = useState<BaselineConfig>({
     target: initialTarget,
-    workloads: [],
+    workloads: initialWorkloads,
     backend: 'mock',
     repetitions: 5,
     hotspots: true,
     hotspot_limit: 12,
+    granular_profiling: false,
+    memory_profiling: false,
     cache: true,
   })
 
   const [targets, setTargets] = useState<string[]>([])
+  const [targetWorkloads, setTargetWorkloads] = useState<Workload[]>([])
   const [backends, setBackends] = useState<{name: string; description: string}[]>([
     { name: 'mock', description: 'Mock backend for testing' },
     { name: 'rapl', description: 'Intel RAPL energy measurement' },
@@ -37,7 +51,7 @@ export default function Baseline() {
   const [runResult, setRunResult] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch targets from discovery
+  // Fetch targets from discovery and workloads when target changes
   useEffect(() => {
     const fetchTargets = async () => {
       try {
@@ -57,6 +71,31 @@ export default function Baseline() {
     }
     fetchTargets()
   }, [])
+
+  // Fetch workloads when target changes
+  useEffect(() => {
+    const fetchWorkloads = async () => {
+      if (!config.target) {
+        setTargetWorkloads([])
+        return
+      }
+      try {
+        const projects = await apiClient.getProjects()
+        if (projects.length > 0) {
+          const discovered = await apiClient.discoverTargets(projects[0].path)
+          const target = discovered.find((t: any) => t.qualname === config.target)
+          if (target?.workloads) {
+            setTargetWorkloads(target.workloads)
+          } else {
+            setTargetWorkloads([])
+          }
+        }
+      } catch {
+        setTargetWorkloads([])
+      }
+    }
+    fetchWorkloads()
+  }, [config.target])
 
   const handleStartBaseline = async () => {
     setIsRunning(true)
@@ -96,7 +135,7 @@ export default function Baseline() {
               </label>
               <select
                 value={config.target}
-                onChange={(e) => setConfig({ ...config, target: e.target.value })}
+                onChange={(e) => setConfig({ ...config, target: e.target.value, workloads: [] })}
                 className="w-full px-3 py-2 border border-joule-border rounded-lg focus:outline-none focus:ring-2 focus:ring-joule-accent"
               >
                 <option value="">Select a target...</option>
@@ -112,6 +151,75 @@ export default function Baseline() {
                 </p>
               )}
             </div>
+
+            {/* Workload Selection */}
+            {config.target && (
+              <div>
+                <label className="block text-sm font-medium text-joule-ink mb-2">
+                  Workloads
+                </label>
+                {targetWorkloads.length === 0 ? (
+                  <p className="text-sm text-joule-muted italic">
+                    No workloads found for this target. JOULE will use automatic workload synthesis.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {targetWorkloads.map((workload) => {
+                      const isSelected = config.workloads.includes(workload.id)
+                      const Icon = workload.kind === 'test' ? TestTube :
+                                   workload.kind === 'property' ? Code :
+                                   workload.kind === 'harness' ? Wrench : Play
+                      return (
+                        <div
+                          key={workload.id}
+                          onClick={() => {
+                            const newWorkloads = isSelected
+                              ? config.workloads.filter(w => w !== workload.id)
+                              : [...config.workloads, workload.id]
+                            setConfig({ ...config, workloads: newWorkloads })
+                          }}
+                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                            isSelected
+                              ? 'border-joule-accent bg-joule-chip'
+                              : 'border-joule-border hover:bg-joule-bg'
+                          }`}
+                        >
+                          <div className="flex items-start">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="mt-1 mr-3"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center">
+                                <Icon className="w-4 h-4 text-joule-accent mr-2" />
+                                <span className="font-medium text-joule-ink text-sm break-all">
+                                  {workload.id}
+                                </span>
+                                <span className="ml-2 px-2 py-0.5 bg-joule-chip rounded text-xs text-joule-muted">
+                                  {workload.kind}
+                                </span>
+                              </div>
+                              <p className="text-xs text-joule-muted mt-1">
+                                {workload.description}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {targetWorkloads.length > 0 && (
+                  <p className="text-xs text-joule-muted mt-2">
+                    {config.workloads.length > 0
+                      ? `${config.workloads.length} workload(s) selected`
+                      : 'No workloads selected – JOULE will use automatic workload synthesis'}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Backend Selection */}
             <div>
@@ -172,16 +280,56 @@ export default function Baseline() {
               </div>
 
               {config.hotspots && (
-                <div>
-                  <label className="block text-sm text-joule-muted mb-2">
-                    Hotspot Limit: {config.hotspot_limit}
-                  </label>
-                  <input
-                    type="range" min="5" max="50"
-                    value={config.hotspot_limit}
-                    onChange={(e) => setConfig({ ...config, hotspot_limit: parseInt(e.target.value) })}
-                    className="w-full"
-                  />
+                <div className="space-y-4 mt-4 pt-4 border-t border-joule-border">
+                  <div>
+                    <label className="block text-sm text-joule-muted mb-2">
+                      Hotspot Limit: {config.hotspot_limit}
+                    </label>
+                    <input
+                      type="range" min="5" max="50"
+                      value={config.hotspot_limit}
+                      onChange={(e) => setConfig({ ...config, hotspot_limit: parseInt(e.target.value) })}
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Granular Profiling */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium text-joule-ink">Granular Profiling</label>
+                      <p className="text-xs text-joule-muted">Line-level analysis with code block metrics</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, granular_profiling: !config.granular_profiling })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        config.granular_profiling ? 'bg-joule-accent' : 'bg-joule-border'
+                      }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        config.granular_profiling ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* Memory Profiling */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium text-joule-ink">Memory Profiling</label>
+                      <p className="text-xs text-joule-muted">Track allocations per code block</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, memory_profiling: !config.memory_profiling })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        config.memory_profiling ? 'bg-joule-accent' : 'bg-joule-border'
+                      }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        config.memory_profiling ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -261,6 +409,10 @@ export default function Baseline() {
                 <span className="font-mono">{config.target || 'Not selected'}</span>
               </div>
               <div className="flex justify-between text-sm">
+                <span className="text-joule-muted">Workloads:</span>
+                <span>{config.workloads.length > 0 ? `${config.workloads.length} selected` : 'Auto-discover'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
                 <span className="text-joule-muted">Backend:</span>
                 <span>{config.backend}</span>
               </div>
@@ -272,6 +424,18 @@ export default function Baseline() {
                 <span className="text-joule-muted">Hotspots:</span>
                 <span>{config.hotspots ? `Enabled (limit: ${config.hotspot_limit})` : 'Disabled'}</span>
               </div>
+              {config.hotspots && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-joule-muted ml-4">• Granular:</span>
+                    <span>{config.granular_profiling ? 'Enabled' : 'Disabled'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-joule-muted ml-4">• Memory:</span>
+                    <span>{config.memory_profiling ? 'Enabled' : 'Disabled'}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-joule-muted">Cache:</span>
                 <span>{config.cache ? 'Enabled' : 'Disabled'}</span>

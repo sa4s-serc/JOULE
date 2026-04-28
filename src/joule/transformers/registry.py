@@ -13,6 +13,15 @@ from joule.transformers.generative import default_llm_operators, escape_llm_oper
 
 LOGGER = logging.getLogger(__name__)
 
+# Contextual scoring weights for operator selection.
+# These balance exploration (UCB) with operator-specific performance signals.
+_SCORE_FRONTIER_BONUS = 0.60   # reward for operators that have contributed to the frontier
+_SCORE_DEPTH_FIT = 0.25        # reward for operators that succeed at the current generation depth
+_SCORE_PHASE_FIT = 0.20        # reward for operators that succeed in the current search phase
+_SCORE_DUPLICATE_PENALTY = 0.35        # penalty for operators that produce duplicate sources
+_SCORE_CORRECTNESS_PENALTY = 0.40      # penalty for operators that produce incorrect candidates
+_SCORE_PRECHECK_PENALTY = 0.20         # penalty for operators that fail precheck
+
 
 class OperatorRegistry:
     def __init__(
@@ -216,12 +225,12 @@ class OperatorRegistry:
             phase_fit = phase_successes / phase_attempts if phase_attempts > 0 else 0.0
         return (
             self._ucb(name, total_attempts)
-            + (0.60 * frontier_rate)
-            + (0.25 * depth_fit)
-            + (0.20 * phase_fit)
-            - (0.35 * duplicate_rate)
-            - (0.40 * correctness_failure_rate)
-            - (0.20 * precheck_failure_rate)
+            + (_SCORE_FRONTIER_BONUS * frontier_rate)
+            + (_SCORE_DEPTH_FIT * depth_fit)
+            + (_SCORE_PHASE_FIT * phase_fit)
+            - (_SCORE_DUPLICATE_PENALTY * duplicate_rate)
+            - (_SCORE_CORRECTNESS_PENALTY * correctness_failure_rate)
+            - (_SCORE_PRECHECK_PENALTY * precheck_failure_rate)
         )
 
     def _empty_stat(self) -> dict[str, Any]:

@@ -73,7 +73,9 @@ def resolve_workload_bundle(
 def discover_targets(settings: JouleSettings, path: Path) -> list[DiscoveryResult]:
     root = _find_root(path)
     profiler = StaticProfiler()
-    results = profiler.discover(root, limit=settings.workload_discovery_limit)
+    # Use hotspot_limit for target discovery (how many functions to surface),
+    # not workload_discovery_limit (which controls workloads per target).
+    results = profiler.discover(root, limit=settings.hotspot_limit)
     for result in results:
         result.workloads = discover_pytest_workloads(root, result.target, limit=3)
     return results
@@ -154,4 +156,7 @@ def _build_target_spec(project_root: Path, file_path: Path, payload: dict) -> Ta
 
 
 def _matches_target(candidate: dict, requested: str) -> bool:
+    # Matches by full qualname (e.g. "ClassName.method") or by bare function name.
+    # Bare-name matching allows users to omit the class prefix when there is no ambiguity,
+    # but will trigger an ambiguity error if multiple classes define the same method name.
     return requested in {candidate["qualname"], candidate["node"].name}

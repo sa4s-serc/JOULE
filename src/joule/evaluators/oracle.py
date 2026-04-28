@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 import json
 from math import ceil
 from pathlib import Path
 import tempfile
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from joule.config import JouleSettings
 from joule.evaluators.backends.base import BackendMeasurement, EnergyBackend
@@ -16,6 +16,10 @@ from joule.integrations.git import source_sha256
 from joule.runtime import invoke_profile_worker
 from joule.models import CalibrationResult, Fidelity, MeasurementReport, MetricSample, TargetSpec, WorkloadBundle, WorkloadSpec
 from joule.utils.metrics import aggregate_samples
+
+if TYPE_CHECKING:
+    from joule.utils.db import JouleDB
+    from joule.utils.terminal import TerminalReporter
 
 
 def _measure_workload_task(
@@ -28,7 +32,7 @@ def _measure_workload_task(
     reps: int,
 ) -> list[BackendMeasurement]:
     measurements = []
-    for _ in range(1, reps + 1):
+    for _ in range(reps):
         measurement = backend.measure(
             target,
             workload,
@@ -41,8 +45,10 @@ def _measure_workload_task(
 
 
 def _bundle_cache_key(bundle: WorkloadBundle) -> str:
-    ids = sorted(item.identifier for item in bundle.workloads)
-    return "bundle::" + "|".join(ids)
+    # Include both identifier and selector so that changes to test file paths or
+    # node IDs invalidate the cache even if the identifier string is unchanged.
+    parts = sorted(f"{item.identifier}:{item.selector}" for item in bundle.workloads)
+    return "bundle::" + "|".join(parts)
 
 
 def _backend_cache_namespace(backend: EnergyBackend) -> str:
@@ -55,14 +61,14 @@ def _measurement_cache_key(bundle: WorkloadBundle, backend: EnergyBackend) -> st
 
 
 class PerformanceOracle:
-    def __init__(self, settings: JouleSettings, backend: EnergyBackend, reporter=None, db=None) -> None:
+    def __init__(self, settings: JouleSettings, backend: EnergyBackend, reporter: TerminalReporter | None = None, db: JouleDB | None = None) -> None:
         self.settings = settings
         self.reporter = reporter
         self.backend = backend
         self.db = db
 
     @classmethod
-    def create(cls, settings: JouleSettings, backend_name: str | None = None, reporter=None, db=None) -> "PerformanceOracle":
+    def create(cls, settings: JouleSettings, backend_name: str | None = None, reporter: TerminalReporter | None = None, db: JouleDB | None = None) -> "PerformanceOracle":
         backend = BackendRegistry().get(backend_name or settings.default_backend, settings)
         return cls(settings=settings, backend=backend, reporter=reporter, db=db)
 
@@ -149,7 +155,7 @@ class PerformanceOracle:
                             f"mode={calibration.adaptive_mode} target={calibration.adaptive_target_window_s:.3f}s",
                         )
                 
-                with ProcessPoolExecutor(max_workers=self.settings.max_parallel_workers) as executor:
+                with ThreadPoolExecutor(max_workers=self.settings.max_parallel_workers) as executor:
                     futures = {}
                     for workload, calibration in calibrations:
                         future = executor.submit(

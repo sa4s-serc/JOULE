@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from joule.models import TargetSpec, WorkloadSpec
-from joule.profiling.core import ProfilingError, execute_workload, load_object
+from joule.profiling.core import ProfilingError, execute_workload
+from joule.runtime_helpers.worker import load_target_callable
 
 # Optional line_profiler for granular analysis
 try:
@@ -187,12 +188,12 @@ def execute_granular_profiling(
             reason="line_profiler_missing",
         )
 
-    # Load the target object for line profiling using shared load_object
+    # Load the target object for line profiling using load_target_callable
     target_obj: Callable[..., Any] | None = None
     line_profiler = LineProfiler()
 
     try:
-        target_obj = load_object(target.selector, project_root, overlay_root)
+        target_obj = load_target_callable(target, project_root, overlay_root)
     except Exception as exc:
         raise ProfilingError(
             f"Failed to load target for profiling: {exc}",
@@ -201,7 +202,7 @@ def execute_granular_profiling(
 
     if not callable(target_obj):
         raise ProfilingError(
-            f"Target is not callable: {target.selector}",
+            f"Target is not callable: {target.qualname}",
             reason="target_not_callable",
         )
 

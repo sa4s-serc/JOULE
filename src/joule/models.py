@@ -191,6 +191,7 @@ class AggregateMetrics:
     success_rate: float
     mean_wall_time_s: float
     mean_cpu_time_s: float
+    # float because it is the mean of integer samples; raw bytes scale preserved for dominance comparisons.
     mean_peak_memory_bytes: float
     mean_energy_j: float
     wall_time_ci95: float
@@ -268,6 +269,18 @@ class CalibrationResult:
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
 
+    @classmethod
+    def from_record(cls, payload: dict[str, Any]) -> "CalibrationResult":
+        return cls(
+            workload_id=str(payload["workload_id"]),
+            inner_repetitions=int(payload["inner_repetitions"]),
+            adaptive_applied=bool(payload["adaptive_applied"]),
+            adaptive_estimated_wall_time_s=float(payload["adaptive_estimated_wall_time_s"]),
+            adaptive_target_window_s=float(payload["adaptive_target_window_s"]),
+            adaptive_mode=str(payload["adaptive_mode"]),
+            capped=bool(payload.get("capped", False)),
+        )
+
 
 @dataclass(slots=True)
 class SearchContext:
@@ -283,6 +296,18 @@ class SearchContext:
         payload = asdict(self)
         payload["phase"] = self.phase.value
         return payload
+
+    @classmethod
+    def from_record(cls, payload: dict[str, Any]) -> "SearchContext":
+        return cls(
+            parent_id=str(payload["parent_id"]),
+            parent_source=str(payload["parent_source"]),
+            parent_operator_name=str(payload["parent_operator_name"]),
+            generation_depth=int(payload["generation_depth"]),
+            phase=SearchPhase(str(payload["phase"])),
+            rejection_history=[str(item) for item in payload.get("rejection_history", [])],
+            search_metadata=dict(payload.get("search_metadata", {})),
+        )
 
 
 @dataclass(slots=True)

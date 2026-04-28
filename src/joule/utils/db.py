@@ -167,9 +167,9 @@ class JouleDB:
             conn.executescript(SCHEMA)
             row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
             current_version = int(row[0]) if row else 0
-            if current_version == 0:
+            if current_version != DB_SCHEMA_VERSION:
                 conn.execute(
-                    "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                    "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)",
                     (DB_SCHEMA_VERSION, datetime.now(UTC).isoformat()),
                 )
 
@@ -683,6 +683,8 @@ class JouleDB:
     ) -> None:
         created_at = datetime.now(UTC).isoformat()
         with self.connect() as conn:
+            # DELETE + INSERT in the same transaction is atomic and correct here since
+            # measurements_cache has no UNIQUE constraint (only an index).
             conn.execute(
                 "DELETE FROM measurements_cache WHERE source_hash = ? AND workload_id = ? AND fidelity = ?",
                 (source_hash, workload_id, fidelity),
