@@ -253,6 +253,7 @@ def test_optimizer_expands_non_baseline_parent_and_persists_lineage(tmp_path: Pa
         search_branching_factor=2,
         search_max_generations=4,
         search_convergence_patience=8,
+        final_improvement_min=0.0,
     )
     target, bundle = _target_and_bundle(tmp_path)
     source_metrics = {

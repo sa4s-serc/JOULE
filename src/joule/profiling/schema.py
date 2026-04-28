@@ -654,10 +654,12 @@ def create_hotspot_summary(
 
     # Summarize harness — pass project + non-project combined so non-project
     # functions excluded from the top_functions slice are still accounted for.
+    # Pass the true total count so total_external_functions is not capped.
     all_profiled_functions = project_top_functions + non_project_top_functions
     harness_summary = summarize_harness(
         all_profiled_functions,
         {o["bucket"]: o["cumulative_time_s"] for o in ownership},
+        total_non_project_count=len(non_project_top_functions),
     )
 
     # Generate recommendations

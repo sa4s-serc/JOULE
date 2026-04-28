@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,64 +16,58 @@ except ImportError:
     LineProfiler = None  # type: ignore[assignment,misc]
     LINE_PROFILER_AVAILABLE = False
 
-# Constants
-DEFAULT_TIMER_UNIT_S = 1e-9  # Default to nanoseconds as conservative estimate
+# line_profiler timer unit: the stats object carries the actual unit per-run,
+# so we always read it from stats.unit rather than guessing.
+# Fallback is 1e-6 (microseconds) which is the most common platform default.
+DEFAULT_TIMER_UNIT_S = 1e-6  # microseconds — correct fallback for most platforms
 
 
-def _get_timer_unit() -> float:
-    """Get the timer unit for line_profiler in seconds per unit.
+def _get_timer_unit(stats: Any = None) -> float:
+    """Return the timer unit in seconds per tick.
 
-    line_profiler uses system-specific timer units. We need to convert
-    from these units to seconds for accurate timing.
+    Prefer reading from the stats object (stats.unit), which line_profiler
+    always populates.  Fall back to the module-level constant only when no
+    stats object is available.
     """
+    if stats is not None and hasattr(stats, "unit"):
+        return float(stats.unit)
     try:
-        import line_profiler
-
-        # The timer unit is exposed as a constant or can be derived
-        # from the get_stats output in newer versions
-        if hasattr(line_profiler, "get_unit"):
-            return line_profiler.get_unit()
-        # Default: assume units are in seconds already (some versions)
-        # or use a conservative estimate based on typical CPU freq
-        return DEFAULT_TIMER_UNIT_S
+        import line_profiler as _lp
+        if hasattr(_lp, "get_unit"):
+            return float(_lp.get_unit())
     except Exception:
-        return DEFAULT_TIMER_UNIT_S  # Fallback
+        pass
+    return DEFAULT_TIMER_UNIT_S
 
 
 def _parse_line_stats(stats: Any) -> dict[int, tuple[int, float]]:
-    """Parse line profiler stats into a standardized format.
+    """Parse line_profiler stats into ``{line_number: (hits, time_s)}``.
 
-    Args:
-        stats: LineProfiler stats object
+    line_profiler's ``stats.timings`` is::
 
-    Returns:
-        Dictionary mapping line_number -> (hits, time_s)
+        {(filename, first_lineno, func_name): [(lineno, hits, time_ticks), ...]}
 
-    The timing conversion uses the actual timer unit from line_profiler
-    rather than hardcoded assumptions.
+    Each inner tuple is ``(lineno, hits, time_ticks)`` — three elements, not two.
+    ``time_ticks`` must be multiplied by ``stats.unit`` to get seconds.
     """
-    if not stats or not stats.timings:
+    if not stats or not getattr(stats, "timings", None):
         return {}
 
-    timer_unit = _get_timer_unit()
+    timer_unit = _get_timer_unit(stats)
     line_stats: dict[int, tuple[int, float]] = {}
 
-    for key, timings in stats.timings.items():
-        # key is (filename, line_number, function_name)
-        if len(key) < 2:
-            continue
-        line_num = key[1]
-
-        # timings is list of (hits, time_in_units)
-        total_hits = 0
-        total_time_units = 0
-        for hits, time_units in timings:
-            total_hits += hits
-            total_time_units += time_units
-
-        # Convert from timer units to seconds
-        total_time_s = total_time_units * timer_unit
-        line_stats[line_num] = (total_hits, total_time_s)
+    for _key, timings in stats.timings.items():
+        # Each timing entry: (lineno, hits, time_ticks)
+        for entry in timings:
+            if len(entry) < 3:
+                continue
+            line_no, hits, time_ticks = entry[0], entry[1], entry[2]
+            time_s = time_ticks * timer_unit
+            if line_no in line_stats:
+                prev_hits, prev_time = line_stats[line_no]
+                line_stats[line_no] = (prev_hits + hits, prev_time + time_s)
+            else:
+                line_stats[line_no] = (hits, time_s)
 
     return line_stats
 
@@ -104,7 +97,8 @@ def _serialize_line_profile(
             reason="no_code_object",
         )
 
-    # Build line stats dict using proper timer unit
+    # Build line stats dict using the timer unit embedded in the stats object
+    timer_unit_s = _get_timer_unit(stats)
     line_stats = _parse_line_stats(stats)
 
     if not line_stats:
@@ -129,9 +123,10 @@ def _serialize_line_profile(
         line_start = min(line_stats.keys()) if line_stats else 0
         line_end = max(line_stats.keys()) if line_stats else 0
 
-    # Calculate summary
+    # Calculate summary — sum across all profiled lines
     total_time = sum(t for _, t in line_stats.values())
-    total_hits = sum(h for h, _ in line_stats.values())
+    # total_hits: count only lines that belong to the target function's range
+    total_hits = sum(h for ln, (h, _) in line_stats.items() if line_start <= ln <= line_end)
 
     # Raw line metrics for detailed inspection
     raw_line_metrics = [
@@ -148,7 +143,7 @@ def _serialize_line_profile(
         "code_blocks": code_blocks,
         "raw_line_count": len(line_stats),
         "raw_line_metrics": raw_line_metrics,
-        "timer_unit_s": _get_timer_unit(),
+        "timer_unit_s": timer_unit_s,
         "profiler": "line_profiler",
         "profiler_available": True,
     }
@@ -190,7 +185,7 @@ def execute_granular_profiling(
 
     # Load the target object for line profiling using load_target_callable
     target_obj: Callable[..., Any] | None = None
-    line_profiler = LineProfiler()
+    line_profiler: Any = LineProfiler()
 
     try:
         target_obj = load_target_callable(target, project_root, overlay_root)

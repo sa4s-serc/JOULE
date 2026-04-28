@@ -558,10 +558,11 @@ def analyze_function_ast(func: Callable[..., Any]) -> list[CodeBlock]:
     dedented_lines = dedent_source.splitlines()
     analyzer = FunctionAnalyzer(dedented_lines)
 
-    # Calculate offset from original source
-    base_lineno = getattr(func, "__code__", None)
-    if base_lineno:
-        offset = base_lineno.co_firstlineno - func_def.lineno
+    # Calculate offset: map dedented AST line numbers back to original file lines.
+    # func.__code__.co_firstlineno is the actual first line in the source file.
+    code_obj = getattr(func, "__code__", None)
+    if code_obj is not None:
+        offset = code_obj.co_firstlineno - func_def.lineno
     else:
         offset = 0
 

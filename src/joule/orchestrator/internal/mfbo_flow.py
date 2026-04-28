@@ -121,7 +121,7 @@ def build_correctness_rejection_evaluation(
         generation_depth=generation_depth,
         frontier_state=FrontierState.SCREENED_OUT,
         accepted=False,
-        score=float("inf"),
+        score=0.0,
         acquisition_score=float(screening["acquisition_score"]),
         dominance_summary={},
         metadata=metadata,

@@ -15,7 +15,7 @@ from joule.profiling.core import ProfilingError
 from joule.profiling.schema import MemoryMetrics
 
 
-def _format_size(num: int, suffix: str = "B") -> str:
+def _format_size(num: float, suffix: str = "B") -> str:
     """Convert bytes to human readable format."""
     for unit in ("", "Ki", "Mi", "Gi", "Ti"):
         if abs(num) < 1024.0:

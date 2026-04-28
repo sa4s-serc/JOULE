@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 
@@ -15,7 +16,7 @@ class HistGradientBoostingSurrogateModel:
     def __init__(self, settings: HistGBDTSurrogateSettings) -> None:
         self._settings = settings
         self._cache_revision = -1
-        self._models: dict[str, tuple[object, object, object]] = {}
+        self._models: dict[str, tuple[Any, Any, Any]] = {}
 
     def predict(
         self,
@@ -64,7 +65,7 @@ class HistGradientBoostingSurrogateModel:
             "l2_regularization": float(self._settings.l2_regularization),
             "random_state": 1337,
         }
-        models: dict[str, tuple[object, object, object]] = {}
+        models: dict[str, tuple[Any, Any, Any]] = {}
         for metric in METRIC_NAMES:
             values = y_train[metric]
             center_model = HistGradientBoostingRegressor(loss="squared_error", **kwargs)

@@ -72,7 +72,13 @@ def build_workload_signals(
         ownership = list(profile.get("ownership", []))
         workload_kind = str(item.get("workload_kind", "unknown"))
 
-        workload_total_time = sum(float(fn.get("cumulative_time_s", 0.0)) for fn in functions)
+        # Use ownership totals as the denominator — they are not capped and
+        # avoid double-counting from cProfile's stack-inclusive cumulative times.
+        workload_total_time = sum(float(o.get("cumulative_time_s", 0.0)) for o in ownership)
+        if workload_total_time <= 0:
+            # Fallback: sum the (capped) function list
+            workload_total_time = sum(float(fn.get("cumulative_time_s", 0.0)) for fn in functions)
+
         workload_project_time = sum(
             float(fn.get("cumulative_time_s", 0.0))
             for fn in functions
@@ -275,8 +281,19 @@ def summarize_harness(
     all_functions: list[dict[str, Any]],
     ownership_totals: dict[str, float],
     limit: int = 5,
+    *,
+    total_non_project_count: int | None = None,
 ) -> HarnessSummary:
-    """Create a condensed summary of harness/external code."""
+    """Create a condensed summary of harness/external code.
+
+    Args:
+        all_functions: Function list (may be pre-sliced to ``limit``).
+        ownership_totals: Per-bucket cumulative time totals.
+        limit: How many top non-project calls to surface.
+        total_non_project_count: Actual total count of non-project functions
+            before any slicing.  When provided, used for
+            ``total_external_functions`` instead of ``len(non_project)``.
+    """
     non_project = [
         fn for fn in all_functions if str(fn.get("ownership", "")) not in PROJECT_LIKE_BUCKETS
     ]
@@ -300,7 +317,7 @@ def summarize_harness(
         total_time_s=harness_total,
         share=harness_total / max(total_all, 0.0001),
         top_calls=top_calls,
-        total_external_functions=len(non_project),
+        total_external_functions=total_non_project_count if total_non_project_count is not None else len(non_project),
     )
 
 
@@ -382,7 +399,15 @@ def _create_stable_block_id(
 
 
 def extract_granular_analysis(records: list[dict]) -> GranularAnalysis | None:
-    """Extract and aggregate granular profiling data from records."""
+    """Extract and aggregate granular profiling data from records.
+
+    Aggregation strategy:
+    - Block timing: sum across workloads (total observed time), then divide by
+      workload_count to get a per-run average that is comparable across runs.
+    - total_hits: summed across all workloads (total invocations observed).
+    - Metadata (function name, file, line_range): taken from the first record;
+      these are stable properties of the target function.
+    """
     granular_data: list[dict] = []
 
     for item in records:
@@ -436,7 +461,6 @@ def extract_granular_analysis(records: list[dict]) -> GranularAnalysis | None:
             line_range = block.get("line_range", [0, 0])
             block_type = block.get("type", "")
 
-            # Create stable block ID
             block_id = _create_stable_block_id(
                 file, function, (line_range[0], line_range[1]), block_type
             )
@@ -447,25 +471,26 @@ def extract_granular_analysis(records: list[dict]) -> GranularAnalysis | None:
             agg["line_range"] = (line_range[0], line_range[1])
             agg["description"] = block.get("description", "")
             agg["nesting_level"] = block.get("nesting_level", 0)
+            # Accumulate totals — divide by count later for per-run averages
             agg["total_hits"] += block.get("hits", 0)
-            time_s = block.get("time_s", 0.0)
+            time_s = float(block.get("time_s", 0.0))
             agg["total_time_s"] += time_s
             agg["time_min_s"] = min(agg["time_min_s"], time_s)
             agg["time_max_s"] = max(agg["time_max_s"], time_s)
             agg["count"] += 1
 
-            # Collect line details
             if block.get("line_details"):
                 agg["line_details"].extend(block["line_details"])
 
-    # Calculate averages and enrich with metrics
+    # Per-run average function time (stable denominator for share_of_function)
     total_function_time = sum(d.get("total_time_s", 0.0) for d in granular_data) / max(len(granular_data), 1)
 
     blocks: list[BlockMetrics] = []
     for agg in block_totals.values():
-        count = agg["count"]
-        time_s = agg["total_time_s"] / max(count, 1)
-        hits = agg["total_hits"] // max(count, 1)
+        count = max(agg["count"], 1)
+        # Per-run average time and hits
+        avg_time_s = agg["total_time_s"] / count
+        avg_hits = agg["total_hits"] // count
 
         blocks.append(
             BlockMetrics(
@@ -474,30 +499,29 @@ def extract_granular_analysis(records: list[dict]) -> GranularAnalysis | None:
                 line_range=agg["line_range"],
                 description=agg["description"],
                 nesting_level=agg["nesting_level"],
-                hits=hits,
-                time_s=time_s,
-                time_per_hit_ms=round((time_s / max(hits, 1)) * MS_PER_SECOND, 4),
-                share_of_function=round(time_s / max(total_function_time, TIME_EPSILON), 4),
+                hits=avg_hits,
+                time_s=avg_time_s,
+                time_per_hit_ms=round((avg_time_s / max(avg_hits, 1)) * MS_PER_SECOND, 4),
+                share_of_function=round(avg_time_s / max(total_function_time, TIME_EPSILON), 4),
                 workload_count=count,
-                time_min_s=agg["time_min_s"] if agg["time_min_s"] != float("inf") else time_s,
-                time_max_s=agg["time_max_s"] if agg["time_max_s"] > 0 else time_s,
+                time_min_s=agg["time_min_s"] if agg["time_min_s"] != float("inf") else avg_time_s,
+                time_max_s=agg["time_max_s"] if agg["time_max_s"] > 0 else avg_time_s,
                 lines_covered=len(set(ld.get("line") for ld in agg["line_details"])) if agg["line_details"] else 0,
-                line_details=agg["line_details"][:LINE_DETAILS_LIMIT],  # Limit details
+                line_details=agg["line_details"][:LINE_DETAILS_LIMIT],
             )
         )
 
-    # Sort by time (descending)
     blocks.sort(key=lambda x: x.time_s, reverse=True)
 
-    # Calculate summary by block type
     type_totals: dict[str, float] = defaultdict(float)
     for block in blocks:
         type_totals[block.block_type] += block.time_s
 
-    # Get function info from first record
+    # Metadata from first record (stable: same target function across workloads)
     first = granular_data[0]
+    # total_hits: sum across all workloads (total observed invocations)
+    total_hits_all = sum(d.get("total_hits", 0) for d in granular_data)
 
-    # Generate structured insights
     insights = InsightRecord.from_granular_data(blocks, dict(type_totals), total_function_time)
 
     return GranularAnalysis(
@@ -505,9 +529,9 @@ def extract_granular_analysis(records: list[dict]) -> GranularAnalysis | None:
         file=first.get("file", ""),
         line_range=(first.get("line_range", [0, 0])[0], first.get("line_range", [0, 0])[1]),
         total_time_s=total_function_time,
-        total_hits=first.get("total_hits", 0),
+        total_hits=total_hits_all,
         workloads_profiled=len(granular_data),
-        code_blocks=blocks[:TOP_BLOCKS_LIMIT],  # Limit to top blocks
+        code_blocks=blocks[:TOP_BLOCKS_LIMIT],
         insights=insights,
         raw_line_count=first.get("raw_line_count", 0),
         raw_line_metrics=first.get("raw_line_metrics", []),

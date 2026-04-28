@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import math
 from pathlib import Path
 import json
 from typing import Any
@@ -149,6 +150,12 @@ def _normalized_profile_path(path_value: str) -> str:
         return value
 
 
+# ---------------------------------------------------------------------------
+# Legacy helpers — kept only for any external callers that import them
+# directly.  All hotspot summarization now goes through
+# joule.profiling.schema.create_hotspot_summary.
+# ---------------------------------------------------------------------------
+
 def _enrich_hotspot_function(entry: dict[str, Any], *, total_cumulative: float) -> dict[str, Any]:
     cumulative_time = float(entry.get("cumulative_time_s", 0.0))
     total_time = float(entry.get("total_time_s", 0.0))
@@ -166,335 +173,6 @@ def _enrich_hotspot_function(entry: dict[str, Any], *, total_cumulative: float) 
     }
 
 
-def _extract_granular_analysis(records: list[dict]) -> dict | None:
-    """Extract and aggregate granular profiling data from records with rich metrics."""
-    granular_data: list[dict] = []
-
-    for item in records:
-        profile = item.get("profile", {})
-        granular = profile.get("granular")
-        if granular and isinstance(granular, dict):
-            if "error" in granular:
-                continue
-            granular_data.append({
-                "workload_id": item.get("workload_id", "unknown"),
-                "function_name": granular.get("function_name", "unknown"),
-                "file": granular.get("file", ""),
-                "line_range": granular.get("line_range", [0, 0]),
-                "total_time_s": granular.get("total_time_s", 0.0),
-                "total_hits": granular.get("total_hits", 0),
-                "code_blocks": granular.get("code_blocks", []),
-                "raw_line_count": granular.get("raw_line_count", 0),
-            })
-
-    if not granular_data:
-        return None
-
-    # Aggregate code blocks across workloads
-    block_totals: dict[tuple[str, int, int], dict] = defaultdict(
-        lambda: {"type": "", "line_range": [0, 0], "description": "", "total_hits": 0, "total_time_s": 0.0, "count": 0, "nesting_level": 0}
-    )
-
-    for data in granular_data:
-        for block in data.get("code_blocks", []):
-            key = (block.get("type", ""), block.get("line_range", [0, 0])[0], block.get("line_range", [0, 0])[1])
-            agg = block_totals[key]
-            agg["type"] = block.get("type", "")
-            agg["line_range"] = block.get("line_range", [0, 0])
-            agg["description"] = block.get("description", "")
-            agg["total_hits"] += block.get("hits", 0)
-            agg["total_time_s"] += block.get("time_s", 0.0)
-            agg["count"] += 1
-            agg["nesting_level"] = block.get("nesting_level", 0)
-
-    # Calculate averages and enrich with metrics
-    total_function_time = sum(d.get("total_time_s", 0.0) for d in granular_data) / max(len(granular_data), 1)
-    enriched_blocks = []
-
-    for agg in block_totals.values():
-        count = agg["count"]
-        time_s = agg["total_time_s"] / max(count, 1)
-        hits = agg["total_hits"] // max(count, 1)
-        block_type = agg["type"]
-
-        # Calculate efficiency score (higher is worse - more time per hit)
-        efficiency_score = time_s / max(hits, 1) * 1000  # ms per hit
-
-        # Calculate loop complexity indicator
-        loop_complexity = 0
-        if block_type in ("for_loop", "while_loop"):
-            # High hit count with low time per hit = efficient loop
-            # Low hit count with high time per hit = expensive loop body
-            loop_complexity = min(10, int(efficiency_score * 2))
-
-        enriched = {
-            "type": block_type,
-            "line_range": agg["line_range"],
-            "description": agg["description"],
-            "nesting_level": agg["nesting_level"],
-            "hits": hits,
-            "time_s": round(time_s, 6),
-            "time_per_hit_ms": round((time_s / max(hits, 1)) * 1000, 4),
-            "share_of_function": round(time_s / max(total_function_time, 0.0001), 4),
-            "workloads_profiled": count,
-            "efficiency_score": round(efficiency_score, 4),
-            "loop_complexity": loop_complexity,
-        }
-        enriched_blocks.append(enriched)
-
-    # Sort by time (descending)
-    enriched_blocks.sort(key=lambda x: x["time_s"], reverse=True)
-
-    # Calculate summary by block type
-    type_totals: dict[str, float] = defaultdict(float)
-    type_counts: dict[str, int] = defaultdict(int)
-    for block in enriched_blocks:
-        type_totals[block["type"]] += block["time_s"]
-        type_counts[block["type"]] += 1
-
-    # Build nested structure for visualization
-    nested_blocks = _build_nested_block_structure(enriched_blocks)
-
-    # Generate visual hotspot tree
-    hotspot_tree = _generate_hotspot_tree(enriched_blocks, total_function_time)
-
-    # Get function info from first record
-    first = granular_data[0]
-
-    # Calculate comprehensions metrics
-    comprehension_types = ["list_comprehension", "dict_comprehension", "set_comprehension", "generator_expression"]
-    comprehension_time = sum(type_totals.get(ct, 0.0) for ct in comprehension_types)
-
-    return {
-        "target_function": first.get("function_name", "unknown"),
-        "file": first.get("file", ""),
-        "line_range": first.get("line_range", [0, 0]),
-        "total_time_s": round(total_function_time, 6),
-        "workloads_profiled": len(granular_data),
-        "code_blocks": enriched_blocks[:20],  # Limit to top 20 blocks
-        "nested_structure": nested_blocks,
-        "hotspot_tree": hotspot_tree,
-        "hotspot_summary": {
-            "hottest_block": enriched_blocks[0].get("description", "") if enriched_blocks else None,
-            "hottest_block_share": enriched_blocks[0].get("share_of_function", 0.0) if enriched_blocks else 0.0,
-            "loop_time_total_s": round(type_totals.get("for_loop", 0.0) + type_totals.get("while_loop", 0.0), 6),
-            "loop_count": type_counts.get("for_loop", 0) + type_counts.get("while_loop", 0),
-            "branch_time_total_s": round(type_totals.get("if_branch", 0.0) + type_totals.get("elif_branch", 0.0) + type_totals.get("else_branch", 0.0), 6),
-            "branch_count": type_counts.get("if_branch", 0) + type_counts.get("elif_branch", 0) + type_counts.get("else_branch", 0),
-            "call_time_total_s": round(type_totals.get("function_call", 0.0), 6),
-            "call_count": type_counts.get("function_call", 0),
-            "assignment_time_total_s": round(type_totals.get("assignment", 0.0) + type_totals.get("augmented_assignment", 0.0), 6),
-            "comprehension_time_total_s": round(comprehension_time, 6),
-            "comprehension_count": sum(type_counts.get(ct, 0) for ct in comprehension_types),
-        },
-        "insights": _generate_granular_insights(enriched_blocks, type_totals, total_function_time),
-    }
-
-
-def _build_nested_block_structure(blocks: list[dict]) -> list[dict]:
-    """Build a nested structure of code blocks based on line ranges."""
-    if not blocks:
-        return []
-
-    # Sort by nesting level and line start
-    sorted_blocks = sorted(blocks, key=lambda b: (b.get("nesting_level", 0), b["line_range"][0]))
-
-    # Build parent-child relationships
-    root_blocks: list[dict] = []
-    block_stack: list[dict] = []
-
-    for block in sorted_blocks:
-        block_copy = {**block, "children": []}
-        nesting = block.get("nesting_level", 0)
-
-        # Pop stack until we find the parent or empty
-        while block_stack and block_stack[-1].get("nesting_level", 0) >= nesting:
-            block_stack.pop()
-
-        if block_stack:
-            block_stack[-1].setdefault("children", []).append(block_copy)
-        else:
-            root_blocks.append(block_copy)
-
-        block_stack.append(block_copy)
-
-    return root_blocks
-
-
-def _generate_hotspot_tree(blocks: list[dict], total_time: float) -> list[dict]:
-    """Generate a visual tree representation of hotspots."""
-    if not blocks or total_time <= 0:
-        return []
-
-    tree_lines = []
-    top_blocks = blocks[:10]  # Top 10 for tree
-
-    for i, block in enumerate(top_blocks):
-        share = block.get("share_of_function", 0.0)
-        nesting = block.get("nesting_level", 0)
-        prefix = "  " * nesting
-        indicator = "🔥" if share > 0.3 else "⚡" if share > 0.1 else "•"
-
-        tree_lines.append({
-            "line": f"{prefix}{indicator} {block['description'][:50]}",
-            "time_s": block["time_s"],
-            "share": share,
-            "nesting_level": nesting,
-        })
-
-    return tree_lines
-
-
-def _generate_granular_insights(blocks: list[dict], type_totals: dict, total_time: float) -> list[str]:
-    """Generate insights from granular analysis."""
-    insights: list[str] = []
-
-    if not blocks:
-        return insights
-
-    # Top hotspot insight
-    top_block = blocks[0]
-    if top_block.get("share_of_function", 0) > 0.3:
-        insights.append(
-            f"🎯 Critical hotspot: '{top_block['description'][:40]}' consumes "
-            f"{top_block['share_of_function']*100:.1f}% of function time"
-        )
-    elif top_block.get("share_of_function", 0) > 0.1:
-        insights.append(
-            f"🔥 Hotspot: '{top_block['description'][:40]}' takes "
-            f"{top_block['share_of_function']*100:.1f}% of function time"
-        )
-
-    # Loop insights
-    loop_time = type_totals.get("for_loop", 0.0) + type_totals.get("while_loop", 0.0)
-    if loop_time / max(total_time, 0.0001) > 0.5:
-        insights.append(f"🔄 Loops dominate: {loop_time/max(total_time, 0.0001)*100:.1f}% of time in loops")
-
-    # High complexity blocks
-    complex_blocks = [b for b in blocks if b.get("loop_complexity", 0) > 5]
-    if complex_blocks:
-        insights.append(
-            f"⚠️  {len(complex_blocks)} loop(s) with high per-iteration cost detected"
-        )
-
-    # Nesting depth warning
-    deep_nesting = [b for b in blocks if b.get("nesting_level", 0) >= 3]
-    if deep_nesting:
-        insights.append(f"📊 Deep nesting: {len(deep_nesting)} block(s) at nesting level 3+")
-
-    # Comprehension usage
-    comprehension_time = (
-        type_totals.get("list_comprehension", 0.0) +
-        type_totals.get("dict_comprehension", 0.0) +
-        type_totals.get("set_comprehension", 0.0)
-    )
-    if comprehension_time > 0:
-        insights.append(f"✨ Comprehensions contribute {comprehension_time/max(total_time, 0.0001)*100:.1f}% of time")
-
-    return insights
-
-
-def _summarize_harness(
-    all_functions: list[dict],
-    ownership_totals: dict[str, float],
-    project_like_buckets: set[str],
-    limit: int = 5,
-) -> dict:
-    """Create a condensed summary of harness/external code."""
-    # Filter to non-project code
-    non_project = [
-        fn for fn in all_functions
-        if str(fn.get("ownership", "")) not in project_like_buckets
-    ]
-
-    harness_total = sum(
-        total for bucket, total in ownership_totals.items()
-        if bucket not in project_like_buckets
-    )
-    total_all = sum(ownership_totals.values())
-
-    # Get top non-project calls
-    top_calls = [
-        {
-            "function": fn.get("function", "unknown"),
-            "file": Path(fn.get("file", "unknown")).name,
-            "time_s": round(fn.get("cumulative_time_s", 0.0), 4),
-            "calls": fn.get("total_calls", 0),
-        }
-        for fn in non_project[:limit]
-    ]
-
-    return {
-        "total_time_s": round(harness_total, 4),
-        "share": round(harness_total / max(total_all, 0.0001), 4),
-        "top_calls": top_calls,
-        "total_external_functions": len(non_project),
-    }
-
-
-def _hotspot_recommendations(
-    *,
-    signal_quality: dict[str, Any],
-    target_top_functions: list[dict[str, Any]],
-    by_workload: list[dict[str, Any]],
-    workload_kind_counts: Counter[str],
-) -> list[str]:
-    recommendations: list[str] = []
-    reasons = set(signal_quality.get("low_signal_reasons") or [])
-
-    if "target_file_under_20pct" in reasons:
-        recommendations.append(
-            "Target file contributes under 20% of hotspot time; add tighter harness/property workloads to isolate target logic."
-        )
-    if "non_project_dominant" in reasons:
-        dominant = signal_quality.get("dominant_ownership_bucket") or "non-project"
-        recommendations.append(
-            f"Hotspot time is dominated by {dominant}; optimize workload setup or dependency overhead before target rewrites."
-        )
-    if "no_profile_samples" in reasons:
-        recommendations.append(
-            "Profiler produced no usable samples; rerun with longer workloads or increase inner repetitions for stable attribution."
-        )
-
-    if target_top_functions:
-        top_target = target_top_functions[0]
-        recommendations.append(
-            "Prioritize target hotspot "
-            f"{Path(str(top_target.get('file', 'unknown'))).name}:{int(top_target.get('line', 0))}::{top_target.get('function', 'unknown')} "
-            f"(share={float(top_target.get('share', 0.0)) * 100:.1f}%)."
-        )
-    else:
-        recommendations.append(
-            "No target-file hotspot entries found; verify target resolution and prefer explicit tests/properties for target behavior."
-        )
-
-    if workload_kind_counts.get("pytest", 0) > 0 and len(workload_kind_counts) == 1:
-        recommendations.append(
-            "Only pytest workloads were profiled; add property/harness selectors to reduce harness-heavy hotspot dilution."
-        )
-
-    low_signal_workloads = [
-        item
-        for item in by_workload
-        if bool((item.get("signal") or {}).get("low_signal", False))
-    ]
-    if low_signal_workloads:
-        first = low_signal_workloads[0]
-        recommendations.append(
-            f"Workload {first.get('workload_id', 'unknown')} has low project share; inspect workload scope and trim setup/fixture overhead."
-        )
-
-    # Detect high call counts (potential loops/N+1)
-    if target_top_functions:
-        most_called = max(target_top_functions, key=lambda fn: int(fn.get("total_calls", 0)))
-        if int(most_called.get("total_calls", 0)) > 5000:
-             recommendations.append(
-                 f"Hotspot {most_called.get('function')} has {most_called.get('total_calls')} calls; check for redundant loops or N+1 patterns."
-             )
-
-    return recommendations[:8]
-
-
 def summarize_hotspots(
     records: list[dict],
     limit: int = 12,
@@ -503,226 +181,21 @@ def summarize_hotspots(
 ) -> dict:
     """Summarize hotspot profiling data.
 
-    Args:
-        records: List of profile records from workloads
-        limit: Maximum number of top functions to include
-        target_file: Path to the target file for filtering
-        granular: Whether to include deep granular (line-level) analysis
-
-    Returns:
-        Hotspot summary dictionary with hardened schema v2
+    Delegates entirely to the canonical implementation in
+    ``joule.profiling.schema.create_hotspot_summary``.
     """
-    # Use hardened schema v2 implementation
-    try:
-        from joule.profiling.schema import create_hotspot_summary, ProfileLevel
+    from joule.profiling.schema import create_hotspot_summary, ProfileLevel
 
-        level = ProfileLevel.GRANULAR if granular else ProfileLevel.BASIC
-        return create_hotspot_summary(
-            records,
-            limit=limit,
-            target_file=target_file,
-            level=level,
-        )
-    except ImportError:
-        # Fall back to legacy implementation if profiling module not available
-        pass
-
-    # Legacy implementation fallback
-    by_workload: list[dict[str, Any]] = []
-    aggregate_functions: defaultdict[tuple[str, int, str, str], dict] = defaultdict(
-        lambda: {
-            "file": "",
-            "line": 0,
-            "function": "",
-            "ownership": "",
-            "cumulative_time_s": 0.0,
-            "total_time_s": 0.0,
-            "total_calls": 0,
-        }
-    )
-    ownership_totals: defaultdict[str, float] = defaultdict(float)
-    workload_kind_counts: Counter[str] = Counter()
-    project_like_buckets = {"project", "candidate-overlay"}
-    normalized_target_file = _normalized_profile_path(str(target_file)) if target_file else ""
-
-    for item in records:
-        profile = item.get("profile", {})
-        functions = list(profile.get("functions", []))
-        ownership = list(profile.get("ownership", []))
-        workload_kind = str(item.get("workload_kind", "unknown"))
-        workload_label = str(item.get("workload_label", ""))
-        workload_selector = str(item.get("workload_selector", ""))
-        workload_kind_counts[workload_kind] += 1
-        workload_total_time = sum(float(fn.get("cumulative_time_s", 0.0)) for fn in functions)
-        workload_project_time = sum(
-            float(fn.get("cumulative_time_s", 0.0))
-            for fn in functions
-            if str(fn.get("ownership", "")) in project_like_buckets
-        )
-        workload_target_time = 0.0
-        if normalized_target_file:
-            workload_target_time = sum(
-                float(fn.get("cumulative_time_s", 0.0))
-                for fn in functions
-                if _normalized_profile_path(str(fn.get("file", ""))) == normalized_target_file
-            )
-        sorted_ownership = sorted(
-            ownership,
-            key=lambda owner: float(owner.get("cumulative_time_s", 0.0)),
-            reverse=True,
-        )
-        dominant_bucket = str(sorted_ownership[0].get("bucket", "unknown")) if sorted_ownership else "unknown"
-        workload_project_share = workload_project_time / workload_total_time if workload_total_time > 0 else 0.0
-        workload_target_share = workload_target_time / workload_total_time if workload_total_time > 0 else 0.0
-        by_workload.append(
-            {
-                "workload_id": item["workload_id"],
-                "workload_kind": workload_kind,
-                "workload_label": workload_label,
-                "workload_selector": workload_selector,
-                "success": item.get("success", False),
-                "top_functions": functions[:limit],
-                "ownership": ownership,
-                "stderr": item.get("stderr", ""),
-                "signal": {
-                    "project_share": round(workload_project_share, 4),
-                    "target_share": round(workload_target_share, 4),
-                    "dominant_ownership_bucket": dominant_bucket,
-                    "total_cumulative_time_s": round(workload_total_time, 6),
-                    "low_signal": workload_total_time > 0 and workload_project_share < 0.2,
-                },
-            }
-        )
-        for fn in functions:
-            key = (fn["file"], int(fn["line"]), fn["function"], fn["ownership"])
-            agg = aggregate_functions[key]
-            agg["file"] = fn["file"]
-            agg["line"] = int(fn["line"])
-            agg["function"] = fn["function"]
-            agg["ownership"] = fn["ownership"]
-            agg["cumulative_time_s"] += float(fn["cumulative_time_s"])
-            agg["total_time_s"] += float(fn["total_time_s"])
-            agg["total_calls"] += int(fn["total_calls"])
-        for owner in ownership:
-            ownership_totals[str(owner["bucket"])] += float(owner["cumulative_time_s"])
-
-    all_functions_raw = sorted(aggregate_functions.values(), key=lambda item: item["cumulative_time_s"], reverse=True)
-    merged_ownership = [
-        {"bucket": bucket, "cumulative_time_s": total}
-        for bucket, total in sorted(ownership_totals.items(), key=lambda item: item[1], reverse=True)
-    ]
-
-    total_cumulative = sum(float(item["cumulative_time_s"]) for item in all_functions_raw)
-    all_functions = [_enrich_hotspot_function(item, total_cumulative=total_cumulative) for item in all_functions_raw]
-
-    # Filter harness code from main top_functions by prioritizing project/target code
-    project_merged = [fn for fn in all_functions if str(fn.get("ownership", "")) in project_like_buckets]
-    non_project_merged = [fn for fn in all_functions if str(fn.get("ownership", "")) not in project_like_buckets]
-    merged_functions = (project_merged + non_project_merged)[:limit]
-    project_cumulative = sum(float(total) for bucket, total in ownership_totals.items() if bucket in project_like_buckets)
-    target_matches = [
-        fn
-        for fn in all_functions
-        if normalized_target_file and _normalized_profile_path(str(fn["file"])) == normalized_target_file
-    ]
-    target_cumulative = sum(float(item.get("cumulative_time_s", 0.0)) for item in target_matches)
-    target_top_functions = target_matches[:limit]
-
-    project_top_functions = [
-        fn
-        for fn in all_functions
-        if str(fn.get("ownership", "")) in project_like_buckets
-    ][:limit]
-    non_project_top_functions = [
-        fn
-        for fn in all_functions
-        if str(fn.get("ownership", "")) not in project_like_buckets
-    ][:limit]
-
-    project_share = project_cumulative / total_cumulative if total_cumulative > 0 else 0.0
-    target_share = target_cumulative / total_cumulative if total_cumulative > 0 else 0.0
-    aggregate_dominant_bucket: str | None = str(merged_ownership[0]["bucket"]) if merged_ownership else None
-    low_signal_reasons: list[str] = []
-    if total_cumulative <= 0:
-        low_signal_reasons.append("no_profile_samples")
-    if normalized_target_file and target_share < 0.2:
-        low_signal_reasons.append("target_file_under_20pct")
-    if aggregate_dominant_bucket and aggregate_dominant_bucket not in project_like_buckets:
-        low_signal_reasons.append("non_project_dominant")
-
-    by_workload.sort(key=lambda item: float((item.get("signal") or {}).get("project_share", 0.0)), reverse=True)
-
-    strongest_workload = by_workload[0] if by_workload else None
-    weakest_workload = by_workload[-1] if by_workload else None
-
-    signal_quality = {
-        "total_cumulative_time_s": total_cumulative,
-        "project_cumulative_time_s": project_cumulative,
-        "target_cumulative_time_s": target_cumulative,
-        "project_share": round(project_share, 4),
-        "target_share": round(target_share, 4),
-        "low_signal": bool(low_signal_reasons),
-        "low_signal_reasons": low_signal_reasons,
-        "dominant_ownership_bucket": aggregate_dominant_bucket,
-    }
-
-    # Extract granular analysis if available
-    granular_analysis = None
-    if granular:
-        granular_analysis = _extract_granular_analysis(records)
-
-    # Summarize harness/external code
-    harness_summary = _summarize_harness(
-        all_functions, dict(ownership_totals), project_like_buckets, limit=5
+    level = ProfileLevel.GRANULAR if granular else ProfileLevel.BASIC
+    return create_hotspot_summary(
+        records,
+        limit=limit,
+        target_file=target_file,
+        level=level,
     )
 
-    recommendations = _hotspot_recommendations(
-        signal_quality=signal_quality,
-        target_top_functions=target_top_functions,
-        by_workload=by_workload,
-        workload_kind_counts=workload_kind_counts,
-    )
-    strongest_signal = None
-    weakest_signal = None
-    if strongest_workload is not None:
-        strongest_signal = {
-            "workload_id": strongest_workload.get("workload_id"),
-            "workload_kind": strongest_workload.get("workload_kind"),
-            "project_share": (strongest_workload.get("signal") or {}).get("project_share", 0.0),
-            "target_share": (strongest_workload.get("signal") or {}).get("target_share", 0.0),
-        }
-    if weakest_workload is not None:
-        weakest_signal = {
-            "workload_id": weakest_workload.get("workload_id"),
-            "workload_kind": weakest_workload.get("workload_kind"),
-            "project_share": (weakest_workload.get("signal") or {}).get("project_share", 0.0),
-            "target_share": (weakest_workload.get("signal") or {}).get("target_share", 0.0),
-        }
 
-    result: dict[str, Any] = {
-        "schema_version": 3,
-        "by_workload": by_workload,
-        "top_functions": merged_functions,
-        "target_top_functions": target_top_functions,
-        "project_top_functions": project_top_functions,
-        "non_project_top_functions": non_project_top_functions,
-        "ownership": merged_ownership,
-        "workload_kind_counts": dict(workload_kind_counts.most_common()),
-        "signal_quality": signal_quality,
-        "insights": {
-            "primary_target_hotspot": target_top_functions[0] if target_top_functions else None,
-            "strongest_signal_workload": strongest_signal,
-            "weakest_signal_workload": weakest_signal,
-            "profiled_workload_count": len(by_workload),
-        },
-        "harness_summary": harness_summary,
-        "recommendations": recommendations,
-    }
 
-    if granular_analysis:
-        result["granular_analysis"] = granular_analysis
-
-    return result
 
 
 def build_optimization_analysis(
@@ -892,8 +365,19 @@ def human_discover_summary(payload: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _sanitize_floats(obj: Any) -> Any:
+    """Recursively replace non-finite floats with None so json.dumps produces valid JSON."""
+    if isinstance(obj, float):
+        return None if not math.isfinite(obj) else obj
+    if isinstance(obj, dict):
+        return {key: _sanitize_floats(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_floats(item) for item in obj]
+    return obj
+
+
 def json_pretty(payload: Any) -> str:
-    return json.dumps(payload, indent=2)
+    return json.dumps(_sanitize_floats(payload), indent=2)
 
 
 def candidate_detail_payload(candidate: dict, measurements: list[dict]) -> dict:

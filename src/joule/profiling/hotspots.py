@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import cProfile
+import os
 import pstats
 from pathlib import Path
 from typing import Any
@@ -10,15 +11,37 @@ from joule.profiling.core import execute_workload
 
 
 def _ownership_bucket(filename: str, project_root: Path, overlay_root: Path | None) -> str:
-    """Classify a file into ownership buckets."""
-    if not filename or filename.startswith("~"):
+    """Classify a file into ownership buckets.
+
+    Order of checks matters:
+    1. Builtins / frozen modules (no real path)
+    2. Candidate overlay (must beat project_root check)
+    3. Virtual-env inside project root — must be stdlib-or-site, not project
+    4. Project source
+    5. stdlib / site-packages anywhere else on the path
+    6. Everything else → external
+    """
+    if not filename or filename.startswith("~") or filename.startswith("<"):
         return "builtin"
     file_path = Path(filename)
-    if overlay_root and str(file_path).startswith(str(overlay_root)):
+    file_str = str(file_path)
+    if overlay_root and file_str.startswith(str(overlay_root)):
         return "candidate-overlay"
-    if str(file_path).startswith(str(project_root)):
+    # Exclude common virtual-env directories that live inside the project root
+    _venv_markers = (
+        f"{file_str}{os.sep}.venv{os.sep}",
+        f"{os.sep}.venv{os.sep}",
+        f"{os.sep}venv{os.sep}",
+        f"{os.sep}.env{os.sep}",
+        f"{os.sep}site-packages{os.sep}",
+    )
+    is_venv = any(marker in file_str for marker in _venv_markers) or (
+        os.sep + ".venv" + os.sep in file_str
+        or "/site-packages/" in file_str
+    )
+    if not is_venv and file_str.startswith(str(project_root)):
         return "project"
-    if "/python" in str(file_path).lower() or "lib/python" in str(file_path).lower():
+    if "/python" in file_str.lower() or "lib/python" in file_str.lower() or is_venv:
         return "stdlib-or-site"
     return "external"
 
@@ -58,7 +81,7 @@ def _serialize_profile(
     ]
 
     return {
-        "functions": functions[:40],
+        "functions": functions[:200],
         "ownership": ownership_info,
         "profiler": "cProfile",
     }

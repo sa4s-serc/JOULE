@@ -1197,13 +1197,12 @@ class OptimizationOrchestrator:
             generation_depth=generation_depth,
             frontier_state=FrontierState.SCREENED_OUT,
             accepted=False,
-            score=float("inf"),
+            score=0.0,
             acquisition_score=float(screening["acquisition_score"]) if screening else 0.0,
             dominance_summary={},
             metadata=metadata,
         )
         self._record_candidate(run_id, evaluation, status=status)
-
     def _proposal_generation_delta(self, proposal: TransformationResult) -> int:
         raw = proposal.metadata.get("generation_delta", 1)
         try:

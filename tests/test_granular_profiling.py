@@ -9,9 +9,22 @@ from typing import Any
 
 from joule.utils.analysis import (
     summarize_hotspots,
-    _extract_granular_analysis,
-    _summarize_harness,
 )
+from joule.profiling.summarize import (
+    extract_granular_analysis as _extract_granular_analysis,
+)
+
+
+def _summarize_harness(
+    all_functions: list,
+    ownership_totals: dict,
+    project_like_buckets: set,
+    limit: int = 5,
+) -> dict:
+    """Thin wrapper matching the old signature used in tests."""
+    from joule.profiling.summarize import summarize_harness, PROJECT_LIKE_BUCKETS
+    result = summarize_harness(all_functions, ownership_totals, limit=limit)
+    return result.to_dict()
 
 
 def test_summarize_hotspots_without_granular() -> None:
@@ -236,15 +249,21 @@ def test_extract_granular_analysis_aggregation() -> None:
     result = _extract_granular_analysis(records)
     assert result is not None
 
-    # Check averaging
-    assert result["total_time_s"] == 1.1  # Average of 1.0 and 1.2
-    assert result["workloads_profiled"] == 2
+    result_dict = result.to_dict()
 
-    # Check block aggregation
-    blocks = result["code_blocks"]
+    # total_time_s is the per-run average: (1.0 + 1.2) / 2 = 1.1
+    assert result_dict["total_time_s"] == pytest.approx(1.1, abs=1e-6)
+    assert result_dict["workloads_profiled"] == 2
+    # total_hits is the sum across all workloads: 500 + 600 = 1100
+    assert result_dict["total_hits"] == 1100
+
+    # Check block aggregation — per-run averages
+    blocks = result_dict["code_blocks"]
     assert len(blocks) == 1
     assert blocks[0]["hits"] == 110  # Average of 100 and 120 (integer division)
-    assert blocks[0]["time_s"] == 0.55  # Average of 0.5 and 0.6
+    assert blocks[0]["time_s"] == pytest.approx(0.55, abs=1e-6)  # Average of 0.5 and 0.6
+    # Hardened schema adds stable block_id
+    assert "block_id" in blocks[0]
 
 
 def test_summarize_harness() -> None:
@@ -279,12 +298,10 @@ def test_summarize_harness() -> None:
         "external": 0.3,
     }
 
-    project_like = {"project", "candidate-overlay"}
+    result = _summarize_harness(all_functions, ownership_totals, {"project", "candidate-overlay"}, limit=5)
 
-    result = _summarize_harness(all_functions, ownership_totals, project_like, limit=5)
-
-    assert result["total_time_s"] == 0.8  # 0.5 + 0.3
-    # Share is non-project / total: (0.5 + 0.3) / (1.5 + 0.5 + 0.3) = 0.8 / 2.3 = 0.3478
+    assert result["total_time_s"] == pytest.approx(0.8, abs=1e-4)  # 0.5 + 0.3
+    # Share is non-project / total: (0.5 + 0.3) / (1.5 + 0.5 + 0.3) = 0.8 / 2.3 ≈ 0.3478
     assert round(result["share"], 2) == 0.35
     assert len(result["top_calls"]) <= 5
     assert result["total_external_functions"] == 2
