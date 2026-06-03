@@ -6,7 +6,7 @@ from typing import Any
 from joule.models import AggregateMetrics, SearchPhase
 
 
-FEATURE_SCHEMA_VERSION = 1
+FEATURE_SCHEMA_VERSION = 2
 SURROGATE_DECISION_SCHEMA_VERSION = 2
 METRIC_NAMES = ("energy", "latency", "memory")
 

@@ -13,6 +13,9 @@ class BaseOperator(ABC):
     tier: ClassVar[Tier] = Tier.L
     escape_only: ClassVar[bool] = False
     precheck_node_types: ClassVar[tuple[type[ast.AST], ...]] = ()
+    # Energy-Smells taxonomy categories this operator primarily targets.
+    # Used by OperatorRegistry for smell-overlap scoring (Phase 2).
+    targets_smells: ClassVar[frozenset[str]] = frozenset()
 
     def tier_name(self) -> str:
         return self.tier.value

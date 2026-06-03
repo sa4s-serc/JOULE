@@ -21,6 +21,7 @@ class MultipleAssignmentFusion(BaseOperator):
     name = "MultipleAssignmentFusion"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C1"])
     precheck_node_types = (ast.Assign,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

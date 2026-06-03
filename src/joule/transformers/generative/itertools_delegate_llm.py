@@ -14,6 +14,7 @@ def _itertools_delegate_precheck(node: ast.AST) -> bool:
 class ItertoolsDelegateLLM(LLMTransformationOperator):
     name = "ItertoolsDelegateLLM"
     tier = Tier.M
+    targets_smells = frozenset(["C3", "C10"])
     objective = "Delegate iterative composition to itertools primitives where beneficial."
     precheck_node_types = (ast.For, ast.Call)
     precheck_predicate = _itertools_delegate_precheck

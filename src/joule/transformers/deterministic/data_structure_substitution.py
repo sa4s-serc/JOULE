@@ -11,6 +11,7 @@ class ListToSetMembership(BaseOperator):
     name = "DataStructureSubstitution[list->set]"
     family = "deterministic"
     tier = Tier.H
+    targets_smells = frozenset(["C5"])
     precheck_node_types = (ast.Compare,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:

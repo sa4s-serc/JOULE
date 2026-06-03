@@ -14,6 +14,7 @@ def _concurrent_map_precheck(node: ast.AST) -> bool:
 class ConcurrentMapDelegateLLM(LLMTransformationOperator):
     name = "ConcurrentMapDelegateLLM"
     tier = Tier.M
+    targets_smells = frozenset(["C11"])
     objective = "Parallelize independent map-style workloads where concurrency is beneficial and safe."
     precheck_node_types = (ast.For, ast.ListComp, ast.GeneratorExp)
     precheck_predicate = _concurrent_map_precheck

@@ -70,6 +70,7 @@ class ListPopZeroToDeque(BaseOperator):
     name = "ListPopZeroToDeque"
     family = "deterministic"
     tier = Tier.H
+    targets_smells = frozenset(["C5"])
     precheck_node_types = (ast.While,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

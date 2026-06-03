@@ -16,6 +16,7 @@ def _recursion_to_dp_precheck(node: ast.AST) -> bool:
 class RecursionToDynamicProgramming(LLMTransformationOperator):
     name = "RecursionToDynamicProgramming"
     tier = Tier.H
+    targets_smells = frozenset(["C7", "C8"])
     objective = "Convert expensive recursive algorithms to dynamic-programming formulations."
     precheck_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Call)
     precheck_predicate = _recursion_to_dp_precheck

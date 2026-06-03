@@ -49,6 +49,7 @@ class SortedToInPlaceSort(BaseOperator):
     name = "SortedToInPlaceSort"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C6"])
     precheck_node_types = (ast.Assign,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

@@ -10,6 +10,7 @@ from .llm_base import LLMTransformationOperator, _call_has_generator_chain
 class LazyEvaluationRewriteLLM(LLMTransformationOperator):
     name = "LazyEvaluationRewriteLLM"
     tier = Tier.M
+    targets_smells = frozenset(["C6", "C10"])
     objective = "Rewrite eager processing into lazy evaluation pipeline to reduce memory pressure."
     precheck_node_types = (ast.Call, ast.ListComp)
     precheck_predicate = _call_has_generator_chain

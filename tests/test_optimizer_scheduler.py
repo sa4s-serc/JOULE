@@ -27,6 +27,7 @@ from joule.orchestrator.mfbo import OptimizationOrchestrator, _ParentSnapshot
 from joule.orchestrator.internal.mfbo_flow import OptimizationState
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
 from joule.surrogate import ObjectiveSurrogate, SurrogateMetricTargets, SurrogateObservation, SurrogateQuery, SurrogateScreeningDecision
+from joule.surrogate.types import FEATURE_SCHEMA_VERSION
 from joule.utils.analysis import candidate_source_hash
 from joule.utils.db import JouleDB
 
@@ -407,7 +408,7 @@ def test_surrogate_novelty_rejection_and_warm_start(tmp_path: Path):
         target_key=target_key,
         source_code=source,
         targets=_scalar_targets(2.5).to_record(),
-        feature_schema_version=1,
+        feature_schema_version=FEATURE_SCHEMA_VERSION,
     )
     orchestrator = OptimizationOrchestrator(
         settings=settings,

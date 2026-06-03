@@ -46,6 +46,7 @@ class TupleUnpackInLoop(BaseOperator):
     name = "TupleUnpackInLoop"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C3", "C10"])
     precheck_node_types = (ast.For,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

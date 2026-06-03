@@ -30,6 +30,7 @@ class StringConcatToJoin(BaseOperator):
     name = "StringConcatToJoin"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C10"])
     precheck_node_types = (ast.BinOp,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

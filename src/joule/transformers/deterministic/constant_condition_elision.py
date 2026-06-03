@@ -10,6 +10,7 @@ class ConstantConditionElision(BaseOperator):
     name = "ConstantConditionElision"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C1", "C4"])
     precheck_node_types = (ast.If,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:

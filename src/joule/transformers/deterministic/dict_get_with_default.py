@@ -10,6 +10,7 @@ class DictGetWithDefault(BaseOperator):
     name = "DictGetWithDefault"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C4", "C5"])
     precheck_node_types = (ast.If,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:

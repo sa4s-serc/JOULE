@@ -16,6 +16,7 @@ class ChainedComparisonFusion(BaseOperator):
     name = "ChainedComparisonFusion"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C4"])
     precheck_node_types = (ast.BoolOp,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:

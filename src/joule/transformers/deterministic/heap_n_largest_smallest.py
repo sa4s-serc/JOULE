@@ -44,6 +44,7 @@ class HeapNLargestSmallest(BaseOperator):
     name = "HeapNLargestSmallest"
     family = "deterministic"
     tier = Tier.H
+    targets_smells = frozenset(["C7", "C10"])
     precheck_node_types = (ast.Subscript,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

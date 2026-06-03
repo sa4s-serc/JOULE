@@ -10,6 +10,7 @@ class IdentityCompareNormalization(BaseOperator):
     name = "IdentityCompareNormalization"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C4"])
     precheck_node_types = (ast.Compare,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:

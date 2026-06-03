@@ -10,6 +10,7 @@ from .llm_base import LLMTransformationOperator, _loop_arithmetic_candidate
 class VectorizationDelegate(LLMTransformationOperator):
     name = "VectorizationDelegate[loop->numpy]"
     tier = Tier.H
+    targets_smells = frozenset(["C10", "C12"])
     objective = "Vectorize numeric loops through NumPy-style operations when semantically safe."
     precheck_node_types = (ast.For, ast.While)
     precheck_predicate = _loop_arithmetic_candidate

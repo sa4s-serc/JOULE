@@ -10,6 +10,7 @@ class NotInNormalization(BaseOperator):
     name = "NotInNormalization"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C4"])
     precheck_node_types = (ast.UnaryOp,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:

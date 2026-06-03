@@ -37,6 +37,11 @@ class SourceFeatureExtractor:
                 float(hints.get("ast_shape_delta", 0.0)),
                 float(hints.get("allocation_pattern_delta", 0.0)),
                 float(hints.get("call_density_delta", 0.0)),
+                # Phase 9 operator-identity hints (default 0 when not provided)
+                float(hints.get("operator_index", 0.0)),
+                float(hints.get("operator_tier", 0.0)),
+                float(hints.get("op_success_rate", 0.5)),
+                float(hints.get("op_frontier_rate", 0.0)),
             ],
             dtype=float,
         )
@@ -51,30 +56,84 @@ class SourceFeatureExtractor:
         if cached is not None:
             self._base_cache.move_to_end(source_hash)
             return cached
+
         try:
             tree = ast.parse(source)
             nodes = list(ast.walk(tree))
         except SyntaxError:
             nodes = []
+            tree = ast.Module(body=[], type_ignores=[])
+
         node_count = len(nodes)
-        loop_count = sum(isinstance(node, (ast.For, ast.While, ast.comprehension)) for node in nodes)
-        comp_count = sum(isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)) for node in nodes)
-        call_count = sum(isinstance(node, ast.Call) for node in nodes)
-        branch_count = sum(isinstance(node, (ast.If, ast.Match, ast.IfExp)) for node in nodes)
-        assign_count = sum(isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)) for node in nodes)
-        container_count = sum(isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)) for node in nodes)
-        literal_count = sum(isinstance(node, ast.Constant) for node in nodes)
-        subscript_count = sum(isinstance(node, ast.Subscript) for node in nodes)
-        lambda_count = sum(isinstance(node, ast.Lambda) for node in nodes)
-        function_count = sum(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in nodes)
-        try_count = sum(isinstance(node, ast.Try) for node in nodes)
-        compare_count = sum(isinstance(node, ast.Compare) for node in nodes)
-        return_count = sum(isinstance(node, ast.Return) for node in nodes)
-        annotated_assign_count = sum(isinstance(node, ast.AnnAssign) for node in nodes)
+
+        # ── original 17 features ────────────────────────────────────────────
+        loop_count = sum(isinstance(n, (ast.For, ast.While, ast.comprehension)) for n in nodes)
+        comp_count = sum(isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)) for n in nodes)
+        call_count = sum(isinstance(n, ast.Call) for n in nodes)
+        branch_count = sum(isinstance(n, (ast.If, ast.Match, ast.IfExp)) for n in nodes)
+        assign_count = sum(isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)) for n in nodes)
+        container_count = sum(isinstance(n, (ast.List, ast.Tuple, ast.Set, ast.Dict)) for n in nodes)
+        literal_count = sum(isinstance(n, ast.Constant) for n in nodes)
+        subscript_count = sum(isinstance(n, ast.Subscript) for n in nodes)
+        lambda_count = sum(isinstance(n, ast.Lambda) for n in nodes)
+        function_count = sum(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in nodes)
+        try_count = sum(isinstance(n, ast.Try) for n in nodes)
+        compare_count = sum(isinstance(n, ast.Compare) for n in nodes)
+        return_count = sum(isinstance(n, ast.Return) for n in nodes)
+        annotated_assign_count = sum(isinstance(n, ast.AnnAssign) for n in nodes)
         annotation_density = float(annotated_assign_count) / max(1.0, float(node_count))
         branch_density = float(branch_count) / max(1.0, float(node_count))
+
+        # ── Phase 1 additions: smell-category structural indicators ─────────
+
+        # C3.S4 — nested loop indicator
+        has_nested_loop = int(_has_nested_loop(nodes))
+
+        # C3.S3 / C8.S2 — call inside a loop body (loop-invariant candidate)
+        loop_contains_call = int(_loop_contains_call(nodes))
+
+        # C4.S6 — bare except (exception used as control flow)
+        has_bare_except = int(_has_bare_except(nodes))
+
+        # C1.S2 — augmented assignment count (x += y vs x = x + y)
+        augassign_count = sum(isinstance(n, ast.AugAssign) for n in nodes)
+
+        # C10.S4 — string concatenation inside a loop
+        has_string_concat_loop = int(_has_string_concat_loop(nodes))
+
+        # C8.S1 / C7.S3 — function calls itself (recursive)
+        has_recursive_call = int(_has_recursive_call(nodes))
+
+        # C8.S3 — attribute chain depth (obj.a.b.c style access)
+        max_attr_chain = _max_attribute_chain_depth(nodes)
+
+        # C1.S8 / C2.S2 — import statements in the function body
+        import_count = sum(isinstance(n, (ast.Import, ast.ImportFrom)) for n in nodes)
+
+        # C3.S1 — ratio of comprehensions to total iteration constructs
+        comp_to_loop_ratio = float(comp_count) / max(1.0, float(loop_count + comp_count))
+
+        # C6.S1 — list/dict/set literals created inside loops
+        list_in_loop = int(_container_created_in_loop(nodes))
+
+        # C5.S2 — subscript access on a Name inside a loop
+        dict_subscript_in_loop = int(_subscript_in_loop(nodes))
+
+        # C6.S3 / C10.S3 — yield / generator usage
+        yield_count = sum(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in nodes)
+
+        # C4.S1 — BoolOp operand count (short-circuit candidates)
+        bool_op_count = sum(isinstance(n, ast.BoolOp) for n in nodes)
+
+        # C3.S1 — manual range(len(x)) pattern
+        has_range_len_loop = int(_has_range_len_loop(nodes))
+
+        # C6.S6 — open() call not inside a with block
+        has_bare_open = int(_has_bare_open(nodes))
+
         base = np.array(
             [
+                # original 17
                 float(len(source)),
                 float(node_count),
                 float(loop_count),
@@ -92,6 +151,22 @@ class SourceFeatureExtractor:
                 float(return_count),
                 annotation_density,
                 branch_density,
+                # Phase 1 additions: 16 new smell-category indicators
+                float(has_nested_loop),
+                float(loop_contains_call),
+                float(has_bare_except),
+                float(augassign_count),
+                float(has_string_concat_loop),
+                float(has_recursive_call),
+                float(max_attr_chain),
+                float(import_count),
+                comp_to_loop_ratio,
+                float(list_in_loop),
+                float(dict_subscript_in_loop),
+                float(yield_count),
+                float(bool_op_count),
+                float(has_range_len_loop),
+                float(has_bare_open),
             ],
             dtype=float,
         )
@@ -100,3 +175,129 @@ class SourceFeatureExtractor:
         while len(self._base_cache) > self._cache_size:
             self._base_cache.popitem(last=False)
         return base
+
+
+# ── helpers ────────────────────────────────────────────────────────────────
+
+def _has_nested_loop(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, (ast.For, ast.While)):
+            for child in ast.walk(node):
+                if child is node:
+                    continue
+                if isinstance(child, (ast.For, ast.While)):
+                    return True
+    return False
+
+
+def _loop_contains_call(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, (ast.For, ast.While)):
+            for child in ast.walk(node):
+                if child is node:
+                    continue
+                if isinstance(child, ast.Call):
+                    return True
+    return False
+
+
+def _has_bare_except(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, ast.Try):
+            for handler in node.handlers:
+                if handler.type is None:
+                    return True
+    return False
+
+
+def _has_string_concat_loop(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, (ast.For, ast.While)):
+            for child in ast.walk(node):
+                if isinstance(child, ast.AugAssign) and isinstance(child.op, ast.Add):
+                    return True
+    return False
+
+
+def _has_recursive_call(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(node):
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Name)
+                    and child.func.id == node.name
+                ):
+                    return True
+    return False
+
+
+def _max_attribute_chain_depth(nodes: list[ast.AST]) -> int:
+    max_depth = 0
+    for node in nodes:
+        if isinstance(node, ast.Attribute):
+            depth = 1
+            inner = node.value
+            while isinstance(inner, ast.Attribute):
+                depth += 1
+                inner = inner.value
+            max_depth = max(max_depth, depth)
+    return max_depth
+
+
+def _container_created_in_loop(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, (ast.For, ast.While)):
+            for child in ast.walk(node):
+                if child is node:
+                    continue
+                if isinstance(child, (ast.List, ast.Dict, ast.Set)):
+                    return True
+    return False
+
+
+def _subscript_in_loop(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, (ast.For, ast.While)):
+            for child in ast.walk(node):
+                if child is node:
+                    continue
+                if isinstance(child, ast.Subscript) and isinstance(child.value, ast.Name):
+                    return True
+    return False
+
+
+def _has_range_len_loop(nodes: list[ast.AST]) -> bool:
+    for node in nodes:
+        if isinstance(node, ast.For):
+            # for i in range(len(x))
+            if (
+                isinstance(node.iter, ast.Call)
+                and isinstance(node.iter.func, ast.Name)
+                and node.iter.func.id == "range"
+                and node.iter.args
+                and isinstance(node.iter.args[0], ast.Call)
+                and isinstance(node.iter.args[0].func, ast.Name)
+                and node.iter.args[0].func.id == "len"
+            ):
+                return True
+    return False
+
+
+def _has_bare_open(nodes: list[ast.AST]) -> bool:
+    """True when open() is called outside a `with` statement."""
+    with_bodies: set[int] = set()
+    for node in nodes:
+        if isinstance(node, ast.With):
+            for child in ast.walk(node):
+                with_bodies.add(id(child))
+    for node in nodes:
+        if id(node) in with_bodies:
+            continue
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "open"
+        ):
+            return True
+    return False

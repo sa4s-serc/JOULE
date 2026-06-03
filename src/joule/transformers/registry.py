@@ -9,9 +9,12 @@ from joule.models import SearchContext, SearchPhase, TargetSpec, TransformationR
 from joule.transformers.base import BaseOperator
 from joule.transformers.deterministic import default_deterministic_operators
 from joule.transformers.generative import default_llm_operators, escape_llm_operators
+from joule.transformers import smell_tagger
 
 
 LOGGER = logging.getLogger(__name__)
+
+# ── Phase 2/3 scoring constants ────────────────────────────────────────────
 
 # Contextual scoring weights for operator selection.
 # These balance exploration (UCB) with operator-specific performance signals.
@@ -21,6 +24,38 @@ _SCORE_PHASE_FIT = 0.20        # reward for operators that succeed in the curren
 _SCORE_DUPLICATE_PENALTY = 0.35        # penalty for operators that produce duplicate sources
 _SCORE_CORRECTNESS_PENALTY = 0.40      # penalty for operators that produce incorrect candidates
 _SCORE_PRECHECK_PENALTY = 0.20         # penalty for operators that fail precheck
+
+# Phase 2 — taxonomy-aware operator routing
+# Bonus applied when operator's targets_smells overlaps with detected smells.
+_SCORE_SMELL_OVERLAP_BONUS = 0.30
+
+# Phase 3 — empirically-derived ROI weights per smell category.
+# Normalised so median (C3/C10) = 1.0. Source: Energy-Smells taxonomy paper.
+_SMELL_ROI_WEIGHT: dict[str, float] = {
+    "C6":  1.40,   # Memory — highest energy savings per fix
+    "C9":  1.30,   # I/O access
+    "C11": 1.20,   # Concurrency
+    "C8":  1.15,   # Missing reuse
+    "C7":  1.10,   # Algorithmic
+    "C12": 1.05,   # Hardware locality
+    "C5":  1.00,   # Data structures (median baseline)
+    "C3":  1.00,   # Iteration (median baseline)
+    "C10": 0.95,   # Language primitives
+    "C2":  0.85,   # Call overhead
+    "C1":  0.80,   # Redundant computation (common, lower individual ROI)
+    "C4":  0.75,   # Control flow (most common, lowest individual ROI)
+}
+
+# Phase 4 — tier-phase coupling bonus.
+# Key: (tier_value, phase_value)  — applied on top of UCB score.
+_TIER_PHASE_BONUS: dict[tuple[str, str], float] = {
+    ("L", "exploration"):   0.40,  # prefer cheap syntactic rewrites first
+    ("L", "exploitation"):  0.10,
+    ("M", "exploitation"):  0.35,  # semantic rewrites shine in exploitation
+    ("M", "exploration"):   0.05,
+    ("H", "exploitation"):  0.20,
+    ("H", "confirmation"):  0.30,  # algorithmic changes earn their place late
+}
 
 
 class OperatorRegistry:
@@ -63,7 +98,13 @@ class OperatorRegistry:
             return False
         return True
 
-    def ranked(self, *, phase: SearchPhase | None = None, parent_generation: int = 0) -> list[BaseOperator]:
+    def ranked(
+        self,
+        *,
+        phase: SearchPhase | None = None,
+        parent_generation: int = 0,
+        smell_tags: frozenset[str] = frozenset(),
+    ) -> list[BaseOperator]:
         total_attempts = sum(max(1.0, stat["attempts"]) for stat in self.stats.values())
         return sorted(
             self.operators,
@@ -72,6 +113,9 @@ class OperatorRegistry:
                 total_attempts,
                 phase=phase,
                 parent_generation=parent_generation,
+                smell_tags=smell_tags,
+                operator_targets=operator.targets_smells,
+                operator_tier=operator.tier.value,
             ),
             reverse=True,
         )
@@ -79,8 +123,19 @@ class OperatorRegistry:
     def select_operator(self, *, phase: SearchPhase, parent_generation: int) -> BaseOperator:
         return self.ranked(phase=phase, parent_generation=parent_generation)[0]
 
-    def select_operators(self, *, phase: SearchPhase, parent_generation: int, top_k: int = 1) -> list[BaseOperator]:
-        return self.ranked(phase=phase, parent_generation=parent_generation)[:top_k]
+    def select_operators(
+        self,
+        *,
+        phase: SearchPhase,
+        parent_generation: int,
+        top_k: int = 1,
+        smell_tags: frozenset[str] = frozenset(),
+    ) -> list[BaseOperator]:
+        return self.ranked(
+            phase=phase,
+            parent_generation=parent_generation,
+            smell_tags=smell_tags,
+        )[:top_k]
 
     def select_operator_for_candidate(
         self,
@@ -104,7 +159,13 @@ class OperatorRegistry:
         parent_generation: int,
         top_k: int = 1,
     ) -> list[BaseOperator]:
-        ranked = self.ranked(phase=phase, parent_generation=parent_generation)
+        # Phase 2: compute smell tags from the target source once and pass down
+        tags = smell_tagger.tag_source(target.source)
+        ranked = self.ranked(
+            phase=phase,
+            parent_generation=parent_generation,
+            smell_tags=tags,
+        )
         valid = self._precheck_ranked(ranked, target=target, context=context)
         return valid[:top_k]
 
@@ -119,6 +180,9 @@ class OperatorRegistry:
                 total_attempts,
                 phase=phase,
                 parent_generation=parent_generation,
+                smell_tags=frozenset(),
+                operator_targets=operator.targets_smells,
+                operator_tier=operator.tier.value,
             ),
             reverse=True,
         )[0]
@@ -207,6 +271,9 @@ class OperatorRegistry:
         *,
         phase: SearchPhase | None,
         parent_generation: int,
+        smell_tags: frozenset[str] = frozenset(),
+        operator_targets: frozenset[str] = frozenset(),
+        operator_tier: str = "L",
     ) -> float:
         stat = self.stats[name]
         attempts = max(1.0, float(stat["attempts"]))
@@ -223,7 +290,8 @@ class OperatorRegistry:
             phase_attempts = float(stat.get("phase_attempts", {}).get(phase.value, 0.0))
             phase_successes = float(stat.get("phase_successes", {}).get(phase.value, 0.0))
             phase_fit = phase_successes / phase_attempts if phase_attempts > 0 else 0.0
-        return (
+
+        base_score = (
             self._ucb(name, total_attempts)
             + (_SCORE_FRONTIER_BONUS * frontier_rate)
             + (_SCORE_DEPTH_FIT * depth_fit)
@@ -232,6 +300,23 @@ class OperatorRegistry:
             - (_SCORE_CORRECTNESS_PENALTY * correctness_failure_rate)
             - (_SCORE_PRECHECK_PENALTY * precheck_failure_rate)
         )
+
+        # Phase 2 — smell-overlap bonus
+        if smell_tags and operator_targets:
+            overlap = len(operator_targets & smell_tags) / max(1, len(smell_tags))
+            base_score += _SCORE_SMELL_OVERLAP_BONUS * overlap
+
+        # Phase 3 — ROI multiplier from taxonomy paper
+        if operator_targets:
+            roi = sum(_SMELL_ROI_WEIGHT.get(s, 1.0) for s in operator_targets) / len(operator_targets)
+            base_score *= roi
+
+        # Phase 4 — tier-phase coupling bonus
+        if phase is not None:
+            tier_phase_key = (operator_tier, phase.value)
+            base_score += _TIER_PHASE_BONUS.get(tier_phase_key, 0.0)
+
+        return base_score
 
     def _empty_stat(self) -> dict[str, Any]:
         return {

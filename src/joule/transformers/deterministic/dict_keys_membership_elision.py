@@ -10,6 +10,7 @@ class DictKeysMembershipElision(BaseOperator):
     name = "DictKeysMembershipElision"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C5"])
     precheck_node_types = (ast.Compare,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

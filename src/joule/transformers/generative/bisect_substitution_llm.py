@@ -14,6 +14,7 @@ def _bisect_substitution_precheck(node: ast.AST) -> bool:
 class BisectSubstitutionLLM(LLMTransformationOperator):
     name = "BisectSubstitutionLLM"
     tier = Tier.M
+    targets_smells = frozenset(["C7", "C10"])
     objective = "Replace linear sorted-list searches with bisect-based indexing."
     precheck_node_types = (ast.Call, ast.For, ast.While)
     precheck_predicate = _bisect_substitution_precheck

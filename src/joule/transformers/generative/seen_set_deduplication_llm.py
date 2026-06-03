@@ -10,6 +10,7 @@ from .llm_base import LLMTransformationOperator, _seen_set_dedup_pattern
 class SeenSetDeduplicationLLM(LLMTransformationOperator):
     name = "SeenSetDeduplicationLLM"
     tier = Tier.H
+    targets_smells = frozenset(["C3", "C5"])
     objective = "Introduce seen-set based deduplication for repeated append patterns."
     precheck_node_types = (ast.If,)
     precheck_predicate = _seen_set_dedup_pattern

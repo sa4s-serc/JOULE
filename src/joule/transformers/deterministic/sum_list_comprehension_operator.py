@@ -8,3 +8,4 @@ from .reduction_list_comp_to_generator import ReductionListCompToGenerator
 class SumListComprehensionOperator(ReductionListCompToGenerator):
     name = "sum_generator"
     tier = Tier.L
+    targets_smells = frozenset(["C6", "C10"])

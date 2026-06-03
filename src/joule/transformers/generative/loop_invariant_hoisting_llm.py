@@ -14,6 +14,7 @@ def _loop_invariant_precheck(node: ast.AST) -> bool:
 class LoopInvariantHoistingLLM(LLMTransformationOperator):
     name = "LoopInvariantHoistingLLM"
     tier = Tier.M
+    targets_smells = frozenset(["C3", "C8"])
     objective = "Hoist loop-invariant computations out of hot loops."
     precheck_node_types = (ast.For, ast.While)
     precheck_predicate = _loop_invariant_precheck

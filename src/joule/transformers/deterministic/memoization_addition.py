@@ -63,6 +63,7 @@ class MemoizationAddition(BaseOperator):
     name = "MemoizationAddition"
     family = "deterministic"
     tier = Tier.H
+    targets_smells = frozenset(["C8"])
     precheck_node_types = (ast.FunctionDef,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

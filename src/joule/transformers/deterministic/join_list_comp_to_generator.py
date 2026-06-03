@@ -10,6 +10,7 @@ class JoinListCompToGenerator(BaseOperator):
     name = "JoinListCompToGenerator"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C6", "C10"])
     precheck_node_types = (ast.Call,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:

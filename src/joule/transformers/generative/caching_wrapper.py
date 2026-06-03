@@ -16,6 +16,7 @@ def _caching_wrapper_precheck(node: ast.AST) -> bool:
 class CachingWrapper(LLMTransformationOperator):
     name = "CachingWrapper"
     tier = Tier.M
+    targets_smells = frozenset(["C8"])
     objective = "Wrap repeated deterministic computations in bounded caching strategy."
     precheck_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Call)
     precheck_predicate = _caching_wrapper_precheck

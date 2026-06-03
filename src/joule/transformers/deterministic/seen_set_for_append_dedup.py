@@ -61,6 +61,7 @@ class SeenSetForAppendDedup(BaseOperator):
     name = "SeenSetForAppendDedup"
     family = "deterministic"
     tier = Tier.H
+    targets_smells = frozenset(["C3", "C5"])
     precheck_node_types = (ast.If,)
 
     def _precheck_node(self, node: ast.AST) -> bool:

@@ -10,6 +10,7 @@ from .llm_base import LLMTransformationOperator, _try_except_fast_path_candidate
 class TryExceptFastPathLLM(LLMTransformationOperator):
     name = "TryExceptFastPathLLM"
     tier = Tier.M
+    targets_smells = frozenset(["C4"])
     objective = "Restructure exception-heavy paths to keep common-case execution fast."
     precheck_node_types = (ast.Try,)
     precheck_predicate = _try_except_fast_path_candidate

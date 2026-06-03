@@ -10,6 +10,7 @@ class ConcatListLiteralFusion(BaseOperator):
     name = "ConcatListLiteralFusion"
     family = "deterministic"
     tier = Tier.L
+    targets_smells = frozenset(["C1", "C6"])
     precheck_node_types = (ast.BinOp,)
 
     def generate(self, target: TargetSpec, context=None) -> list[TransformationResult]:
