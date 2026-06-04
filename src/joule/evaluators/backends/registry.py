@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from joule.config import JouleSettings
 from joule.evaluators.backends.base import EnergyBackend
+from joule.evaluators.backends.energibridge import EnergiBridgeBackend
 from joule.evaluators.backends.mock import MockEnergyBackend
 from joule.evaluators.backends.rapl import RaplEnergyBackend
 
@@ -20,6 +21,7 @@ class BackendRegistry:
         self._factories: dict[str, BackendFactory] = {
             "mock": self._mock_factory,
             "rapl": self._rapl_factory,
+            "energibridge": self._energibridge_factory,
         }
         self._discover_entry_points()
 
@@ -53,6 +55,13 @@ class BackendRegistry:
         rapl_options = settings.backends.options.get("rapl", {}) if settings.backends.options else {}
         rapl_path = rapl_options.get("path")
         return RaplEnergyBackend(rapl_path=Path(rapl_path) if isinstance(rapl_path, str) else None)
+
+    def _energibridge_factory(self, settings: JouleSettings) -> EnergyBackend:
+        opts = settings.backends.options.get("energibridge", {}) if settings.backends.options else {}
+        binary_path: str | None = opts.get("binary_path")
+        results_dir_raw: str | None = opts.get("results_dir")
+        results_dir = Path(results_dir_raw) if isinstance(results_dir_raw, str) else None
+        return EnergiBridgeBackend(binary_path=binary_path, results_dir=results_dir)
 
     def _discover_entry_points(self) -> None:
         discovered = entry_points()
