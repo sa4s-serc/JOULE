@@ -30,7 +30,13 @@ class StaticProfiler:
                 lines = getattr(node, "end_lineno", node.lineno) - node.lineno + 1
                 loops = sum(isinstance(inner, (ast.For, ast.While, ast.comprehension)) for inner in ast.walk(node))
                 calls = sum(isinstance(inner, ast.Call) for inner in ast.walk(node))
-                score = (lines * 0.5) + (loops * 3.0) + calls
+                loop_density = loops / max(lines, 1)
+                nesting = _max_nesting_depth(node)
+                size_score = lines * 0.3
+                loop_score = loop_density * 20.0 + loops * 2.0
+                call_score = calls * 0.8
+                nest_score = nesting * 2.0
+                score = size_score + loop_score + call_score + nest_score
                 segment = dedent(ast.get_source_segment(source, node) or "")
                 pure, reasons = analyze_purity(segment)
                 if not pure:
@@ -62,6 +68,11 @@ class StaticProfiler:
                             f"{lines} lines",
                             f"{loops} loops/comprehensions",
                             f"{calls} calls",
+                            f"nesting={nesting}",
+                            f"size_score={size_score:.2f}",
+                            f"loop_score={loop_score:.2f}",
+                            f"call_score={call_score:.2f}",
+                            f"nest_score={nest_score:.2f}",
                             "async target" if isinstance(node, ast.AsyncFunctionDef) else "sync target",
                             *reasons,
                         ],
@@ -81,6 +92,24 @@ def _module_name(project_root: Path, file_path: Path) -> str:
     else:
         relative = Path(file_path.stem)
     return ".".join(relative.parts)
+
+
+def _max_nesting_depth(node: ast.AST) -> int:
+    """Return the maximum nesting depth of control-flow constructs inside node.
+
+    Counts ancestor nodes that are ast.If, ast.For, ast.While, ast.With, or
+    ast.Try when walking the subtree via a recursive DFS.
+    """
+    _nesting_types = (ast.If, ast.For, ast.While, ast.With, ast.Try)
+
+    def _dfs(current: ast.AST, depth: int) -> int:
+        max_depth = depth
+        for child in ast.iter_child_nodes(current):
+            child_depth = depth + 1 if isinstance(child, _nesting_types) else depth
+            max_depth = max(max_depth, _dfs(child, child_depth))
+        return max_depth
+
+    return _dfs(node, 0)
 
 
 def _iter_supported_nodes(tree: ast.Module) -> list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, list[str]]]:

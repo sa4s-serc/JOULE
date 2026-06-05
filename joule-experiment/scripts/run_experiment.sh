@@ -64,16 +64,38 @@ run_phase_3() {
     done
 }
 
+run_phase_35() {
+    log_info "=== Running Phase 3.5: Workload Pre-flight ==="
+    for repo in ${REPOS}; do
+        log_info "Pre-flight workload check for ${repo}..."
+        if ! python3 "${SCRIPT_DIR}/03b_preflight_workloads.py" \
+                --repo "${repo}" \
+                --min-workloads "${MIN_WORKLOADS_PREFLIGHT}" \
+                --min-alignment "${MIN_ALIGNMENT_PREFLIGHT}" \
+                --workload-limit "${WORKLOAD_DISCOVERY_LIMIT}"; then
+            log_error "Phase 3.5 failed for ${repo}"
+            exit 1
+        fi
+    done
+}
+
 run_phase_4() {
     log_info "=== Running Phase 4: Hotspot Baseline ==="
     for repo in ${REPOS}; do
+        # Use preflight CSV if available; fall back to raw sample CSV
+        preflight_file="${RESULTS_DIR}/hotspots/${repo}_preflight.csv"
         sample_file="${RESULTS_DIR}/hotspots/${repo}_sample_targets.csv"
-        if [ ! -f "${sample_file}" ]; then
-            log_error "Sample file not found for ${repo}: ${sample_file}"
-            log_error "Run Phase 3 first."
+        if [ -f "${preflight_file}" ]; then
+            input_file="${preflight_file}"
+        elif [ -f "${sample_file}" ]; then
+            log_warn "Preflight CSV not found for ${repo}; using raw sample targets (run Phase 3.5 for better results)"
+            input_file="${sample_file}"
+        else
+            log_error "No sample file found for ${repo}: ${preflight_file}"
+            log_error "Run Phase 3 and Phase 3.5 first."
             exit 1
         fi
-        bash "${SCRIPT_DIR}/04_hotspot_baseline.sh" "${repo}" "${sample_file}"
+        bash "${SCRIPT_DIR}/04_hotspot_baseline.sh" "${repo}" "${input_file}"
     done
 }
 
@@ -128,23 +150,42 @@ run_phase_9() {
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
-ALL_PHASES=(1 2 3 4 5 6 7 8 9)
+# ALL_PHASES uses strings to accommodate phase 3.5
+ALL_PHASES=(1 2 3 3.5 4 5 6 7 8 9)
+
+_phase_fn() {
+    # Convert "3.5" → "run_phase_35"; integers pass through as-is
+    local p="${1//./_}"
+    # Remove trailing underscore for integers (3 → run_phase_3, not run_phase_3_)
+    echo "run_phase_${p//_0/}"
+}
+
+# Numeric comparison helper — bash can't compare floats natively
+_phase_ge() {
+    # Returns 0 (true) if phase $1 >= phase $2 using awk for float comparison
+    awk -v a="$1" -v b="$2" 'BEGIN { exit !(a >= b) }'
+}
 
 run_from() {
     local from="$1"
     for phase in "${ALL_PHASES[@]}"; do
-        if [ "${phase}" -ge "${from}" ]; then
-            "run_phase_${phase}"
+        if _phase_ge "${phase}" "${from}"; then
+            local fn
+            fn="$(_phase_fn "${phase}")"
+            if declare -f "${fn}" > /dev/null 2>&1; then
+                "${fn}"
+            fi
         fi
     done
 }
 
 if [ -n "${SINGLE_PHASE}" ]; then
-    if ! declare -f "run_phase_${SINGLE_PHASE}" > /dev/null 2>&1; then
-        log_error "Invalid phase: ${SINGLE_PHASE}. Valid: 1–9"
+    fn="$(_phase_fn "${SINGLE_PHASE}")"
+    if ! declare -f "${fn}" > /dev/null 2>&1; then
+        log_error "Invalid phase: ${SINGLE_PHASE}. Valid: 1, 2, 3, 3.5, 4–9"
         exit 1
     fi
-    "run_phase_${SINGLE_PHASE}"
+    "${fn}"
 else
     run_from "${START_PHASE}"
 fi

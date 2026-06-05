@@ -34,7 +34,9 @@ if [ -f "${output_file}" ]; then
 fi
 
 log_info "Running JOULE discover on ${REPO}..."
-if "${JOULE_BIN}" discover "${repo_path}" --output json > "${output_file}" 2>&1; then
+if "${JOULE_BIN}" discover "${repo_path}" \
+    --limit "${DISCOVERY_LIMIT:-150}" \
+    --output json > "${output_file}" 2>&1; then
     count=$(python3 -c "import json; print(len(json.load(open('${output_file}'))))" 2>/dev/null || echo "?")
     log_info "Discovery complete for ${REPO}: ${count} candidate functions"
     log_info "Output: ${output_file}"
