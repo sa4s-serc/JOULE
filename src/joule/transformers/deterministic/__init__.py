@@ -15,6 +15,7 @@ from .empty_literal import EmptyLiteralOperator
 from .enumerate_substitution import EnumerateSubstitution
 from .for_loop_to_comprehension import ForLoopToComprehension
 from .fstring_conversion import FStringConversion
+from .functools_cache_injection import FunctoolsCacheInjection
 from .generator_to_yield_from import GeneratorToYieldFrom
 from .heap_n_largest_smallest import HeapNLargestSmallest
 from .identity_compare_normalization import IdentityCompareNormalization
@@ -24,6 +25,7 @@ from .list_pop_zero_to_deque import ListPopZeroToDeque
 from .local_import_hoisting import LocalImportHoisting
 from .loop_global_to_local_hoisting import LoopGlobalToLocalHoisting
 from .loop_membership_set_cache import LoopMembershipSetCache
+from .map_filter_fusion import MapFilterFusion
 from .memoization_addition import MemoizationAddition
 from .multiple_assignment_fusion import MultipleAssignmentFusion
 from .multiple_or_to_set_membership import MultipleOrToSetMembership
@@ -50,6 +52,7 @@ __all__ = [
     "EnumerateSubstitution",
     "FStringConversion",
     "ForLoopToComprehension",
+    "FunctoolsCacheInjection",
     "GeneratorToYieldFrom",
     "HeapNLargestSmallest",
     "IdentityCompareNormalization",
@@ -60,6 +63,7 @@ __all__ = [
     "LocalImportHoisting",
     "LoopGlobalToLocalHoisting",
     "LoopMembershipSetCache",
+    "MapFilterFusion",
     "MemoizationAddition",
     "MultipleAssignmentFusion",
     "MultipleOrToSetMembership",
@@ -77,7 +81,9 @@ __all__ = [
 
 def default_deterministic_operators() -> list[BaseOperator]:
     return [
+        # Tier L — syntactic rewrites (fast, high-confidence)
         ForLoopToComprehension(),
+        MapFilterFusion(),
         IteratorSubstitution(),
         ReductionListCompToGenerator(),
         DictKeysMembershipElision(),
@@ -101,13 +107,16 @@ def default_deterministic_operators() -> list[BaseOperator]:
         NotInNormalization(),
         ConcatListLiteralFusion(),
         ListToSetMembership(),
+        EmptyLiteralOperator(),
+        SumListComprehensionOperator(),
+        ContainerMembershipOperator(),
+        # Tier M — semantic rewrites
+        FunctoolsCacheInjection(),
         LoopMembershipSetCache(),
         SeenSetForAppendDedup(),
-        MemoizationAddition(),
         DefaultDictSubstitution(),
         CounterSubstitution(),
         HeapNLargestSmallest(),
-        ContainerMembershipOperator(),
-        SumListComprehensionOperator(),
-        EmptyLiteralOperator(),
+        # Tier H — algorithmic rewrites
+        MemoizationAddition(),
     ]

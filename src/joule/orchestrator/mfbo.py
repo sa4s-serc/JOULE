@@ -222,6 +222,11 @@ class OptimizationOrchestrator:
             parent = parent_snapshots[parent_id]
             parent_context = build_parent_context(parent, phase=phase, analysis=analysis)
             candidate_target = self._target_with_source(target, parent.source, parent_id=parent_id)
+            # Inject smell tags into context so LLM operators can use them for targeted hints.
+            from joule.transformers import smell_tagger as _smell_tagger
+            _smell_tags = _smell_tagger.tag_source(parent.source)
+            if _smell_tags:
+                parent_context.search_metadata["smell_tags"] = sorted(_smell_tags)
             operator = None
             if state.no_frontier_gain >= self.settings.search_convergence_patience:
                 select_escape = getattr(self.registry, "select_escape_operator_for_candidate", None)

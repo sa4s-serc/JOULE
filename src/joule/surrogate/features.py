@@ -131,6 +131,33 @@ class SourceFeatureExtractor:
         # C6.S6 — open() call not inside a with block
         has_bare_open = int(_has_bare_open(nodes))
 
+        # ── Phase 2 additions: 6 new structural/complexity features ───────────────
+
+        # Cyclomatic-complexity proxy: branches + loops + exceptions + bool-ops
+        cyclomatic_complexity = branch_count + loop_count + try_count + bool_op_count
+
+        # Loop-internal AugAssign reductions (x += y, x *= y inside a loop body)
+        loop_reduction_count = _loop_augassign_count(nodes)
+
+        # Pure-function heuristic: no global/nonlocal, no I/O, no mutable defaults
+        is_pure_function = int(_is_pure_function(nodes))
+
+        # Name-reuse ratio: Load-ctx Names / max(1, Store-ctx Names + args)
+        load_names = sum(isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) for n in nodes)
+        store_names = sum(isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) for n in nodes)
+        arg_names = sum(isinstance(n, ast.arg) for n in nodes)
+        name_reuse_ratio = float(load_names) / max(1.0, float(store_names + arg_names))
+
+        # Dict/list subscript access density
+        subscript_density = float(subscript_count) / max(1.0, float(node_count))
+
+        # Decorator presence (any decorator on any function/class)
+        has_decorator = int(any(
+            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and n.decorator_list
+            for n in nodes
+        ))
+
         base = np.array(
             [
                 # original 17
@@ -167,6 +194,13 @@ class SourceFeatureExtractor:
                 float(bool_op_count),
                 float(has_range_len_loop),
                 float(has_bare_open),
+                # Phase 2 additions: 6 new complexity/purity features
+                float(cyclomatic_complexity),
+                float(loop_reduction_count),
+                float(is_pure_function),
+                name_reuse_ratio,
+                subscript_density,
+                float(has_decorator),
             ],
             dtype=float,
         )
@@ -301,3 +335,35 @@ def _has_bare_open(nodes: list[ast.AST]) -> bool:
         ):
             return True
     return False
+
+
+# ── Phase 2 helpers ────────────────────────────────────────────────────────
+
+def _loop_augassign_count(nodes: list[ast.AST]) -> int:
+    """Count AugAssign nodes that appear inside a loop body (not just anywhere)."""
+    count = 0
+    for node in nodes:
+        if isinstance(node, (ast.For, ast.While)):
+            for child in ast.walk(node):
+                if child is node:
+                    continue
+                if isinstance(child, ast.AugAssign) and isinstance(child.op, (ast.Add, ast.Mult, ast.BitOr, ast.BitAnd)):
+                    count += 1
+    return count
+
+
+def _is_pure_function(nodes: list[ast.AST]) -> bool:
+    """Heuristic: True when no global/nonlocal, no I/O calls, no mutable default args."""
+    _io_names = {"open", "print", "input", "write", "read"}
+    for node in nodes:
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            return False
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in _io_names:
+                return False
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for default in node.args.defaults + node.args.kw_defaults:
+                if default is not None and isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                    return False
+    return True
+

@@ -368,17 +368,19 @@ def test_checkpoint_restore_recovers_pareto_expansion_counts(tmp_path: Path):
 
 
 def test_pareto_parent_sampling_can_prefer_deeper_points():
-    baseline_metrics = AggregateMetrics("all", 1, 1.0, 10.0, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0)
-    deeper_metrics = AggregateMetrics("all", 1, 1.0, 11.0, 11.0, 10.0, 9.0, 0.0, 0.0, 0.0, 0.0)
+    # Use identical weighted scores so depth_bias is the only tiebreaker.
+    # Under the UCB selection, prefer_deeper=False biases toward shallower
+    # candidates and prefer_deeper=True biases toward deeper ones.
+    identical_metrics = AggregateMetrics("all", 1, 1.0, 10.0, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0)
 
     shallow_first = ParetoFront(weights=(0.5, 0.3, 0.2))
-    shallow_first.add(ParetoPoint(candidate_id="baseline", metrics=baseline_metrics, generation_depth=0))
-    shallow_first.add(ParetoPoint(candidate_id="deep", metrics=deeper_metrics, generation_depth=2))
+    shallow_first.add(ParetoPoint(candidate_id="baseline", metrics=identical_metrics, generation_depth=0))
+    shallow_first.add(ParetoPoint(candidate_id="deep", metrics=identical_metrics, generation_depth=2))
     assert shallow_first.sample_active_parent(max_generation=4, prefer_deeper=False) == "baseline"
 
     deep_first = ParetoFront(weights=(0.5, 0.3, 0.2))
-    deep_first.add(ParetoPoint(candidate_id="baseline", metrics=baseline_metrics, generation_depth=0))
-    deep_first.add(ParetoPoint(candidate_id="deep", metrics=deeper_metrics, generation_depth=2))
+    deep_first.add(ParetoPoint(candidate_id="baseline", metrics=identical_metrics, generation_depth=0))
+    deep_first.add(ParetoPoint(candidate_id="deep", metrics=identical_metrics, generation_depth=2))
     assert deep_first.sample_active_parent(max_generation=4, prefer_deeper=True) == "deep"
 
 

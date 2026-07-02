@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,10 +19,15 @@ class ParetoPoint:
 
 
 class ParetoFront:
+    # Beta for the UCB parent selection formula.
+    # Higher values favour exploration (expanding less-visited frontier points).
+    UCB_BETA: float = 1.0
+
     def __init__(self, *, weights: tuple[float, float, float] = (0.5, 0.3, 0.2)) -> None:
         self._points: list[ParetoPoint] = []
         self._weights = weights
         self._expansions: dict[str, int] = {}
+        self._total_expansions: int = 0
 
     def add(self, point: ParetoPoint) -> dict[str, Any]:
         dominated_ids = [item.candidate_id for item in self._points if _dominates(point.metrics, item.metrics)]
@@ -76,19 +82,27 @@ class ParetoFront:
         choices = [item for item in self._points if item.active and item.generation_depth < max_generation]
         if not choices:
             return None
-        selected = min(
-            choices,
-            key=lambda item: (
-                self._expansions.get(item.candidate_id, 0),
-                -item.generation_depth if prefer_deeper else item.generation_depth,
-                self.weighted_score(item.metrics),
-                item.candidate_id,
-            ),
-        )
+
+        total = max(1, self._total_expansions)
+
+        def _ucb_key(item: ParetoPoint) -> float:
+            expansion_count = self._expansions.get(item.candidate_id, 0)
+            # Exploitation: weighted objective score (lower is better, negate for sort)
+            exploit = -self.weighted_score(item.metrics)
+            # Exploration: UCB bonus — large when expansion_count is low
+            explore = self.UCB_BETA * math.sqrt(math.log(total + 1) / (expansion_count + 1))
+            # Depth bias: positive when prefer_deeper=True, negative when prefer_deeper=False.
+            # Magnitude is intentionally small so UCB score remains the primary driver.
+            depth_bias = (item.generation_depth * 0.001) if prefer_deeper else -(item.generation_depth * 0.001)
+            return exploit + explore + depth_bias
+
+        selected = max(choices, key=_ucb_key)
         return selected.candidate_id
+
 
     def record_expansion(self, candidate_id: str) -> None:
         self._expansions[candidate_id] = self._expansions.get(candidate_id, 0) + 1
+        self._total_expansions += 1
 
     def mark_exhausted(self, candidate_id: str) -> None:
         for item in self._points:

@@ -89,6 +89,9 @@ class OperatorRegistry:
         for operator in [*self.operators, *self.escape_operators]:
             self.stats.setdefault(operator.name, self._empty_stat())
 
+        # Track last target key to reset precheck failure counts on target change.
+        self._last_target_key: str | None = None
+
     def _is_allowed(self, name: str) -> bool:
         if self.kill_switches.get(name, False):
             return False
@@ -161,6 +164,12 @@ class OperatorRegistry:
     ) -> list[BaseOperator]:
         # Phase 2: compute smell tags from the target source once and pass down
         tags = smell_tagger.tag_source(target.source)
+        # Reset precheck failure penalties when the target changes.
+        target_key = f"{target.module}:{target.qualname}"
+        if target_key != self._last_target_key:
+            self._last_target_key = target_key
+            for stat in self.stats.values():
+                stat["precheck_failures"] = 0.0
         ranked = self.ranked(
             phase=phase,
             parent_generation=parent_generation,
@@ -222,6 +231,12 @@ class OperatorRegistry:
         stat["duplicates"] += 1 if duplicate else 0
         stat["correctness_failures"] += 1 if correctness_failure else 0
         stat["frontier_contributions"] += 1 if frontier_contribution else 0
+        # EMA success rate: decays old history, upweights recent outcomes (alpha=0.1)
+        _ema_alpha = 0.10
+        stat["ema_success_rate"] = (
+            (1.0 - _ema_alpha) * float(stat["ema_success_rate"])
+            + _ema_alpha * (1.0 if success else 0.0)
+        )
         depth_key = str(parent_generation)
         depth_attempts = stat.setdefault("depth_attempts", {})
         depth_successes = stat.setdefault("depth_successes", {})
@@ -291,25 +306,37 @@ class OperatorRegistry:
             phase_successes = float(stat.get("phase_successes", {}).get(phase.value, 0.0))
             phase_fit = phase_successes / phase_attempts if phase_attempts > 0 else 0.0
 
-        base_score = (
-            self._ucb(name, total_attempts)
-            + (_SCORE_FRONTIER_BONUS * frontier_rate)
+        base_ucb = self._ucb(name, total_attempts)
+
+        # Exploitation terms (these are scaled by ROI)
+        exploitation = (
+            (_SCORE_FRONTIER_BONUS * frontier_rate)
             + (_SCORE_DEPTH_FIT * depth_fit)
             + (_SCORE_PHASE_FIT * phase_fit)
-            - (_SCORE_DUPLICATE_PENALTY * duplicate_rate)
-            - (_SCORE_CORRECTNESS_PENALTY * correctness_failure_rate)
-            - (_SCORE_PRECHECK_PENALTY * precheck_failure_rate)
         )
+
+        penalties = (
+            (_SCORE_DUPLICATE_PENALTY * duplicate_rate)
+            + (_SCORE_CORRECTNESS_PENALTY * correctness_failure_rate)
+            + (_SCORE_PRECHECK_PENALTY * precheck_failure_rate)
+        )
+
+        # Phase 3 — ROI multiplier applies ONLY to exploitation terms, not UCB.
+        # This prevents suppressing new operators whose UCB exploration term is unscaled.
+        roi = 1.0
+        if operator_targets:
+            roi = sum(_SMELL_ROI_WEIGHT.get(s, 1.0) for s in operator_targets) / len(operator_targets)
+
+        base_score = base_ucb + (exploitation * roi) - penalties
 
         # Phase 2 — smell-overlap bonus
         if smell_tags and operator_targets:
             overlap = len(operator_targets & smell_tags) / max(1, len(smell_tags))
             base_score += _SCORE_SMELL_OVERLAP_BONUS * overlap
 
-        # Phase 3 — ROI multiplier from taxonomy paper
-        if operator_targets:
-            roi = sum(_SMELL_ROI_WEIGHT.get(s, 1.0) for s in operator_targets) / len(operator_targets)
-            base_score *= roi
+        # EMA success-rate boost: give slight preference to operators with recent success.
+        ema_success = float(stat.get("ema_success_rate", 0.0))
+        base_score += 0.10 * ema_success
 
         # Phase 4 — tier-phase coupling bonus
         if phase is not None:
@@ -327,6 +354,7 @@ class OperatorRegistry:
             "correctness_failures": 0.0,
             "frontier_contributions": 0.0,
             "precheck_failures": 0.0,
+            "ema_success_rate": 0.0,
             "depth_attempts": {},
             "depth_successes": {},
             "phase_attempts": {},

@@ -90,6 +90,18 @@ def tag_source(source: str) -> frozenset[str]:
     if _has_manual_reduction(nodes):
         tags.add("C10")
 
+    # C9 — I/O Access
+    if _has_io_access(nodes):
+        tags.add("C9")
+
+    # C11 — Concurrency opportunity (independent loop iterations)
+    if _has_concurrency_opportunity(nodes):
+        tags.add("C11")
+
+    # C12 — Hardware locality (strided / non-sequential subscript patterns)
+    if _has_strided_access(nodes):
+        tags.add("C12")
+
     return frozenset(tags)
 
 
@@ -366,4 +378,91 @@ def _has_static_method_candidate(nodes: list[ast.AST]) -> bool:
                 )
                 if not self_used:
                     return True
+    return False
+
+
+# ── C9 / C11 / C12 helpers ───────────────────────────────────────────────────
+
+_IO_MODULE_METHODS: dict[str, set[str]] = {
+    "json": {"load", "loads", "dump", "dumps"},
+    "csv": {"reader", "writer"},
+    "pickle": {"load", "loads", "dump", "dumps"},
+    "sqlite3": {"connect"},
+    "urllib": {"urlopen", "urlretrieve"},
+    "requests": {"get", "post", "put", "delete", "head", "patch"},
+    "pathlib": {"read_text", "write_text", "read_bytes", "write_bytes", "open"},
+}
+
+
+def _has_io_access(nodes: list[ast.AST]) -> bool:
+    """C9: Detect file/network/DB I/O patterns."""
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # bare open() call
+        if isinstance(func, ast.Name) and func.id == "open":
+            return True
+        # module.method() patterns
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            methods = _IO_MODULE_METHODS.get(func.value.id)
+            if methods and func.attr in methods:
+                return True
+        # pathlib Path(...).method() — two-level attribute chain
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in {"read_text", "write_text", "read_bytes", "write_bytes", "open", "open_binary"}
+        ):
+            return True
+    return False
+
+
+def _has_concurrency_opportunity(nodes: list[ast.AST]) -> bool:
+    """C11: Detect for-loops where the body is likely independent (no carried deps).
+
+    Heuristic: the loop body contains only calls or assignments whose RHS does
+    not reference the accumulator introduced in the same body. We flag loops
+    that iterate over a name, have a non-trivial body (>1 stmt or contains a
+    call), and do NOT have any loop-carried AugAssign that references the iter
+    variable — these are strong candidates for ThreadPoolExecutor.map.
+    """
+    for node in nodes:
+        if not isinstance(node, ast.For):
+            continue
+        # Iterable must be a name or attribute (not a generator)
+        if not isinstance(node.iter, (ast.Name, ast.Attribute, ast.Call)):
+            continue
+        # Body must contain at least one Call node
+        body_calls = [c for c in ast.walk(ast.Module(body=node.body, type_ignores=[]))
+                      if isinstance(c, ast.Call)]
+        if not body_calls:
+            continue
+        # No augmented assignment on the loop target (loop-carried dependency)
+        loop_var = node.target.id if isinstance(node.target, ast.Name) else None
+        has_carried_dep = False
+        if loop_var:
+            for child in ast.walk(ast.Module(body=node.body, type_ignores=[])):
+                if isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
+                    has_carried_dep = True
+                    break
+        if not has_carried_dep:
+            return True
+    return False
+
+
+def _has_strided_access(nodes: list[ast.AST]) -> bool:
+    """C12: Detect strided / non-sequential subscript access: a[i * k] or a[i + k].
+
+    This pattern can be cache-unfriendly and is a sign of potential hardware
+    locality issues (e.g., column-major access of a row-major array).
+    """
+    for node in nodes:
+        if not isinstance(node, ast.Subscript):
+            continue
+        index = node.slice
+        # BinOp index: a[i * stride] or a[i + offset] where index involves a Name
+        if isinstance(index, ast.BinOp) and isinstance(index.op, (ast.Mult, ast.Add, ast.Sub)):
+            names_in_index = [n for n in ast.walk(index) if isinstance(n, ast.Name)]
+            if len(names_in_index) >= 1:
+                return True
     return False
