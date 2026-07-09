@@ -23,7 +23,7 @@ function App() {
           <Route path="/baseline" element={<Baseline />} />
           <Route path="/optimize" element={<Optimize />} />
           <Route path="/results" element={<Results />} />
-          <Route path="/inspect" element={<Results />} />
+          <Route path="/inspect" element={<Inspect />} />
           <Route path="/inspect/:runId" element={<Inspect />} />
           <Route path="/apply" element={<Apply />} />
           <Route path="*" element={<NotFound />} />

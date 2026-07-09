@@ -1,30 +1,14 @@
-/**
- * JOULE Web UI – API Client & WebSocket Client
- *
- * Centralises all backend communication so every React page/hook
- * imports from a single place.
- */
-
 import axios, { AxiosInstance } from 'axios'
-
-// ---------------------------------------------------------------------------
-//  Axios instance
-// ---------------------------------------------------------------------------
 
 const API_BASE_URL = '/api'
 
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 120_000, // 2 min for long-running discovery
+  timeout: 120_000,
   headers: { 'Content-Type': 'application/json' },
 })
 
-// ---------------------------------------------------------------------------
-//  API Client
-// ---------------------------------------------------------------------------
-
 export const apiClient = {
-  // ---- Projects ----
   async getProjects(): Promise<any[]> {
     const { data } = await api.get('/projects')
     return data
@@ -40,7 +24,6 @@ export const apiClient = {
     return data
   },
 
-  // ---- Discovery ----
   async discoverTargets(projectPath: string): Promise<any[]> {
     const { data } = await api.get(`/projects/${encodeURIComponent(projectPath)}/discover/targets`)
     return data
@@ -53,7 +36,6 @@ export const apiClient = {
     return data
   },
 
-  // ---- Runs ----
   async getRuns(): Promise<any[]> {
     const { data } = await api.get('/runs')
     return data
@@ -74,7 +56,6 @@ export const apiClient = {
     return data
   },
 
-  // ---- Baseline ----
   async runBaseline(projectPath: string, config: any): Promise<any> {
     const { data } = await api.post(
       `/projects/${encodeURIComponent(projectPath)}/baseline`,
@@ -83,7 +64,6 @@ export const apiClient = {
     return data
   },
 
-  // ---- Optimization ----
   async runOptimization(projectPath: string, config: any): Promise<any> {
     const { data } = await api.post(
       `/projects/${encodeURIComponent(projectPath)}/optimize`,
@@ -92,16 +72,11 @@ export const apiClient = {
     return data
   },
 
-  // ---- Apply ----
   async applyCandidate(runId: string, config: any): Promise<any> {
     const { data } = await api.post(`/runs/${runId}/apply`, config)
     return data
   },
 }
-
-// ---------------------------------------------------------------------------
-//  WebSocket Client
-// ---------------------------------------------------------------------------
 
 type WebSocketMessageHandler = (message: any) => void
 
@@ -111,12 +86,14 @@ class WebSocketClient {
   private globalSubscribers: Set<WebSocketMessageHandler> = new Set()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
-
-  constructor() {}
-
+  private shouldReconnect = true
 
   connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) return
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+      return
+    }
+
+    this.shouldReconnect = true
 
     try {
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -124,35 +101,35 @@ class WebSocketClient {
       this.ws = new WebSocket(wsUrl)
 
       this.ws.onopen = () => {
-        console.log('[WS] Connected')
         this.startPing()
       }
 
       this.ws.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data)
-          this.dispatch(message)
+          this.dispatch(JSON.parse(event.data))
         } catch {
-          console.warn('[WS] Failed to parse message', event.data)
+          return
         }
       }
 
       this.ws.onclose = () => {
-        console.log('[WS] Disconnected')
         this.stopPing()
-        this.scheduleReconnect()
+        this.ws = null
+        if (this.shouldReconnect) {
+          this.scheduleReconnect()
+        }
       }
 
-      this.ws.onerror = (error) => {
-        console.error('[WS] Error', error)
+      this.ws.onerror = () => {
+        this.stopPing()
       }
-    } catch (error) {
-      console.error('[WS] Connection failed', error)
+    } catch {
       this.scheduleReconnect()
     }
   }
 
   disconnect(): void {
+    this.shouldReconnect = false
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -175,55 +152,62 @@ class WebSocketClient {
       this.subscribers.set(runId, new Set())
     }
     this.subscribers.get(runId)!.add(handler)
-
-    // Ask the server to subscribe us
     this.send({ type: 'subscribe_run', run_id: runId })
 
     return () => {
       const subs = this.subscribers.get(runId)
-      if (subs) {
-        subs.delete(handler)
-        if (subs.size === 0) {
-          this.subscribers.delete(runId)
-          this.send({ type: 'unsubscribe_run', run_id: runId })
-        }
+      if (!subs) return
+      subs.delete(handler)
+      if (subs.size === 0) {
+        this.subscribers.delete(runId)
+        this.send({ type: 'unsubscribe_run', run_id: runId })
       }
     }
   }
 
   onMessage(handler: WebSocketMessageHandler): () => void {
     this.globalSubscribers.add(handler)
-    return () => { this.globalSubscribers.delete(handler) }
+    return () => {
+      this.globalSubscribers.delete(handler)
+    }
   }
 
-  // ---- Private ----
-
   private dispatch(message: any): void {
-    // Global handlers
     for (const handler of this.globalSubscribers) {
-      try { handler(message) } catch { /* ignore */ }
+      try {
+        handler(message)
+      } catch {
+        continue
+      }
     }
 
-    // Run-specific handlers
     if (message.run_id) {
       const subs = this.subscribers.get(message.run_id)
-      if (subs) {
-        for (const handler of subs) {
-          try { handler(message) } catch { /* ignore */ }
+      if (!subs) return
+      for (const handler of subs) {
+        try {
+          handler(message)
+        } catch {
+          continue
         }
       }
     }
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer) return
+    if (this.reconnectTimer || !this.shouldReconnect) {
+      return
+    }
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.connect()
+      if (this.shouldReconnect) {
+        this.connect()
+      }
     }, 3000)
   }
 
   private startPing(): void {
+    this.stopPing()
     this.pingTimer = setInterval(() => {
       this.send({ type: 'ping', timestamp: Date.now() })
     }, 30_000)
@@ -239,14 +223,9 @@ class WebSocketClient {
 
 export const wsClient = new WebSocketClient()
 
-// Auto-connect on module load
 if (typeof window !== 'undefined') {
   wsClient.connect()
 }
-
-// ---------------------------------------------------------------------------
-//  Utility helpers
-// ---------------------------------------------------------------------------
 
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'

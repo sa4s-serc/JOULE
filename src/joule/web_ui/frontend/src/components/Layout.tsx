@@ -31,7 +31,6 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-joule-bg to-joule-chip">
       <div className="flex">
-        {/* Sidebar */}
         <div className={`${isSidebarOpen ? 'w-64' : 'w-16'} min-h-screen bg-joule-panel border-r border-joule-border transition-all duration-300`}>
           <div className="p-6">
             <h1 className={`text-2xl font-bold text-joule-ink ${!isSidebarOpen && 'hidden'}`}>JOULE</h1>
@@ -78,9 +77,7 @@ export default function Layout({ children }: LayoutProps) {
           </nav>
         </div>
 
-        {/* Main Content */}
         <div className="flex-1">
-          {/* Header */}
           <header className="bg-joule-panel border-b border-joule-border px-8 py-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-joule-ink">
@@ -93,7 +90,6 @@ export default function Layout({ children }: LayoutProps) {
             </div>
           </header>
 
-          {/* Page Content */}
           <main className="p-8">
             {children}
           </main>
@@ -103,7 +99,6 @@ export default function Layout({ children }: LayoutProps) {
   )
 }
 
-// Connection status component with real health check
 function ConnectionStatus() {
   const [isConnected, setIsConnected] = useState(false)
 
@@ -118,7 +113,7 @@ function ConnectionStatus() {
     }
 
     checkConnection()
-    const interval = setInterval(checkConnection, 30000) // Check every 30s
+    const interval = setInterval(checkConnection, 30000)
     return () => clearInterval(interval)
   }, [])
 

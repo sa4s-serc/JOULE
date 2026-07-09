@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Eye, Code, TrendingUp, AlertCircle, Download, ChevronRight, RefreshCw } from 'lucide-react'
 import { apiClient, formatBytes, formatImprovement } from '../utils/api'
@@ -58,17 +58,24 @@ export default function Inspect() {
   const [activeTab, setActiveTab] = useState<'overview' | 'candidates' | 'hotspots' | 'artifacts'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const runStatusRef = useRef<RunDetails['status'] | null>(null)
 
-  const fetchRunDetails = async () => {
+  const fetchRunDetails = async (showLoading = false) => {
     if (!runId) return
-    setLoading(true)
+    if (showLoading) {
+      setLoading(true)
+    }
     try {
       const data = await apiClient.getRun(runId)
+      runStatusRef.current = data.status
       setRunDetails(data)
+      setError(null)
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Failed to load run details')
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      }
     }
   }
 
@@ -77,21 +84,19 @@ export default function Inspect() {
     try {
       const data = await apiClient.getRunArtifacts(runId)
       setArtifacts(data)
-    } catch {
-      // optional
-    }
+    } catch {}
   }
 
   useEffect(() => {
-    fetchRunDetails()
-    fetchArtifacts()
+    void fetchRunDetails(true)
+    void fetchArtifacts()
 
-    // If running, poll for updates
     const interval = setInterval(() => {
-      if (runDetails?.status === 'running') {
-        fetchRunDetails()
+      if (runStatusRef.current === 'running') {
+        void fetchRunDetails()
       }
     }, 5000)
+
     return () => clearInterval(interval)
   }, [runId])
 
@@ -140,7 +145,6 @@ export default function Inspect() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-joule-ink">Inspect Run</h1>
@@ -164,7 +168,6 @@ export default function Inspect() {
         </div>
       </div>
 
-      {/* Run Info */}
       <div className="joule-panel">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
@@ -190,7 +193,6 @@ export default function Inspect() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="border-b border-joule-border">
         <nav className="flex space-x-8">
           {tabs.map((tab) => {
@@ -213,11 +215,9 @@ export default function Inspect() {
         </nav>
       </div>
 
-      {/* Tab Content */}
       <div>
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Baseline Metrics */}
             {runDetails.baseline && (
               <div className="joule-panel">
                 <h3 className="text-lg font-semibold text-joule-ink mb-4">Baseline Metrics</h3>
@@ -237,7 +237,6 @@ export default function Inspect() {
               </div>
             )}
 
-            {/* Optimization Summary */}
             <div className="joule-panel">
               <h3 className="text-lg font-semibold text-joule-ink mb-4">
                 {runDetails.run_type === 'baseline' ? 'Baseline Summary' : 'Optimization Summary'}
@@ -328,7 +327,6 @@ export default function Inspect() {
 
                   {selectedCandidate === candidate.candidate_id && (
                     <div className="mt-4 pt-4 border-t border-joule-border space-y-4">
-                      {/* Measurements */}
                       {candidate.measurements && (
                         <div>
                           <h5 className="font-medium text-joule-ink mb-2">Measurements</h5>
@@ -348,7 +346,6 @@ export default function Inspect() {
                         </div>
                       )}
 
-                      {/* Improvements */}
                       {candidate.improvements && (
                         <div>
                           <h5 className="font-medium text-joule-ink mb-2">Improvements</h5>
@@ -444,4 +441,3 @@ export default function Inspect() {
     </div>
   )
 }
-

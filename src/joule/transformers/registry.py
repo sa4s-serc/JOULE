@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib.metadata import entry_points
+import inspect
 import logging
 import math
 from typing import Any
@@ -14,7 +15,7 @@ from joule.transformers import smell_tagger
 
 LOGGER = logging.getLogger(__name__)
 
-# ── Phase 2/3 scoring constants ────────────────────────────────────────────
+# Phase 2/3 scoring constants
 
 # Contextual scoring weights for operator selection.
 # These balance exploration (UCB) with operator-specific performance signals.
@@ -426,27 +427,39 @@ class OperatorRegistry:
         raise TypeError(f"Entry point {name!r} did not produce operator instances")
 
     def _instantiate_operator_class(self, name: str, cls: type[BaseOperator], *, llm_model: str) -> BaseOperator:
-        for args, kwargs in [
-            ((llm_model,), {}),
-            ((), {"model": llm_model}),
-            ((), {"llm_model": llm_model}),
-            ((), {}),
-        ]:
-            try:
-                return cls(*args, **kwargs)
-            except TypeError:
-                continue
-        raise TypeError(f"Could not instantiate operator class from entry point {name!r}")
+        try:
+            return self._instantiate_with_llm_model(cls, llm_model)
+        except Exception as exc:
+            raise TypeError(f"Could not instantiate operator class from entry point {name!r}: {exc}") from exc
 
     def _call_operator_factory(self, name: str, factory: Any, *, llm_model: str) -> Any:
-        for args, kwargs in [
-            ((llm_model,), {}),
-            ((), {"model": llm_model}),
-            ((), {"llm_model": llm_model}),
-            ((), {}),
-        ]:
-            try:
-                return factory(*args, **kwargs)
-            except TypeError:
-                continue
-        raise TypeError(f"Could not call operator factory from entry point {name!r}")
+        try:
+            return self._instantiate_with_llm_model(factory, llm_model)
+        except Exception as exc:
+            raise TypeError(f"Could not call operator factory from entry point {name!r}: {exc}") from exc
+
+    def _instantiate_with_llm_model(self, func: Any, llm_model: str) -> Any:
+        try:
+            sig = inspect.signature(func)
+        except (ValueError, TypeError):
+            return func()
+
+        params = list(sig.parameters.values())
+        param_names = {p.name for p in params}
+
+        if "llm_model" in param_names:
+            return func(llm_model=llm_model)
+        if "model" in param_names:
+            return func(model=llm_model)
+
+        if params:
+            first_param = params[0]
+            if first_param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+                return func(llm_model)
+
+        if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
+            return func(llm_model)
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+            return func(llm_model=llm_model)
+
+        return func()

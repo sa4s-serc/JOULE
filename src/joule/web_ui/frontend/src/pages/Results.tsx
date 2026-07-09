@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Search,
@@ -80,7 +80,7 @@ export default function Results() {
 
   useEffect(() => {
     fetchRuns()
-    const interval = setInterval(fetchRuns, 15000) // Poll
+    const interval = setInterval(fetchRuns, 15000)
     return () => clearInterval(interval)
   }, [])
 
@@ -139,7 +139,6 @@ export default function Results() {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="joule-panel">
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="flex-1">
@@ -167,7 +166,6 @@ export default function Results() {
         </div>
       </div>
 
-      {/* Runs Table */}
       <div className="joule-panel">
         {loading && runs.length === 0 ? (
           <div className="animate-pulse space-y-3">
@@ -195,7 +193,7 @@ export default function Results() {
               </thead>
               <tbody>
                 {filteredRuns.map((run) => (
-                  <>
+                  <Fragment key={run.run_id}>
                     <tr key={run.run_id}
                       className={`border-b border-joule-border cursor-pointer transition-colors ${
                         expandedRun === run.run_id ? 'bg-joule-chip' : 'hover:bg-joule-bg'
@@ -239,7 +237,7 @@ export default function Results() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -247,7 +245,6 @@ export default function Results() {
         )}
       </div>
 
-      {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
           { label: 'Completed', value: runs.filter(r => r.status === 'completed').length },
@@ -266,13 +263,10 @@ export default function Results() {
     </div>
   )
 }
-
-
-// Sub-component
 interface RunDetailViewProps {
   run: Run
   activeTab: 'overview' | 'candidates' | 'hotspots' | 'artifacts'
-  setActiveTab: (tab: any) => void
+  setActiveTab: (tab: 'overview' | 'candidates' | 'hotspots' | 'artifacts') => void
   onClose: () => void
   onNavigateInspect: () => void
 }

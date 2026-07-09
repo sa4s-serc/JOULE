@@ -105,7 +105,7 @@ def tag_source(source: str) -> frozenset[str]:
     return frozenset(tags)
 
 
-# ── AST predicates ────────────────────────────────────────────────────────
+# AST predicates
 
 def _has_loop(nodes: list[ast.AST]) -> bool:
     return any(isinstance(n, (ast.For, ast.While)) for n in nodes)
@@ -381,7 +381,7 @@ def _has_static_method_candidate(nodes: list[ast.AST]) -> bool:
     return False
 
 
-# ── C9 / C11 / C12 helpers ───────────────────────────────────────────────────
+# C9 / C11 / C12 helpers
 
 _IO_MODULE_METHODS: dict[str, set[str]] = {
     "json": {"load", "loads", "dump", "dumps"},
@@ -433,17 +433,22 @@ def _has_concurrency_opportunity(nodes: list[ast.AST]) -> bool:
         if not isinstance(node.iter, (ast.Name, ast.Attribute, ast.Call)):
             continue
         # Body must contain at least one Call node
-        body_calls = [c for c in ast.walk(ast.Module(body=node.body, type_ignores=[]))
-                      if isinstance(c, ast.Call)]
+        body_calls = [
+            c for stmt in node.body for c in ast.walk(stmt)
+            if isinstance(c, ast.Call)
+        ]
         if not body_calls:
             continue
         # No augmented assignment on the loop target (loop-carried dependency)
         loop_var = node.target.id if isinstance(node.target, ast.Name) else None
         has_carried_dep = False
         if loop_var:
-            for child in ast.walk(ast.Module(body=node.body, type_ignores=[])):
-                if isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
-                    has_carried_dep = True
+            for stmt in node.body:
+                for child in ast.walk(stmt):
+                    if isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
+                        has_carried_dep = True
+                        break
+                if has_carried_dep:
                     break
         if not has_carried_dep:
             return True

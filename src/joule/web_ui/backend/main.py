@@ -1,13 +1,7 @@
-"""JOULE Web UI – FastAPI backend.
-
-Launched via ``joule ui <project-path>``.  The *project_path* is set once at
-start-up (via cli arg / env-var) and stored on ``app.state.project_path`` so
-every route can resolve joule settings & DB from it.
-"""
 from __future__ import annotations
 
 import os
-import sys
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,23 +9,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-# ---------------------------------------------------------------------------
-# Lifespan
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Resolve project path from env or fallback to cwd
     project_path = os.environ.get("JOULE_PROJECT_PATH", ".")
     app.state.project_path = str(Path(project_path).resolve())
-    print(f"JOULE Web UI backend starting – project: {app.state.project_path}")
+    logger.info("JOULE Web UI backend starting for %s", app.state.project_path)
     yield
-    print("JOULE Web UI backend shutting down.")
+    logger.info("JOULE Web UI backend shutting down")
 
-
-# ---------------------------------------------------------------------------
-# Application
-# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="JOULE Web UI API",
@@ -40,7 +28,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS – allow the Vite dev-server *and* same-origin production build
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -52,19 +39,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Routers
-# ---------------------------------------------------------------------------
-
 from joule.web_ui.backend.api.projects import router as projects_router  # noqa: E402
 from joule.web_ui.backend.api.runs import router as runs_router  # noqa: E402
 from joule.web_ui.backend.api.websocket import router as ws_router  # noqa: E402
+
 
 @app.get("/api/health")
 def health_check():
     return {"status": "ok"}
 
-# Include routers
 app.include_router(projects_router, prefix="/api")
 app.include_router(runs_router, prefix="/api")
 app.include_router(ws_router)
@@ -75,18 +58,10 @@ async def root():
     return {"message": "JOULE Web UI API", "version": "0.1.0"}
 
 
-# ---------------------------------------------------------------------------
-# Static-files support (production build of the React frontend)
-# ---------------------------------------------------------------------------
-
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if _FRONTEND_DIST.is_dir():
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="frontend")
 
-
-# ---------------------------------------------------------------------------
-# Entry-point (``python -m joule.web_ui.backend.main``)
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn

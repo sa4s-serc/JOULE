@@ -13,7 +13,7 @@ class LLMUnavailableError(RuntimeError):
     pass
 
 
-# ── Tier-specific Python optimization heuristics ───────────────────────────
+# Tier-specific Python optimization heuristics
 _TIER_HEURISTICS: dict[str, str] = {
     "L": dedent("""\
         Tier L (syntactic) heuristics — make only local structural changes:
@@ -44,7 +44,7 @@ _TIER_HEURISTICS: dict[str, str] = {
         - Replace CPU-bound loops over independent items with `concurrent.futures.ThreadPoolExecutor.map`."""),
 }
 
-# ── Smell-category context hints ────────────────────────────────────────────
+# Smell-category context hints
 _SMELL_HINTS: dict[str, str] = {
     "C1": "Redundant computation detected — look for repeated calculations that can be hoisted or cached.",
     "C2": "Unnecessary call overhead detected — consider inlining or reducing function call nesting.",
@@ -97,18 +97,18 @@ def _build_user_prompt(
 ) -> str:
     parts: list[str] = []
 
-    # ── Operator identity ──────────────────────────────────────────────────
+    # Operator identity
     parts.append(dedent(f"""\
         OPERATOR: {operator_name}
         TIER: {tier_value.value} ({tier_descriptor(tier_value)})
         OBJECTIVE: {objective}"""))
 
-    # ── Tier-specific guidance ─────────────────────────────────────────────
+    # Tier-specific guidance
     heuristics = _TIER_HEURISTICS.get(tier_value.value, "")
     if heuristics:
         parts.append(f"TIER GUIDANCE:\n{heuristics}")
 
-    # ── Smell-category hints from context ──────────────────────────────────
+    # Smell-category hints from context
     smell_tags: frozenset[str] = frozenset()
     if context is not None:
         raw_smells = context.search_metadata.get("smell_tags")
@@ -119,7 +119,7 @@ def _build_user_prompt(
         if smell_hints:
             parts.append("DETECTED CODE SMELLS (prioritise addressing these):\n" + "\n".join(f"  - {h}" for h in smell_hints))
 
-    # ── Search context ─────────────────────────────────────────────────────
+    # Search context
     if context is not None:
         rejection_note = ""
         if context.rejection_history:
@@ -131,14 +131,14 @@ def _build_user_prompt(
               Generation depth: {context.generation_depth}
               Search phase: {context.phase.value}{rejection_note}"""))
 
-    # ── Prior error feedback on retry ─────────────────────────────────────
+    # Prior error feedback on retry
     if prior_error and attempt > 0:
         parts.append(dedent(f"""\
             PREVIOUS ATTEMPT FAILED (attempt {attempt}):
             {prior_error}
             Fix the issue above. Do NOT return the same code as the original."""))
 
-    # ── Source code ────────────────────────────────────────────────────────
+    # Source code
     parts.append(f"SOURCE TO OPTIMISE:\n{target.source}")
 
     return "\n\n".join(parts)

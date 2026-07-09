@@ -50,7 +50,7 @@ def test_registry_precheck_prunes_when_no_operator_matches(tmp_path):
         owner_path=[],
         line_start=1,
         line_end=2,
-        source="def target(x):\n    return x\n",
+        source="def target(x):\n    pass\n",
     )
     registry = OperatorRegistry(llm_model="", include_llm=False)
     selected = registry.select_operator_for_candidate(

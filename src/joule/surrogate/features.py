@@ -66,7 +66,7 @@ class SourceFeatureExtractor:
 
         node_count = len(nodes)
 
-        # ── original 17 features ────────────────────────────────────────────
+        # original 17 features
         loop_count = sum(isinstance(n, (ast.For, ast.While, ast.comprehension)) for n in nodes)
         comp_count = sum(isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)) for n in nodes)
         call_count = sum(isinstance(n, ast.Call) for n in nodes)
@@ -84,7 +84,7 @@ class SourceFeatureExtractor:
         annotation_density = float(annotated_assign_count) / max(1.0, float(node_count))
         branch_density = float(branch_count) / max(1.0, float(node_count))
 
-        # ── Phase 1 additions: smell-category structural indicators ─────────
+        # Phase 1 additions: smell-category structural indicators
 
         # C3.S4 — nested loop indicator
         has_nested_loop = int(_has_nested_loop(nodes))
@@ -131,7 +131,7 @@ class SourceFeatureExtractor:
         # C6.S6 — open() call not inside a with block
         has_bare_open = int(_has_bare_open(nodes))
 
-        # ── Phase 2 additions: 6 new structural/complexity features ───────────────
+        # Phase 2 additions: 6 new structural/complexity features
 
         # Cyclomatic-complexity proxy: branches + loops + exceptions + bool-ops
         cyclomatic_complexity = branch_count + loop_count + try_count + bool_op_count
@@ -211,7 +211,7 @@ class SourceFeatureExtractor:
         return base
 
 
-# ── helpers ────────────────────────────────────────────────────────────────
+# helpers
 
 def _has_nested_loop(nodes: list[ast.AST]) -> bool:
     for node in nodes:
@@ -337,7 +337,7 @@ def _has_bare_open(nodes: list[ast.AST]) -> bool:
     return False
 
 
-# ── Phase 2 helpers ────────────────────────────────────────────────────────
+# Phase 2 helpers
 
 def _loop_augassign_count(nodes: list[ast.AST]) -> int:
     """Count AugAssign nodes that appear inside a loop body (not just anywhere)."""

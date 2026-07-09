@@ -1,8 +1,3 @@
-"""WebSocket router for real-time run updates.
-
-Clients connect to ``/ws`` and can subscribe to individual run IDs to
-receive progress events.
-"""
 from __future__ import annotations
 
 import json
@@ -16,13 +11,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
 
-# ---------------------------------------------------------------------------
-# Connection manager
-# ---------------------------------------------------------------------------
-
 class ConnectionManager:
-    """Manages WebSocket connections and per-run subscriptions."""
-
     def __init__(self) -> None:
         self.active_connections: list[WebSocket] = []
         self.run_subscribers: dict[str, list[WebSocket]] = {}
@@ -35,7 +24,6 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket) -> None:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-        # Clean up subscriptions
         for run_id in list(self.run_subscribers):
             subs = self.run_subscribers[run_id]
             if websocket in subs:
@@ -82,14 +70,7 @@ class ConnectionManager:
         if not subs and run_id in self.run_subscribers:
             del self.run_subscribers[run_id]
 
-
-# Singleton
 manager = ConnectionManager()
-
-
-# ---------------------------------------------------------------------------
-# WebSocket endpoint
-# ---------------------------------------------------------------------------
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:

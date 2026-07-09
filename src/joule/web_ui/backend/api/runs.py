@@ -19,22 +19,15 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from joule.config import load_settings
+from joule.models import RunType
 from joule.utils.db import JouleDB
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["runs"])
 
-# Background thread pool for long-running jobs
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="joule-run")
-
-# In-memory registry of active background runs
 _active_runs: dict[str, dict[str, Any]] = {}
-
-
-# ---------------------------------------------------------------------------
-# Pydantic request models
-# ---------------------------------------------------------------------------
 
 class BaselineConfig(BaseModel):
     target: str
@@ -66,11 +59,6 @@ class ApplyConfig(BaseModel):
     branch: bool = False
     commit_changes: bool = False
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _project_path(request: Request) -> str:
     return getattr(request.app.state, "project_path", ".")
 
@@ -82,9 +70,128 @@ def _load(project_path: str):
     return settings, db
 
 
-# ---------------------------------------------------------------------------
-# GET /api/runs
-# ---------------------------------------------------------------------------
+def _resolve_target_bundle(
+    *,
+    project_path: str,
+    settings,
+    reporter,
+    target_qualname: str,
+):
+    from joule.cli_helpers.flow import resolve_target_and_bundle
+    from joule.discovery.resolver import discover_targets
+
+    path = Path(project_path)
+    all_targets = discover_targets(settings, path)
+    matched_target = next((t.target for t in all_targets if t.target.qualname == target_qualname), None)
+    if not matched_target:
+        raise ValueError(f"Target '{target_qualname}' not found in project {project_path}")
+
+    return resolve_target_and_bundle(
+        path=matched_target.file_path,
+        function=target_qualname,
+        settings=settings,
+        reporter=reporter,
+        tests=None,
+        properties=None,
+        harness=None,
+    )
+
+
+def _prepare_execution(
+    *,
+    project_path: str,
+    settings,
+    db: JouleDB,
+    target_qualname: str,
+    chosen_backend: str,
+    run_type,
+):
+    from joule.cli_helpers.flow import JouleContainer, ExecutionContext, create_run_record
+    from joule.evaluators.oracle import PerformanceOracle
+    from joule.orchestrator.mfbo import OptimizationOrchestrator
+    from joule.utils.artifacts import ensure_artifacts, seed_random
+    from joule.utils.terminal import TerminalReporter
+    from rich.console import Console
+
+    ensure_artifacts(settings)
+    seed_random(settings.seed)
+    reporter = TerminalReporter(Console(stderr=True, quiet=True), "quiet")
+    target, bundle = _resolve_target_bundle(
+        project_path=project_path,
+        settings=settings,
+        reporter=reporter,
+        target_qualname=target_qualname,
+    )
+    record, actual_run_id, run_dir = create_run_record(
+        settings=settings,
+        db=db,
+        run_type=run_type,
+        target=target,
+        bundle=bundle,
+        chosen_backend=chosen_backend,
+    )
+    reporter.set_log_file(run_dir / "events.jsonl")
+
+    oracle = PerformanceOracle.create(settings, backend_name=chosen_backend, reporter=reporter, db=db)
+    orchestrator = OptimizationOrchestrator.create(settings, db, oracle, reporter=reporter)
+    container = JouleContainer(
+        settings=settings,
+        db=db,
+        reporter=reporter,
+        oracle=oracle,
+        orchestrator=orchestrator,
+        correctness=orchestrator.correctness,
+        registry=orchestrator.registry,
+        surrogate=orchestrator.surrogate,
+    )
+    context = ExecutionContext(
+        container=container,
+        settings=settings,
+        db=db,
+        reporter=reporter,
+        target=target,
+        bundle=bundle,
+        chosen_backend=chosen_backend,
+        run_id=actual_run_id,
+        run_dir=run_dir,
+        record=record,
+        oracle=oracle,
+        orchestrator=orchestrator,
+    )
+    return settings, db, reporter, context, actual_run_id
+
+
+def _run_job_sync(
+    *,
+    project_path: str,
+    config,
+    run_id: str,
+    run_type,
+    cli_runner,
+    cli_kwargs: dict[str, Any],
+) -> None:
+    try:
+        _active_runs[run_id]["status"] = "running"
+        settings, db = _load(project_path)
+        parallel = getattr(config, "parallel", None)
+        if parallel:
+            settings.max_parallel_workers = parallel
+        chosen_backend = config.backend or settings.default_backend
+        settings, db, reporter, context, actual_run_id = _prepare_execution(
+            project_path=project_path,
+            settings=settings,
+            db=db,
+            target_qualname=config.target,
+            chosen_backend=chosen_backend,
+            run_type=run_type,
+        )
+        cli_runner(context, **cli_kwargs)
+        _active_runs[run_id]["status"] = "completed"
+        _active_runs[run_id]["actual_run_id"] = actual_run_id
+    except Exception as exc:
+        logger.exception("Background %s %s failed", run_type.value, run_id)
+        _active_runs[run_id]["status"] = "failed"
+        _active_runs[run_id]["error"] = str(exc)
 
 @router.get("/runs")
 async def list_runs(request: Request, project_path: str | None = None) -> list[dict[str, Any]]:
@@ -93,7 +200,6 @@ async def list_runs(request: Request, project_path: str | None = None) -> list[d
         settings, db = _load(pp)
         runs = db.list_runs()
 
-        # Enrich each run with target info from the DB
         enriched: list[dict[str, Any]] = []
         for run_summary in runs:
             run_id = run_summary["run_id"]
@@ -105,7 +211,6 @@ async def list_runs(request: Request, project_path: str | None = None) -> list[d
                 run_summary.setdefault("target_qualname", "unknown")
                 run_summary.setdefault("backend", "unknown")
 
-            # Check if there's an active background run
             if run_id in _active_runs:
                 run_summary["status"] = _active_runs[run_id].get("status", run_summary.get("status"))
 
@@ -114,11 +219,6 @@ async def list_runs(request: Request, project_path: str | None = None) -> list[d
     except Exception as exc:
         logger.warning("Failed to list runs from DB – returning empty: %s", exc)
         return []
-
-
-# ---------------------------------------------------------------------------
-# GET /api/runs/{run_id}
-# ---------------------------------------------------------------------------
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, request: Request, project_path: str | None = None) -> dict[str, Any]:
@@ -131,7 +231,6 @@ async def get_run(run_id: str, request: Request, project_path: str | None = None
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    # Base payload
     payload: dict[str, Any] = {
         "run_id": record.run_id,
         "run_type": record.run_type.value,
@@ -143,7 +242,6 @@ async def get_run(run_id: str, request: Request, project_path: str | None = None
         "metadata": record.metadata,
     }
 
-    # Baseline measurements
     measurements = db.get_measurements(run_id)
     baseline_measurement = None
     for m in measurements:
@@ -160,7 +258,6 @@ async def get_run(run_id: str, request: Request, project_path: str | None = None
             "peak_memory_bytes": int(agg.get("mean_peak_memory_bytes", 0)),
         }
 
-    # Candidates
     db_candidates = db.get_candidates(run_id)
     candidates_payload: list[dict[str, Any]] = []
     for c in db_candidates:
@@ -172,7 +269,6 @@ async def get_run(run_id: str, request: Request, project_path: str | None = None
             "explanation": c["reasoning"],
         }
 
-        # Find measurements for this candidate
         for m in measurements:
             if m.get("candidate_id") == c["candidate_id"]:
                 agg = m.get("aggregate", {})
@@ -182,7 +278,6 @@ async def get_run(run_id: str, request: Request, project_path: str | None = None
                     "cpu_time_s": agg.get("mean_cpu_time_s", 0),
                     "peak_memory_bytes": int(agg.get("mean_peak_memory_bytes", 0)),
                 }
-                # Compute improvement ratios vs baseline
                 if baseline_measurement:
                     bl = baseline_measurement.get("aggregate", {})
                     bl_e = bl.get("mean_energy_j", 1) or 1
@@ -202,38 +297,47 @@ async def get_run(run_id: str, request: Request, project_path: str | None = None
 
     payload["candidates"] = candidates_payload
 
-    # Hotspot profiles
     try:
         hotspot_profiles = db.get_hotspot_profiles(run_id)
         if hotspot_profiles:
-            # Look for the aggregated profile (schema_version is present)
             agg = next((h["payload"] for h in hotspot_profiles if "schema_version" in h.get("payload", {})), None)
             if not agg:
-                agg = hotspot_profiles[-1].get("payload", {})  # fallback
+                agg = hotspot_profiles[-1].get("payload", {})
             payload["hotspots"] = agg
     except Exception:
         pass
 
     return payload
 
-
-# ---------------------------------------------------------------------------
-# POST /api/projects/{project_path}/baseline
-# ---------------------------------------------------------------------------
-
 @router.post("/projects/{project_path:path}/baseline")
 async def run_baseline_endpoint(project_path: str, config: BaselineConfig, request: Request):
     pp = project_path if project_path != "." else _project_path(request)
     try:
-        settings, db = _load(pp)
+        settings, _ = _load(pp)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     run_id = settings.new_run_id()
     _active_runs[run_id] = {"status": "starting", "run_type": "baseline", "started_at": time.time()}
+    from joule.cli_commands.baseline import run_baseline as _cli_baseline
 
-    # Dispatch synchronous CLI logic in a background thread
-    _executor.submit(_run_baseline_sync, pp, config, run_id)
+    _executor.submit(
+        _run_job_sync,
+        project_path=pp,
+        config=config,
+        run_id=run_id,
+        run_type=RunType.BASELINE,
+        cli_runner=_cli_baseline,
+        cli_kwargs={
+            "output": "json",
+            "repetitions": config.repetitions,
+            "hotspots": config.hotspots,
+            "hotspot_limit": config.hotspot_limit,
+            "granular": config.granular_profiling,
+            "no_dashboard": True,
+            "no_cache": not config.cache,
+        },
+    )
 
     return {
         "run_id": run_id,
@@ -241,215 +345,43 @@ async def run_baseline_endpoint(project_path: str, config: BaselineConfig, reque
         "config": config.model_dump(),
     }
 
-
-def _run_baseline_sync(project_path: str, config: BaselineConfig, run_id: str):
-    """Execute baseline in a background thread."""
-    from joule.web_ui.backend.api.websocket import manager
-    import asyncio
-
-    try:
-        _active_runs[run_id]["status"] = "running"
-        # Use CLI internals to run the baseline
-        from joule.config import load_settings
-        from joule.utils.db import JouleDB
-        from joule.utils.artifacts import ensure_artifacts, seed_random
-        from joule.cli_helpers.flow import resolve_target_and_bundle, create_run_record, JouleContainer, ExecutionContext
-        from joule.utils.terminal import TerminalReporter
-        from joule.evaluators.oracle import PerformanceOracle
-        from joule.orchestrator.mfbo import OptimizationOrchestrator
-        from joule.models import RunType
-        from rich.console import Console
-
-        from joule.discovery.resolver import discover_targets
-
-        path = Path(project_path)
-        settings = load_settings(path)
-        db = JouleDB(settings.db_path)
-        ensure_artifacts(settings)
-        seed_random(settings.seed)
-        console = Console(stderr=True, quiet=True)
-        reporter = TerminalReporter(console, "quiet")
-
-        # Resolve the actual file_path for the given target qualname
-        all_targets = discover_targets(settings, path)
-        matched_target = next((t.target for t in all_targets if t.target.qualname == config.target), None)
-        if not matched_target:
-            raise ValueError(f"Target '{config.target}' not found in project {project_path}")
-
-        target, bundle = resolve_target_and_bundle(
-            path=matched_target.file_path,
-            function=config.target,
-            settings=settings,
-            reporter=reporter,
-            tests=None,
-            properties=None,
-            harness=None,
-        )
-        chosen_backend = config.backend or settings.default_backend
-
-        record, actual_run_id, run_dir = create_run_record(
-            settings=settings,
-            db=db,
-            run_type=RunType.BASELINE,
-            target=target,
-            bundle=bundle,
-            chosen_backend=chosen_backend,
-        )
-        reporter.set_log_file(run_dir / "events.jsonl")
-
-        oracle = PerformanceOracle.create(settings, backend_name=config.backend, reporter=reporter, db=db)
-        orchestrator = OptimizationOrchestrator.create(settings, db, oracle, reporter=reporter)
-        container = JouleContainer(
-            settings=settings, db=db, reporter=reporter,
-            oracle=oracle, orchestrator=orchestrator,
-            correctness=orchestrator.correctness,
-            registry=orchestrator.registry,
-            surrogate=orchestrator.surrogate,
-        )
-        context = ExecutionContext(
-            container=container, settings=settings, db=db, reporter=reporter,
-            target=target, bundle=bundle, chosen_backend=chosen_backend,
-            run_id=actual_run_id, run_dir=run_dir, record=record,
-            oracle=oracle, orchestrator=orchestrator,
-        )
-
-        from joule.cli_commands.baseline import run_baseline as _cli_baseline
-        _cli_baseline(
-            context,
-            output="json",
-            repetitions=config.repetitions,
-            hotspots=config.hotspots,
-            hotspot_limit=config.hotspot_limit,
-            granular=config.granular_profiling,
-            no_dashboard=True,
-            no_cache=not config.cache,
-        )
-
-        _active_runs[run_id]["status"] = "completed"
-        _active_runs[run_id]["actual_run_id"] = actual_run_id
-
-    except Exception as exc:
-        logger.exception("Background baseline %s failed", run_id)
-        _active_runs[run_id]["status"] = "failed"
-        _active_runs[run_id]["error"] = str(exc)
-
-
-# ---------------------------------------------------------------------------
-# POST /api/projects/{project_path}/optimize
-# ---------------------------------------------------------------------------
 
 @router.post("/projects/{project_path:path}/optimize")
 async def run_optimization_endpoint(project_path: str, config: OptimizationConfig, request: Request):
     pp = project_path if project_path != "." else _project_path(request)
     try:
-        settings, db = _load(pp)
+        settings, _ = _load(pp)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     run_id = settings.new_run_id()
     _active_runs[run_id] = {"status": "starting", "run_type": "optimize", "started_at": time.time()}
+    from joule.cli_commands.run import run_optimize as _cli_optimize
 
-    _executor.submit(_run_optimize_sync, pp, config, run_id)
+    _executor.submit(
+        _run_job_sync,
+        project_path=pp,
+        config=config,
+        run_id=run_id,
+        run_type=RunType.OPTIMIZE,
+        cli_runner=_cli_optimize,
+        cli_kwargs={
+            "budget": config.budget,
+            "analysis": config.analysis,
+            "no_dashboard": True,
+            "output": "json",
+            "no_cache": not config.cache,
+            "ci": False,
+            "improvement_threshold": config.improvement_threshold,
+            "fresh_surrogate": config.fresh_surrogate,
+        },
+    )
 
     return {
         "run_id": run_id,
         "status": "started",
         "config": config.model_dump(),
     }
-
-
-def _run_optimize_sync(project_path: str, config: OptimizationConfig, run_id: str):
-    """Execute optimisation in a background thread."""
-    try:
-        _active_runs[run_id]["status"] = "running"
-        from joule.config import load_settings
-        from joule.utils.db import JouleDB
-        from joule.utils.artifacts import ensure_artifacts, seed_random
-        from joule.cli_helpers.flow import resolve_target_and_bundle, create_run_record, JouleContainer, ExecutionContext
-        from joule.utils.terminal import TerminalReporter
-        from joule.evaluators.oracle import PerformanceOracle
-        from joule.orchestrator.mfbo import OptimizationOrchestrator
-        from joule.models import RunType
-        from rich.console import Console
-
-        from joule.discovery.resolver import discover_targets
-
-        path = Path(project_path)
-        settings = load_settings(path)
-        if config.parallel:
-            settings.max_parallel_workers = config.parallel
-        db = JouleDB(settings.db_path)
-        ensure_artifacts(settings)
-        seed_random(settings.seed)
-        console = Console(stderr=True, quiet=True)
-        reporter = TerminalReporter(console, "quiet")
-
-        # Resolve the actual file_path for the given target qualname
-        all_targets = discover_targets(settings, path)
-        matched_target = next((t.target for t in all_targets if t.target.qualname == config.target), None)
-        if not matched_target:
-            raise ValueError(f"Target '{config.target}' not found in project {project_path}")
-
-        target, bundle = resolve_target_and_bundle(
-            path=matched_target.file_path,
-            function=config.target,
-            settings=settings,
-            reporter=reporter,
-            tests=None,
-            properties=None,
-            harness=None,
-        )
-        chosen_backend = config.backend or settings.default_backend
-
-        record, actual_run_id, run_dir = create_run_record(
-            settings=settings, db=db,
-            run_type=RunType.OPTIMIZE,
-            target=target, bundle=bundle,
-            chosen_backend=chosen_backend,
-        )
-        reporter.set_log_file(run_dir / "events.jsonl")
-
-        oracle = PerformanceOracle.create(settings, backend_name=config.backend, reporter=reporter, db=db)
-        orchestrator = OptimizationOrchestrator.create(settings, db, oracle, reporter=reporter)
-        container = JouleContainer(
-            settings=settings, db=db, reporter=reporter,
-            oracle=oracle, orchestrator=orchestrator,
-            correctness=orchestrator.correctness,
-            registry=orchestrator.registry,
-            surrogate=orchestrator.surrogate,
-        )
-        context = ExecutionContext(
-            container=container, settings=settings, db=db, reporter=reporter,
-            target=target, bundle=bundle, chosen_backend=chosen_backend,
-            run_id=actual_run_id, run_dir=run_dir, record=record,
-            oracle=oracle, orchestrator=orchestrator,
-        )
-
-        from joule.cli_commands.run import run_optimize as _cli_optimize
-        _cli_optimize(
-            context,
-            budget=config.budget,
-            analysis=config.analysis,
-            no_dashboard=True,
-            output="json",
-            no_cache=not config.cache,
-            ci=False,
-            improvement_threshold=config.improvement_threshold,
-            fresh_surrogate=config.fresh_surrogate,
-        )
-
-        _active_runs[run_id]["status"] = "completed"
-        _active_runs[run_id]["actual_run_id"] = actual_run_id
-
-    except Exception as exc:
-        logger.exception("Background optimisation %s failed", run_id)
-        _active_runs[run_id]["status"] = "failed"
-        _active_runs[run_id]["error"] = str(exc)
-
-
-# ---------------------------------------------------------------------------
-# POST /api/runs/{run_id}/apply
-# ---------------------------------------------------------------------------
 
 @router.post("/runs/{run_id}/apply")
 async def apply_candidate_endpoint(run_id: str, config: ApplyConfig, request: Request, project_path: str | None = None):
@@ -481,11 +413,6 @@ async def apply_candidate_endpoint(run_id: str, config: ApplyConfig, request: Re
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Apply failed: {exc}")
 
-
-# ---------------------------------------------------------------------------
-# GET /api/runs/{run_id}/artifacts
-# ---------------------------------------------------------------------------
-
 @router.get("/runs/{run_id}/artifacts")
 async def get_run_artifacts(run_id: str, request: Request, project_path: str | None = None) -> list[dict[str, Any]]:
     pp = project_path or _project_path(request)
@@ -493,7 +420,6 @@ async def get_run_artifacts(run_id: str, request: Request, project_path: str | N
         settings, db = _load(pp)
         path = Path(pp)
 
-        # Check artifact files on disk
         run_dir = path / settings.artifact_dir / "runs" / run_id
         artifacts: list[dict[str, Any]] = []
         if run_dir.exists():
@@ -507,7 +433,6 @@ async def get_run_artifacts(run_id: str, request: Request, project_path: str | N
                         "created_at": datetime.fromtimestamp(f.stat().st_ctime, tz=UTC).isoformat(),
                     })
 
-        # Also include DB-stored artifacts
         try:
             db_artifacts = db.get_artifacts(run_id)
             for a in db_artifacts:
@@ -524,11 +449,6 @@ async def get_run_artifacts(run_id: str, request: Request, project_path: str | N
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-
-# ---------------------------------------------------------------------------
-# GET /api/runs/{run_id}/artifacts/{artifact_name}
-# ---------------------------------------------------------------------------
-
 @router.get("/runs/{run_id}/artifacts/{artifact_name:path}")
 async def download_artifact(run_id: str, artifact_name: str, request: Request, project_path: str | None = None):
     pp = project_path or _project_path(request)
@@ -544,11 +464,6 @@ async def download_artifact(run_id: str, artifact_name: str, request: Request, p
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
-
-# ---------------------------------------------------------------------------
-# GET /api/runs/active  – list background runs
-# ---------------------------------------------------------------------------
 
 @router.get("/runs/active")
 async def list_active_runs() -> dict[str, Any]:

@@ -9,7 +9,7 @@ from joule.surrogate.features import SourceFeatureExtractor
 from joule.surrogate.types import FEATURE_SCHEMA_VERSION
 
 
-# ── SmellTagger tests ──────────────────────────────────────────────────────
+# SmellTagger tests
 
 def test_tag_source_returns_frozenset():
     result = tag_source("def f(x): return x")
@@ -180,26 +180,26 @@ def add(a: int, b: int) -> int:
     assert len(tags) <= 1
 
 
-# ── Surrogate feature vector tests ─────────────────────────────────────────
+# Surrogate feature vector tests
 
-def test_feature_schema_version_is_2():
-    assert FEATURE_SCHEMA_VERSION == 2
+def test_feature_schema_version_is_3():
+    assert FEATURE_SCHEMA_VERSION == 3
 
 
 def test_feature_vector_length():
     extractor = SourceFeatureExtractor()
     source = "def f(x):\n    return x + 1\n"
     features = extractor.features(source)
-    # 32 base + 9 dynamic = 41 total
-    assert len(features) == 41
+    # 38 base + 9 dynamic = 47 total
+    assert len(features) == 47
 
 
 def test_feature_vector_base_length():
     extractor = SourceFeatureExtractor()
     source = "def f(x):\n    return x + 1\n"
     base = extractor._base_features(source)
-    # 17 original + 15 Phase 1 additions = 32
-    assert len(base) == 32
+    # 17 original + 15 Phase 1 additions + 6 Phase 2 additions = 38
+    assert len(base) == 38
 
 
 def test_feature_vector_nested_loop_indicator():
@@ -287,7 +287,7 @@ def test_feature_hints_populate_dynamic_slots():
     assert dynamic[8] == pytest.approx(0.3)   # op_frontier_rate
 
 
-# ── Registry smell-routing tests ───────────────────────────────────────────
+# Registry smell-routing tests
 
 def test_targets_smells_on_all_deterministic_operators():
     from joule.transformers.deterministic import default_deterministic_operators
