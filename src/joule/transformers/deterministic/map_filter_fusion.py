@@ -7,8 +7,8 @@ from joule.transformers.base import BaseOperator
 
 
 def _single_name(node: ast.expr) -> str | None:
-    """Return the name id if node is a simple ast.Name load, else None."""
-    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+    """Return the name id if node is a simple ast.Name, regardless of context."""
+    if isinstance(node, ast.Name):
         return node.id
     return None
 

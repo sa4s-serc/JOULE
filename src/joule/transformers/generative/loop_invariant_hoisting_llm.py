@@ -8,7 +8,7 @@ from .llm_base import LLMTransformationOperator
 
 
 def _loop_invariant_precheck(node: ast.AST) -> bool:
-    return isinstance(node, (ast.For, ast.While)) and any(isinstance(child, ast.Call) for child in ast.walk(node))
+    return isinstance(node, (ast.For, ast.While)) and any(isinstance(child, (ast.Call, ast.Attribute)) for child in ast.walk(node) if child is not node)
 
 
 class LoopInvariantHoistingLLM(LLMTransformationOperator):

@@ -171,6 +171,10 @@ class OperatorRegistry:
             self._last_target_key = target_key
             for stat in self.stats.values():
                 stat["precheck_failures"] = 0.0
+        else:
+            # Decay precheck failures so that old failures on this target don't permanently penalise
+            for stat in self.stats.values():
+                stat["precheck_failures"] = float(stat.get("precheck_failures", 0.0)) * 0.90
         ranked = self.ranked(
             phase=phase,
             parent_generation=parent_generation,
@@ -272,11 +276,19 @@ class OperatorRegistry:
 
     def _ucb(self, name: str, total_attempts: float) -> float:
         stat = self.stats[name]
-        attempts = max(1.0, stat["attempts"])
+        raw_attempts = float(stat["attempts"])
+        attempts = max(1.0, raw_attempts)
         mean_reward = stat["reward"] / attempts
         if not math.isfinite(mean_reward):
             mean_reward = 0.0
         exploration = math.sqrt((2.0 * math.log(total_attempts + 1.0)) / attempts)
+        
+        # Add a minimum exploration floor for operators that haven't had a fair chance.
+        # This prevents early failures (e.g. transient LLM errors) from permanently suppressing an operator.
+        MIN_EXPLORATION_ATTEMPTS = 2.0
+        if raw_attempts < MIN_EXPLORATION_ATTEMPTS:
+            exploration += 2.0  # Strong bonus to guarantee initial trials
+
         success_bonus = stat["successes"] / attempts
         return mean_reward + success_bonus + exploration
 

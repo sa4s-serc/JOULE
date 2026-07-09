@@ -235,12 +235,18 @@ def _has_dict_keys_membership(nodes: list[ast.AST]) -> bool:
 
 
 def _has_list_created_in_loop(nodes: list[ast.AST]) -> bool:
+    """Detect list creation (assignment) inside loops — a memory-waste signal.
+
+    Only flags list literals that are part of an assignment statement.
+    List literals used as function call arguments (e.g. ``func([1,2,3])``) are
+    intentional and not a C6 smell.
+    """
     for node in nodes:
         if isinstance(node, (ast.For, ast.While)):
             for child in ast.walk(node):
                 if child is node:
                     continue
-                if isinstance(child, ast.List):
+                if isinstance(child, ast.Assign) and isinstance(child.value, ast.List):
                     return True
     return False
 
@@ -317,11 +323,40 @@ def _has_regex_runtime_call(nodes: list[ast.AST]) -> bool:
 
 
 def _has_string_concat_loop(nodes: list[ast.AST]) -> bool:
+    """Detect string concatenation via += inside loops.
+
+    Only flags when the augmented-assignment target is plausibly a string.
+    We look for a prior assignment of the target name to a string constant
+    (e.g. ``s = ""`` or ``s = ''``) in the same function scope to avoid
+    false-positiving on integer accumulation patterns like ``total += n``.
+    """
     for node in nodes:
-        if isinstance(node, (ast.For, ast.While)):
-            for child in ast.walk(node):
-                if isinstance(child, ast.AugAssign) and isinstance(child.op, ast.Add):
-                    return True
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        # Collect names initialized to string constants in this function.
+        string_vars: set[str] = set()
+        for stmt in ast.walk(node):
+            if (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and isinstance(stmt.value, ast.Constant)
+                and isinstance(stmt.value.value, str)
+            ):
+                string_vars.add(stmt.targets[0].id)
+        if not string_vars:
+            continue
+        # Look for AugAssign(Add) on one of those names inside a loop.
+        for child in ast.walk(node):
+            if isinstance(child, (ast.For, ast.While)):
+                for loop_child in ast.walk(child):
+                    if (
+                        isinstance(loop_child, ast.AugAssign)
+                        and isinstance(loop_child.op, ast.Add)
+                        and isinstance(loop_child.target, ast.Name)
+                        and loop_child.target.id in string_vars
+                    ):
+                        return True
     return False
 
 
@@ -440,16 +475,18 @@ def _has_concurrency_opportunity(nodes: list[ast.AST]) -> bool:
         if not body_calls:
             continue
         # No augmented assignment on the loop target (loop-carried dependency)
-        loop_var = node.target.id if isinstance(node.target, ast.Name) else None
+        # Check for any AugAssign in the loop body — this indicates a
+        # loop-carried dependency (accumulator pattern) which prevents
+        # safe parallelisation.  The check is on any name, not just the
+        # loop variable, since patterns like `total += f(x)` are carried.
         has_carried_dep = False
-        if loop_var:
-            for stmt in node.body:
-                for child in ast.walk(stmt):
-                    if isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
-                        has_carried_dep = True
-                        break
-                if has_carried_dep:
+        for stmt in node.body:
+            for child in ast.walk(stmt):
+                if isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
+                    has_carried_dep = True
                     break
+            if has_carried_dep:
+                break
         if not has_carried_dep:
             return True
     return False

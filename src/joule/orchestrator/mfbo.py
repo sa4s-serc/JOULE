@@ -731,10 +731,19 @@ class OptimizationOrchestrator:
                 if candidate_report:
                     evaluation.metadata["explanation_summary"] = synthesize_explanation(baseline, evaluation)
                 self._record_candidate(run_id, evaluation, status="accepted" if accepted else "rejected")
+                base_reward = baseline_score - candidate_score
+                if accepted:
+                    computed_reward = max(0.0, base_reward)
+                else:
+                    if base_reward < 0:
+                        computed_reward = max(-2.0, base_reward / max(1e-6, baseline_score))
+                    else:
+                        computed_reward = max(0.0, base_reward) * (0.1 if rejection_reason == "correctness" else 0.5)
+
                 self._update_operator(
                     proposal,
                     success=accepted,
-                    reward=max(0.0, baseline_score - candidate_score),
+                    reward=computed_reward,
                     phase=phase,
                     parent_generation=parent.generation_depth,
                     frontier_contribution=accepted and frontier_state is FrontierState.FRONTIER_ACTIVE,
@@ -1291,6 +1300,9 @@ class OptimizationOrchestrator:
                 if not next_proposals:
                     break
                 next_proposal = sorted(next_proposals, key=lambda item: item.proposal_rank)[0]
+                
+                if next_proposal.candidate_source == current_proposal.candidate_source:
+                    break
                 
                 next_delta = self._proposal_generation_delta(next_proposal)
                 current_depth += next_delta

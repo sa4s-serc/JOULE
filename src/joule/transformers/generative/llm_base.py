@@ -83,10 +83,28 @@ def _loop_has_early_exit(node: ast.AST) -> bool:
     return False
 
 
+def _loop_without_early_exit(node: ast.AST) -> bool:
+    if not isinstance(node, (ast.For, ast.While)):
+        return False
+    return not _loop_has_early_exit(node)
+
+
+def _eager_materialisation_precheck(node: ast.AST) -> bool:
+    if isinstance(node, ast.ListComp):
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"list", "set", "dict", "tuple"}:
+        return True
+    return False
+
+
 def _call_has_generator_chain(node: ast.AST) -> bool:
     if not isinstance(node, ast.Call):
         return False
     return any(isinstance(arg, (ast.GeneratorExp, ast.ListComp, ast.SetComp, ast.DictComp)) for arg in node.args)
+
+
+def _loop_invariant_precheck(node: ast.AST) -> bool:
+    return isinstance(node, (ast.For, ast.While)) and any(isinstance(child, (ast.Call, ast.Attribute)) for child in ast.walk(node) if child is not node)
 
 
 def _loop_has_append_call(node: ast.AST) -> bool:

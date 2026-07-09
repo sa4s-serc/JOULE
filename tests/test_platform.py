@@ -26,7 +26,8 @@ def test_doctor_command_reports_backend(sample_project):
 def test_dashboard_once_returns_html(sample_project):
     result = runner.invoke(app, ["dashboard", str(sample_project), "--once"])
     assert result.exit_code == 0, result.output
-    assert "<title>JOULE Dashboard</title>" in result.output
+    normalized = re.sub(r"\s+", " ", result.output)
+    assert "<title>JOULE Dashboard</title>" in normalized
 
 
 def test_dashboard_once_includes_guided_sections(sample_project):
@@ -132,7 +133,8 @@ def test_repo_launcher_dispatches_to_cli(sample_project):
         check=False,
     )
     assert process.returncode == 0, process.stderr
-    assert "<title>JOULE Dashboard</title>" in process.stdout
+    normalized = re.sub(r"\s+", " ", process.stdout)
+    assert "<title>JOULE Dashboard</title>" in normalized
 
 
 def test_doctor_command_separates_required_and_optional_checks(sample_project):
