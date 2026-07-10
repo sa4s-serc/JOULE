@@ -54,7 +54,7 @@ Primary entrypoint: [src/joule/cli.py](../src/joule/cli.py)
 Responsibilities:
 
 - bootstrap settings, DB, and reporting
-- expose command surface (`doctor`, `baseline`, `run`, `resume`, `inspect`, `apply`, `discover`, `dashboard`, `transformations`, `config show`, `parse-json`)
+- expose command surface (`doctor`, `baseline`, `run`, `batch`, `resume`, `inspect`, `apply`, `discover`, `dashboard`, `transformations`, `config show`, `parse-json`)
 - coordinate output mode and CI semantics
 
 ### Discovery and Targeting
@@ -117,7 +117,7 @@ Primary files:
 
 Responsibilities:
 
-- iterative Pareto-parent expansion
+- iterative Pareto-parent expansion with multi-hop operator composition
 - operator ranking and generation
 - correctness and surrogate gating
 - multi-fidelity promotion and acceptance logic

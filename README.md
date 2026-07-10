@@ -39,6 +39,7 @@ The example suite now includes medium and very large complex targets documented 
 | `transformations` | Show active operator catalog | Human or JSON output |
 | `baseline` | Measure baseline for one target | Optional hotspots |
 | `run` | Full optimization flow | Supports `--analysis`, `--ci`, `--fresh-surrogate` |
+| `batch` | Batch discovery and optimization | Processes multiple targets sequentially |
 | `resume` | Resume an optimize run | Loads persisted run + checkpoints |
 | `inspect` | Inspect persisted run state | Candidate, measurement, event, hotspot visibility |
 | `dashboard` | Serve or print run dashboard HTML | `--once` for stdout snapshot |
@@ -63,7 +64,7 @@ Current code enforces typed/explicit contracts in key architecture seams:
 
 Use explicit workload selectors whenever possible:
 
-1. Target needs setup/state/fixtures/async orchestration: use `--tests`, `--properties`, or `--harness`.
+1. Target needs setup/state/fixtures/async orchestration: use `--tests`, `--properties`, `--harness`, or `--async-harness`.
 2. Conventional pytest layout and naming: heuristic discovery may be enough.
 3. No tests available: default-arg fallback is allowed only for safe pure targets.
 
@@ -96,9 +97,9 @@ In scope:
 
 - top-level functions, async functions, and class methods
 - explicit and heuristic workload resolution
-- iterative Pareto-parent search with bounded depth
+- iterative Pareto-parent search with bounded depth and multi-hop operator composition
 - configurable multi-metric surrogate models (`hist_gbdt`, `gp`, `local_kernel`)
-- local persistence and artifact-based inspection
+- local persistence, artifact-based inspection, and checkpoint/resume support
 - review-first dependency policy during apply
 
 Not in scope for current v0:

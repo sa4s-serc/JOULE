@@ -59,6 +59,7 @@ flowchart LR
 | What happened in optimization flow? | `optimization_analysis.json` | `events.jsonl` |
 | Can this candidate be applied? | candidate metadata `dependency_policy_state` | `apply` command response |
 | Can I resume safely? | `checkpoint.json` and DB checkpoints | `resume --run-id ...` |
+| Did a batch run process all targets? | Terminal output | `joule dashboard` to view all recent runs |
 
 ## Key Files Per Run
 

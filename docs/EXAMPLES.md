@@ -35,7 +35,17 @@ This catalog explains the expanded JOULE example set and when to use each target
   --analysis --no-dashboard
 ```
 
-### 2. Intermediate Transformation Mix
+### 2. Batch Processing
+
+```bash
+./joule batch \
+  example/mock_repo/sample_pkg/ \
+  --budget 4 \
+  --parallel 2 \
+  --verbose
+```
+
+### 3. Intermediate Transformation Mix
 
 ```bash
 ./joule run \

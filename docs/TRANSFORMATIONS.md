@@ -15,11 +15,16 @@ Source of truth for available operators is runtime output:
 flowchart LR
     REG[Operator Registry] --> PRE[Precheck]
     PRE --> GEN[Candidate Generation]
-    GEN --> COR[Correctness Gate]
+    GEN --> COMP[Search Space Composition]
+    COMP --> COR[Correctness Gate]
     COR --> SUR[Surrogate Screen]
     SUR --> MEAS[Fidelity Measurements]
     MEAS --> FRONT[Pareto Frontier Decision]
 ```
+
+## Search Space Composition
+
+Generated candidates can be chained together using a bounded multi-hop composition strategy. This allows JOULE to explore multi-step refactorings (e.g., `ForLoopToComprehension` followed by `MapFilterFusion`) before hitting the surrogate evaluation and correctness gates. Composed candidates are evaluated alongside base candidates.
 
 ## Tier Model
 
