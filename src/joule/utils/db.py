@@ -155,6 +155,32 @@ CREATE TABLE IF NOT EXISTS surrogate_observations (
 CREATE INDEX IF NOT EXISTS idx_surrogate_obs_target_recent ON surrogate_observations(target_key, id DESC);
 """
 
+# ---------------------------------------------------------------------------
+# Incremental migration registry
+# ---------------------------------------------------------------------------
+# Each entry maps a *target schema version* to the SQL that must be applied
+# to reach it from the previous version.  Entries MUST be ordered by version
+# and each entry MUST be idempotent (use CREATE TABLE IF NOT EXISTS,
+# ALTER TABLE … ADD COLUMN IF NOT EXISTS, etc.).
+#
+# To add a new migration:
+#   1. Increment DB_SCHEMA_VERSION at the top of the file.
+#   2. Add one entry here: {DB_SCHEMA_VERSION: "ALTER TABLE …"}
+#   3. That is all — no other edits required.
+_MIGRATIONS: dict[int, str] = {
+    # Version 1 → 2: added measurements_cache and surrogate_observations tables.
+    # These are already part of SCHEMA (CREATE TABLE IF NOT EXISTS), so no
+    # additional ALTER is required; the entry exists only to advance the version
+    # counter for existing v1 databases.
+    2: "SELECT 1",  # no-op; tables already in SCHEMA
+    # Version 2 → 3: added checkpoints table.
+    3: "SELECT 1",  # no-op; table already in SCHEMA
+    # Version 3 → 4: added hotspot_profiles table.
+    4: "SELECT 1",  # no-op; table already in SCHEMA
+    # Version 4 → 5: added idx_cache_lookup index and idx_surrogate_obs_target_recent.
+    5: "SELECT 1",  # no-op; indexes already in SCHEMA
+}
+
 
 class JouleDB:
     def __init__(self, path: Path) -> None:
@@ -165,13 +191,7 @@ class JouleDB:
         self._check_schema_compatibility()
         with self.connect() as conn:
             conn.executescript(SCHEMA)
-            row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
-            current_version = int(row[0]) if row else 0
-            if current_version != DB_SCHEMA_VERSION:
-                conn.execute(
-                    "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)",
-                    (DB_SCHEMA_VERSION, datetime.now(UTC).isoformat()),
-                )
+            self._apply_migrations(conn)
 
     def _check_schema_compatibility(self) -> None:
         if not self.path.exists() or self.path.stat().st_size == 0:
@@ -193,13 +213,46 @@ class JouleDB:
                 )
             row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
             current_version = int(row[0]) if row else 0
-            if current_version != 0 and current_version < DB_SCHEMA_VERSION:
-                raise ValueError(
-                    "Detected incompatible JOULE database schema version "
-                    f"{current_version}. Remove .joule/ and rerun to initialize schema version {DB_SCHEMA_VERSION}."
+            if current_version != 0 and current_version > DB_SCHEMA_VERSION:
+                # DB was created by a newer version of JOULE — warn but do not crash.
+                import warnings
+                warnings.warn(
+                    f"JOULE database schema version {current_version} is newer than the "
+                    f"current tool version ({DB_SCHEMA_VERSION}). Some features may not work correctly.",
+                    UserWarning,
+                    stacklevel=4,
                 )
         finally:
             conn.close()
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        """Apply any pending migrations from ``_MIGRATIONS`` in order.
+
+        Reads the current version from ``schema_version``, then applies
+        every migration whose target version is greater than the current
+        version, in ascending order.  Each migration is recorded in
+        ``schema_version`` immediately after it succeeds.
+        """
+        row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
+        current_version = int(row[0]) if row else 0
+
+        for target_version in sorted(_MIGRATIONS.keys()):
+            if target_version <= current_version:
+                continue
+            migration_sql = _MIGRATIONS[target_version]
+            conn.execute(migration_sql)
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)",
+                (target_version, datetime.now(UTC).isoformat()),
+            )
+
+        # Always ensure current version is recorded even if no migrations ran.
+        if current_version < DB_SCHEMA_VERSION:
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)",
+                (DB_SCHEMA_VERSION, datetime.now(UTC).isoformat()),
+            )
+
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

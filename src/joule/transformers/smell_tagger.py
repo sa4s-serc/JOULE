@@ -10,6 +10,9 @@ Used by OperatorRegistry to bias operator selection toward operators whose
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass, field
+
+from joule.utils.ast_cache import get_parsed_tree
 
 
 def tag_source(source: str) -> frozenset[str]:
@@ -17,11 +20,13 @@ def tag_source(source: str) -> frozenset[str]:
 
     Returns an empty frozenset on parse errors — callers treat that as
     "no smell information available" and apply no bias.
+
+    Uses the shared ``joule.utils.ast_cache`` so that the same source
+    string is only parsed once even when both the smell tagger and the
+    surrogate feature extractor call this function for the same candidate.
     """
-    try:
-        tree = ast.parse(source)
-        nodes = list(ast.walk(tree))
-    except SyntaxError:
+    tree, nodes = get_parsed_tree(source)
+    if tree is None:
         return frozenset()
 
     tags: set[str] = set()
@@ -103,6 +108,163 @@ def tag_source(source: str) -> frozenset[str]:
         tags.add("C12")
 
     return frozenset(tags)
+
+
+# ---------------------------------------------------------------------------
+# Enriched smell report (confidence + evidence)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class SmellEvidence:
+    """Evidence for a single Energy-Smell category.
+
+    Attributes
+    ----------
+    category:
+        Category code, e.g. ``"C3"``.
+    confidence:
+        Float in [0.0, 1.0].  Currently computed as a weighted count of
+        predicates triggered for this category (each predicate contributes
+        1.0 / max_predicates).
+    evidence:
+        Human-readable descriptions of each triggered predicate, e.g.
+        ``["nested loop detected", "range(len(x)) loop detected"]``.
+    """
+
+    category: str
+    confidence: float
+    evidence: list[str] = field(default_factory=list)
+
+    def to_record(self) -> dict:
+        return {
+            "category": self.category,
+            "confidence": round(float(self.confidence), 4),
+            "evidence": list(self.evidence),
+        }
+
+
+# Maximum number of individual predicates we check per category (used for
+# normalising confidence scores so they stay in [0, 1]).
+_MAX_PREDICATES_PER_CATEGORY: dict[str, int] = {
+    "C1": 2, "C2": 1, "C3": 4, "C4": 3, "C5": 2,
+    "C6": 3, "C7": 2, "C8": 3, "C9": 1, "C10": 3,
+    "C11": 1, "C12": 1,
+}
+
+
+def tag_source_with_evidence(source: str) -> dict[str, SmellEvidence]:
+    """Return per-category smell evidence for *source*.
+
+    Unlike :func:`tag_source`, this function returns a mapping from
+    category code to a :class:`SmellEvidence` object containing a
+    confidence score (0–1) and a list of human-readable evidence strings.
+
+    Returns an empty dict on parse errors.
+
+    Example::
+
+        report = tag_source_with_evidence(source)
+        for code, smell in report.items():
+            print(f"{code}: confidence={smell.confidence:.2f}")
+            for ev in smell.evidence:
+                print(f"  - {ev}")
+    """
+    tree, nodes = get_parsed_tree(source)
+    if tree is None:
+        return {}
+
+    hits: dict[str, list[str]] = {}
+
+    def _record(category: str, description: str) -> None:
+        hits.setdefault(category, []).append(description)
+
+    # C1 — Redundant Computation
+    if _has_dead_assignment(nodes):
+        _record("C1", "self-assignment detected (x = x)")
+    if _has_repeated_call(nodes):
+        _record("C1", "repeated identical call expression detected")
+
+    # C2 — Unnecessary Call Overhead
+    if _has_static_method_candidate(nodes):
+        _record("C2", "instance method never uses self — static method candidate")
+
+    # C3 — Inefficient Iteration
+    if _has_loop(nodes):
+        _record("C3", "explicit for/while loop detected")
+    if _has_nested_loop(nodes):
+        _record("C3", "nested loop detected (O(n²) risk)")
+    if _has_range_len_loop(nodes):
+        _record("C3", "range(len(x)) pattern — prefer enumerate()")
+    if _has_loop_append(nodes):
+        _record("C3", "list.append() inside loop — prefer comprehension")
+
+    # C4 — Inefficient Control Flow
+    if _has_bare_except(nodes):
+        _record("C4", "bare except clause detected")
+    if _has_consecutive_ifs(tree):
+        _record("C4", "consecutive if statements — consider elif")
+    if _has_return_bool_pattern(nodes):
+        _record("C4", "explicit return True/False after comparison")
+
+    # C5 — Suboptimal Data Structures
+    if _has_list_membership_check(nodes):
+        _record("C5", "membership test on list — consider set")
+    if _has_dict_keys_membership(nodes):
+        _record("C5", "d.keys() membership check — use 'x in d'")
+
+    # C6 — Unnecessary Memory
+    if _has_list_created_in_loop(nodes):
+        _record("C6", "container created inside loop body")
+    if _has_bare_open(nodes):
+        _record("C6", "open() call outside with-statement")
+    if _has_mutable_default_arg(nodes):
+        _record("C6", "mutable default argument (list/dict/set)")
+
+    # C7 — Suboptimal Algorithmic
+    if _has_recursive_call(nodes):
+        _record("C7", "recursive call detected — consider iterative/DP")
+    if _has_nested_loop(nodes):
+        _record("C7", "nested loop detected — O(n²) algorithm risk")
+
+    # C8 — Missing Reuse
+    if _has_repeated_call(nodes):
+        _record("C8", "repeated identical call — cache the result")
+    if _has_regex_runtime_call(nodes):
+        _record("C8", "runtime re.compile() inside function — pre-compile")
+    if _has_recursive_call(nodes):
+        _record("C8", "recursive call — consider memoisation")
+
+    # C9 — I/O Access
+    if _has_io_access(nodes):
+        _record("C9", "file / network / DB I/O detected")
+
+    # C10 — Underused Language Primitives
+    if _has_range_len_loop(nodes):
+        _record("C10", "range(len(x)) — prefer enumerate() or zip()")
+    if _has_string_concat_loop(nodes):
+        _record("C10", "string concatenation in loop — prefer str.join()")
+    if _has_manual_reduction(nodes):
+        _record("C10", "manual accumulator — prefer sum()/min()/max()/any()/all()")
+
+    # C11 — Concurrency opportunity
+    if _has_concurrency_opportunity(nodes):
+        _record("C11", "independent loop iterations detected — ThreadPoolExecutor candidate")
+
+    # C12 — Hardware locality
+    if _has_strided_access(nodes):
+        _record("C12", "strided subscript access (a[i*k]) — cache-unfriendly")
+
+    result: dict[str, SmellEvidence] = {}
+    for category, descriptions in hits.items():
+        max_p = _MAX_PREDICATES_PER_CATEGORY.get(category, 1)
+        confidence = min(1.0, len(descriptions) / max_p)
+        result[category] = SmellEvidence(
+            category=category,
+            confidence=confidence,
+            evidence=descriptions,
+        )
+    return result
 
 
 # AST predicates

@@ -35,6 +35,7 @@ from joule.orchestrator.internal.mfbo_flow import (
 )
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
 from joule.surrogate import ObjectiveSurrogate, SurrogateMetricTargets, SurrogateObservation, SurrogateQuery
+from joule.transformers.protocols import OperatorSelectorProtocol
 from joule.transformers.registry import OperatorRegistry
 from joule.utils.analysis import candidate_source_hash
 from joule.utils.db import JouleDB
@@ -58,7 +59,7 @@ class OptimizationOrchestrator:
         db: JouleDB,
         oracle: PerformanceOracle,
         correctness: CorrectnessEngine,
-        registry: OperatorRegistry,
+        registry: OperatorSelectorProtocol,
         surrogate: ObjectiveSurrogate,
         reporter: TerminalReporter | None = None,
     ) -> None:
@@ -78,7 +79,7 @@ class OptimizationOrchestrator:
         oracle: PerformanceOracle,
         reporter: TerminalReporter | None = None,
     ) -> "OptimizationOrchestrator":
-        correctness = CorrectnessEngine()
+        correctness = CorrectnessEngine(max_workers=settings.max_parallel_workers)
         registry = OperatorRegistry(
             llm_model=settings.llm_model,
             include_llm=settings.enable_llm_operators,
@@ -229,16 +230,11 @@ class OptimizationOrchestrator:
                 parent_context.search_metadata["smell_tags"] = sorted(_smell_tags)
             operator = None
             if state.no_frontier_gain >= self.settings.search_convergence_patience:
-                select_escape = getattr(self.registry, "select_escape_operator_for_candidate", None)
-                escape_operator = (
-                    select_escape(
-                        target=candidate_target,
-                        context=parent_context,
-                        phase=phase,
-                        parent_generation=parent.generation_depth,
-                    )
-                    if callable(select_escape)
-                    else None
+                escape_operator = self.registry.select_escape_operator_for_candidate(
+                    target=candidate_target,
+                    context=parent_context,
+                    phase=phase,
+                    parent_generation=parent.generation_depth,
                 )
                 if escape_operator is not None and not escape_used:
                     operator = escape_operator
@@ -276,28 +272,13 @@ class OptimizationOrchestrator:
                     break
             operators = [operator] if operator is not None else []
             if not operators:
-                select_for_candidate = getattr(self.registry, "select_operators_for_candidate", None)
-                if callable(select_for_candidate):
-                    operators = select_for_candidate(
-                        target=candidate_target,
-                        context=parent_context,
-                        phase=phase,
-                        parent_generation=parent.generation_depth,
-                        top_k=max(1, int(self.settings.search_operator_beam_width)),
-                    )
-                else:
-                    select_func = getattr(self.registry, "select_operator_for_candidate", None)
-                    if callable(select_func):
-                        base_op = select_func(
-                            target=candidate_target,
-                            context=parent_context,
-                            phase=phase,
-                            parent_generation=parent.generation_depth,
-                        )
-                    else:
-                        base_op = self.registry.select_operator(phase=phase, parent_generation=parent.generation_depth)
-                    if base_op is not None:
-                        operators = [base_op]
+                operators = self.registry.select_operators_for_candidate(
+                    target=candidate_target,
+                    context=parent_context,
+                    phase=phase,
+                    parent_generation=parent.generation_depth,
+                    top_k=max(1, int(self.settings.search_operator_beam_width)),
+                )
 
                 if not operators:
                     self._record_event(
@@ -1281,19 +1262,14 @@ class OptimizationOrchestrator:
                         "composed_from_operator": current_proposal.operator_name,
                     },
                 )
-                select_for_candidate = getattr(self.registry, "select_operator_for_candidate", None)
-                if callable(select_for_candidate):
-                    next_operator = select_for_candidate(
-                        target=intermediate_target,
-                        context=intermediate_context,
-                        phase=phase,
-                        parent_generation=current_depth,
-                    )
-                else:
-                    next_operator = self.registry.select_operator(
-                        phase=phase,
-                        parent_generation=current_depth,
-                    )
+                ops = self.registry.select_operators_for_candidate(
+                    target=intermediate_target,
+                    context=intermediate_context,
+                    phase=phase,
+                    parent_generation=current_depth,
+                    top_k=1,
+                )
+                next_operator = ops[0] if ops else None
                 if next_operator is None:
                     break
                 next_proposals = next_operator.generate(intermediate_target, intermediate_context)

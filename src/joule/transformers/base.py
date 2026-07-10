@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 from joule.models import SearchContext, TargetSpec, Tier, TransformationResult, tier_descriptor
+from joule.utils.ast_cache import get_parsed_tree as _get_parsed_tree
 
 
 class BaseOperator(ABC):
@@ -52,11 +53,11 @@ class BaseOperator(ABC):
         )
 
     def precheck(self, target: TargetSpec, context: SearchContext | None = None) -> bool:
-        try:
-            tree = ast.parse(target.source)
-        except SyntaxError:
+        tree, _nodes = _get_parsed_tree(target.source)
+        if tree is None:
             return False
         return self._precheck_tree(tree, target, context)
+
 
     def _precheck_tree(self, tree: ast.AST, target: TargetSpec, context: SearchContext | None = None) -> bool:
         del target, context

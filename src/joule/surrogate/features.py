@@ -8,6 +8,7 @@ import numpy as np
 
 from joule.models import SearchContext
 from joule.surrogate.types import FEATURE_SCHEMA_VERSION
+from joule.utils.ast_cache import get_parsed_tree as _get_parsed_tree
 
 
 class SourceFeatureExtractor:
@@ -57,12 +58,11 @@ class SourceFeatureExtractor:
             self._base_cache.move_to_end(source_hash)
             return cached
 
-        try:
-            tree = ast.parse(source)
-            nodes = list(ast.walk(tree))
-        except SyntaxError:
+        tree, nodes = _get_parsed_tree(source)
+        if tree is None:
             nodes = []
             tree = ast.Module(body=[], type_ignores=[])
+
 
         node_count = len(nodes)
 

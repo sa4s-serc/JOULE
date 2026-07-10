@@ -79,14 +79,36 @@ class _SingleRegistry:
         self.operator = operator
         self.operators = [operator]
 
-    def select_operator(self, *, phase: SearchPhase, parent_generation: int):
-        del phase, parent_generation
-        return self.operator
+    def select_operators_for_candidate(
+        self,
+        *,
+        target=None,
+        context=None,
+        phase: SearchPhase,
+        parent_generation: int,
+        top_k: int = 1,
+    ) -> list:
+        del target, context, phase, parent_generation
+        return [self.operator]
+
+    def select_escape_operator_for_candidate(
+        self,
+        *,
+        target=None,
+        context=None,
+        phase: SearchPhase,
+        parent_generation: int,
+    ):
+        del target, context, phase, parent_generation
+        return None
 
     def update(self, *_args, **_kwargs) -> None:
         return None
 
     def record_empty_attempt(self, *_args, **_kwargs) -> None:
+        return None
+
+    def load_stats(self, *_args, **_kwargs) -> None:
         return None
 
 
@@ -819,7 +841,14 @@ def test_partial_fidelity_rejections_record_explicit_reason(tmp_path: Path):
     assert rejected_f1[-1]["detail"].get("reason") == "partial_fidelity_f1"
 
 
-def test_db_rejects_legacy_schema_versions(tmp_path: Path):
+def test_db_migrates_legacy_schema_versions(tmp_path: Path):
+    """JouleDB now applies incremental migrations instead of rejecting old schemas.
+
+    Opening a DB with version < DB_SCHEMA_VERSION should succeed and the
+    schema_version table should be updated to the current version.
+    """
+    from joule.utils.db import DB_SCHEMA_VERSION
+
     db_path = tmp_path / "legacy.db"
     db = JouleDB(db_path)
     with db.connect() as conn:
@@ -828,8 +857,12 @@ def test_db_rejects_legacy_schema_versions(tmp_path: Path):
             "INSERT INTO schema_version(version, applied_at) VALUES(?, ?)",
             (4, "2026-01-01T00:00:00+00:00"),
         )
-    with pytest.raises(ValueError, match="incompatible JOULE database schema version"):
-        JouleDB(db_path)
+    # Opening a DB with an older schema should succeed (migration applied).
+    db2 = JouleDB(db_path)
+    with db2.connect() as conn:
+        row = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
+    assert row is not None
+    assert int(row[0]) == DB_SCHEMA_VERSION
 
 
 def test_restore_checkpoint_rejects_legacy_checkpoint_schema(tmp_path: Path):

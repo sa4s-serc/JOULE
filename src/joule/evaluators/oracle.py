@@ -56,8 +56,14 @@ def _backend_cache_namespace(backend: EnergyBackend) -> str:
     return name or type(backend).__name__.lower()
 
 
-def _measurement_cache_key(bundle: WorkloadBundle, backend: EnergyBackend) -> str:
-    return f"backend::{_backend_cache_namespace(backend)}::{_bundle_cache_key(bundle)}"
+def _measurement_cache_key(bundle: WorkloadBundle, backend: EnergyBackend, target_qualname: str) -> str:
+    """Build a fully content-addressed cache key.
+
+    Includes the backend namespace, target qualname, and workload
+    identifiers/selectors so that two different functions sharing the
+    same workload IDs and backend cannot collide.
+    """
+    return f"backend::{_backend_cache_namespace(backend)}::target::{target_qualname}::{_bundle_cache_key(bundle)}"
 
 
 class PerformanceOracle:
@@ -102,7 +108,7 @@ class PerformanceOracle:
             source = candidate_source or target.source
             source_hash = source_sha256(source)
             file_mtime = target.file_path.stat().st_mtime if target.file_path.exists() else 0.0
-            cache_key = _measurement_cache_key(bundle, self.backend)
+            cache_key = _measurement_cache_key(bundle, self.backend, target.qualname)
 
             if use_cache and self.db and candidate_id is None:
                 cached = self.db.get_cached_measurement(source_hash, cache_key, fidelity.value, file_mtime)
