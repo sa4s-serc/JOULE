@@ -914,3 +914,27 @@ def test_energy_backend_protocol_requires_parallel_capability_flag():
             )
 
     assert not isinstance(MissingCapabilityBackend(), EnergyBackend)
+
+
+def test_optimization_time_budget(tmp_path: Path):
+    settings = JouleSettings(project_root=tmp_path)
+    # Set time budget to 0.0 seconds so it exits on the first check.
+    settings.optimization_time_budget_s = 0.0
+    target, bundle = _target_and_bundle(tmp_path)
+    db = JouleDB(settings.db_path)
+    orchestrator = OptimizationOrchestrator(
+        settings=settings,
+        db=db,
+        oracle=cast(Any, _FakeOracle({
+            target.source: (1.0, 1.0, 1.0),
+            "def target(limit):\n    return sum(value for value in range(limit))\n": (0.8, 0.8, 800.0)
+        })),
+        correctness=cast(Any, _AlwaysCorrect()),
+        registry=cast(Any, _SingleRegistry(_ChainOperator())),
+        surrogate=_make_surrogate(tmp_path),
+    )
+    _baseline, _pareto, best = orchestrator.optimize("run-time-budget", target, bundle, budget=10)
+    events = db.get_search_events("run-time-budget")
+    converged = [e for e in events if e["event_type"] == "converged" and e["detail"].get("reason") == "time_budget_exceeded"]
+    assert converged
+

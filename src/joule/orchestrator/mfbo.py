@@ -202,7 +202,20 @@ class OptimizationOrchestrator:
         accepted_candidate_ids = {candidate_id for candidate_id in accepted_evaluations}
         if self.reporter:
             self.reporter.info("progress", f"Optimization budget: {state.total_budget} measured candidate(s)")
+        start_time = perf_counter()
         while state.measured < state.total_budget:
+            if self.settings.optimization_time_budget_s is not None:
+                elapsed = perf_counter() - start_time
+                if elapsed >= self.settings.optimization_time_budget_s:
+                    if self.reporter:
+                        self.reporter.info("progress", f"Stopping: time budget exceeded ({elapsed:.1f}s / {self.settings.optimization_time_budget_s}s)")
+                    self._record_event(
+                        run_id,
+                        event_type="converged",
+                        stage="search",
+                        detail={"reason": "time_budget_exceeded", "elapsed_s": elapsed},
+                    )
+                    break
             phase = self._phase_for_index(state.measured, state.total_budget)
             prefer_deeper_parent = phase is not SearchPhase.EXPLORATION or state.no_frontier_gain > 0
             parent_id = pareto.sample_active_parent(
@@ -340,6 +353,11 @@ class OptimizationOrchestrator:
             for proposal in ranked_proposals:
                 if state.measured >= state.total_budget:
                     break
+                if self.settings.optimization_time_budget_s is not None:
+                    elapsed = perf_counter() - start_time
+                    if elapsed >= self.settings.optimization_time_budget_s:
+                        break
+
                 candidate_id = uuid.uuid4().hex[:8]
                 source_hash = candidate_source_hash(proposal.candidate_source)
                 generation_delta = self._proposal_generation_delta(proposal)
