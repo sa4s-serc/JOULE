@@ -70,7 +70,7 @@ def run_batch(
                 db=db,
                 run_type=RunType.OPTIMIZE,
                 target=target,
-                bundle=target_result, # target_result is a WorkloadBundle (DiscoveryResult subclasses / wraps it)
+                bundle=target_result,  # target_result is a WorkloadBundle (DiscoveryResult subclasses or wraps it)
                 chosen_backend=chosen_backend,
             )
 
