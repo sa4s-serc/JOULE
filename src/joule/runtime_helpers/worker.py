@@ -217,6 +217,46 @@ def execute_harness_workload(
     return {"return_code": 0, "success": True}, inner_repetitions
 
 
+async def _run_async_repetitions(callback: Any, target_callable: Any, expects_target: bool, reps: int) -> None:
+    import inspect
+    tasks = []
+    for _ in range(reps):
+        if expects_target:
+            res = callback(target_callable)
+        else:
+            res = callback()
+        if inspect.isawaitable(res):
+            tasks.append(res)
+        elif hasattr(res, "__await__") or inspect.iscoroutine(res):
+            tasks.append(res)
+    if tasks:
+        import asyncio
+        await asyncio.gather(*tasks)
+
+
+def execute_async_harness_workload(
+    *,
+    target: TargetSpec,
+    selector: str,
+    project_root: Path,
+    overlay_root: Path | None,
+    inner_repetitions: int,
+    load_object_fn,
+) -> tuple[dict[str, Any], int]:
+    import asyncio
+    callback = load_object_fn(selector, project_root, overlay_root=overlay_root)
+    target_callable = load_target_callable(target, project_root, overlay_root)
+    signature = inspect.signature(callback)
+    expects_target = len(signature.parameters) > 0
+
+    async def _main():
+        await _run_async_repetitions(callback, target_callable, expects_target, inner_repetitions)
+
+    asyncio.run(_main())
+    return {"return_code": 0, "success": True}, inner_repetitions
+
+
+
 def execute_golden_trace_workload(
     *,
     target: TargetSpec,

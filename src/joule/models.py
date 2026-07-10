@@ -16,7 +16,9 @@ class WorkloadKind(str, Enum):
     PYTEST = "pytest"
     PROPERTY = "property"
     HARNESS = "harness"
+    ASYNC_HARNESS = "async_harness"
     GOLDEN_TRACE = "golden_trace"
+
 
 
 class Fidelity(str, Enum):

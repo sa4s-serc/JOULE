@@ -8,6 +8,7 @@ from typing import Any
 
 from joule.models import TargetSpec, WorkloadSpec
 from joule.runtime_helpers.worker import (
+    execute_async_harness_workload,
     execute_golden_trace_workload,
     execute_harness_workload,
     execute_property_workload,
@@ -107,6 +108,15 @@ def execute_workload(
             )
         elif workload.kind is WorkloadKind.HARNESS:
             payload, logical_invocations = execute_harness_workload(
+                target=target,
+                selector=workload.selector,
+                project_root=project_root,
+                overlay_root=overlay_root,
+                inner_repetitions=inner_repetitions,
+                load_object_fn=load_object,
+            )
+        elif workload.kind is WorkloadKind.ASYNC_HARNESS:
+            payload, logical_invocations = execute_async_harness_workload(
                 target=target,
                 selector=workload.selector,
                 project_root=project_root,
