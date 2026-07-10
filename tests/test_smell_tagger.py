@@ -182,24 +182,26 @@ def add(a: int, b: int) -> int:
 
 # Surrogate feature vector tests
 
-def test_feature_schema_version_is_3():
-    assert FEATURE_SCHEMA_VERSION == 3
+def test_feature_schema_version_is_4():
+    assert FEATURE_SCHEMA_VERSION == 4
+
 
 
 def test_feature_vector_length():
     extractor = SourceFeatureExtractor()
     source = "def f(x):\n    return x + 1\n"
     features = extractor.features(source)
-    # 38 base + 9 dynamic = 47 total
-    assert len(features) == 47
+    # 41 base + 9 dynamic = 50 total
+    assert len(features) == 50
 
 
 def test_feature_vector_base_length():
     extractor = SourceFeatureExtractor()
     source = "def f(x):\n    return x + 1\n"
     base = extractor._base_features(source)
-    # 17 original + 15 Phase 1 additions + 6 Phase 2 additions = 38
-    assert len(base) == 38
+    # 17 original + 15 Phase 1 additions + 6 Phase 2 additions + 3 Batch 6 additions = 41
+    assert len(base) == 41
+
 
 
 def test_feature_vector_nested_loop_indicator():
@@ -285,6 +287,26 @@ def test_feature_hints_populate_dynamic_slots():
     assert dynamic[6] == pytest.approx(1.0)   # operator_tier
     assert dynamic[7] == pytest.approx(0.8)   # op_success_rate
     assert dynamic[8] == pytest.approx(0.3)   # op_frontier_rate
+
+
+def test_feature_vector_identifier_entropy():
+    extractor = SourceFeatureExtractor()
+    simple = "def f(x):\n    a = x\n    return a\n"  # Very repetitive naming (few identifiers)
+    diverse = "def f(x):\n    a = 1\n    b = 2\n    c = 3\n    d = 4\n    return x + a + b + c + d\n"
+    simple_base = extractor._base_features(simple)
+    diverse_base = extractor._base_features(diverse)
+    # entropy is index 38
+    assert diverse_base[38] > simple_base[38]
+
+
+def test_feature_vector_import_profile():
+    extractor = SourceFeatureExtractor()
+    source = "def f():\n    import sys\n    import json\n    import something_external\n"
+    base = extractor._base_features(source)
+    # stdlib imports (index 39), third party imports (index 40)
+    assert base[39] == 2.0  # sys and json
+    assert base[40] == 1.0  # something_external
+
 
 
 # Registry smell-routing tests

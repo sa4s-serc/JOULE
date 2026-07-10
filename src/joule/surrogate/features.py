@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import math
+import sys
 from collections import OrderedDict
 
 import numpy as np
@@ -9,6 +11,7 @@ import numpy as np
 from joule.models import SearchContext
 from joule.surrogate.types import FEATURE_SCHEMA_VERSION
 from joule.utils.ast_cache import get_parsed_tree as _get_parsed_tree
+
 
 
 class SourceFeatureExtractor:
@@ -158,6 +161,35 @@ class SourceFeatureExtractor:
             for n in nodes
         ))
 
+        # 1. Identifier entropy (Shannon entropy of Name.ids)
+        names = [n.id for n in nodes if isinstance(n, ast.Name)]
+        if names:
+            from collections import Counter
+            counts = Counter(names)
+            total = len(names)
+            identifier_entropy = -sum((count / total) * math.log2(count / total) for count in counts.values())
+        else:
+            identifier_entropy = 0.0
+
+        # 2. Import profile (standard library vs third-party)
+        stdlib_imports_count = 0.0
+        third_party_imports_count = 0.0
+        for n in nodes:
+            if isinstance(n, ast.Import):
+                for name in n.names:
+                    root = name.name.split(".", 1)[0].strip()
+                    if root in sys.stdlib_module_names:
+                        stdlib_imports_count += 1.0
+                    else:
+                        third_party_imports_count += 1.0
+            elif isinstance(n, ast.ImportFrom):
+                if n.module:
+                    root = n.module.split(".", 1)[0].strip()
+                    if root in sys.stdlib_module_names:
+                        stdlib_imports_count += 1.0
+                    else:
+                        third_party_imports_count += 1.0
+
         base = np.array(
             [
                 # original 17
@@ -201,6 +233,10 @@ class SourceFeatureExtractor:
                 name_reuse_ratio,
                 subscript_density,
                 float(has_decorator),
+                # Batch 6 additions: 3 new features
+                identifier_entropy,
+                stdlib_imports_count,
+                third_party_imports_count,
             ],
             dtype=float,
         )
