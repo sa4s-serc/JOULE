@@ -12,7 +12,9 @@ from joule.cli_commands.baseline import run_baseline
 from joule.cli_commands.config_show import run_config_show
 from joule.cli_commands.run import run_optimize
 from joule.cli_commands.dashboard import run_dashboard
+from joule.cli_commands.batch import run_batch
 from joule.cli_commands.discover import run_discover
+
 from joule.cli_commands.doctor import run_doctor
 from joule.cli_commands.inspect import run_inspect
 from joule.cli_commands.parse_json import run_parse_json
@@ -408,5 +410,38 @@ def scaffold_operator(
     )
 
 
+@app.command()
+def batch(
+    path: Path = typer.Argument(..., help=PATH_HELP),
+    budget: int | None = typer.Option(
+        None,
+        "--budget",
+        help="Override candidate search budget (default: [tool.joule].optimization_budget)",
+    ),
+    backend: str | None = typer.Option(None, "--backend", help="Energy backend"),
+    parallel: int | None = typer.Option(None, "--parallel", help="Override max parallel workers"),
+    verbose: bool = typer.Option(False, "--verbose", help="Print detailed optimization events"),
+    quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
+):
+    """Discover and optimize multiple targets in the project sequentially.
+
+    Runs target discovery to find candidate functions, then executes the
+    optimization loop for each candidate.
+    """
+    _validate_positive(budget, option_name="--budget")
+    _validate_positive(parallel, option_name="--parallel")
+    run_batch(
+        path=path,
+        budget=budget,
+        backend=backend,
+        parallel=parallel,
+        verbose=verbose,
+        quiet=quiet,
+        console=console,
+        bootstrap_fn=_bootstrap,
+    )
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
+

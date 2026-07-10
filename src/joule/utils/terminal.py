@@ -91,3 +91,7 @@ class TerminalReporter:
 
     def warn(self, stage: str, message: str) -> None:
         self._emit(level="warn", stage=stage, message=message, minimum="normal", color="yellow")
+
+    def error(self, stage: str, message: str) -> None:
+        self._emit(level="error", stage=stage, message=message, minimum="normal", color="red")
+
