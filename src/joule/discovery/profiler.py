@@ -9,7 +9,17 @@ from joule.models import DiscoveryResult, TargetSpec
 
 
 class StaticProfiler:
-    def discover(self, project_root: Path, limit: int = 5) -> list[DiscoveryResult]:
+    def discover(
+        self,
+        project_root: Path,
+        limit: int = 5,
+        *,
+        lines_weight: float = 0.3,
+        loop_density_weight: float = 20.0,
+        loop_count_weight: float = 2.0,
+        call_weight: float = 0.8,
+        nesting_weight: float = 2.0,
+    ) -> list[DiscoveryResult]:
         results: list[DiscoveryResult] = []
         for file_path in project_root.rglob("*.py"):
             relative = file_path.relative_to(project_root)
@@ -32,10 +42,10 @@ class StaticProfiler:
                 calls = sum(isinstance(inner, ast.Call) for inner in ast.walk(node))
                 loop_density = loops / max(lines, 1)
                 nesting = _max_nesting_depth(node)
-                size_score = lines * 0.3
-                loop_score = loop_density * 20.0 + loops * 2.0
-                call_score = calls * 0.8
-                nest_score = nesting * 2.0
+                size_score = lines * lines_weight
+                loop_score = loop_density * loop_density_weight + loops * loop_count_weight
+                call_score = calls * call_weight
+                nest_score = nesting * nesting_weight
                 score = size_score + loop_score + call_score + nest_score
                 segment = dedent(ast.get_source_segment(source, node) or "")
                 pure, reasons = analyze_purity(segment)
@@ -43,6 +53,7 @@ class StaticProfiler:
                     continue
                 qualname = ".".join([*owner_path, node.name]) if owner_path else node.name
                 results.append(
+
                     DiscoveryResult(
                         target=TargetSpec(
                             project_root=project_root,
@@ -122,4 +133,9 @@ def _iter_supported_nodes(tree: ast.Module) -> list[tuple[ast.FunctionDef | ast.
             for child in node.body:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     nodes.append((child, [node.name]))
+                elif isinstance(child, ast.ClassDef):
+                    for grandchild in child.body:
+                        if isinstance(grandchild, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            nodes.append((grandchild, [node.name, child.name]))
     return nodes
+

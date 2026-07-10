@@ -269,6 +269,15 @@ class JouleSettings:
     pareto_weights: ParetoWeights = field(default_factory=ParetoWeights)
     fidelity: FidelitySettings = field(default_factory=FidelitySettings)
     surrogate: SurrogateSettings = field(default_factory=SurrogateSettings)
+    # Time budget in seconds. If set, MFBO will stop when total elapsed optimization time exceeds this.
+    optimization_time_budget_s: float | None = None
+    # Static discovery profiler weights
+    discovery_lines_weight: float = 0.3
+    discovery_loop_density_weight: float = 20.0
+    discovery_loop_count_weight: float = 2.0
+    discovery_call_weight: float = 0.8
+    discovery_nesting_weight: float = 2.0
+
 
     @property
     def artifact_path(self) -> Path:
@@ -409,21 +418,15 @@ def _build_surrogate_settings(
     )
 
 
-def load_settings(path: str | Path) -> JouleSettings:
-    """Load and validate JouleSettings from pyproject.toml configuration."""
-    project_root = find_project_root(Path(path))
-    payload = _load_raw_payload(project_root)
-    _reject_legacy_surrogate_keys(payload)
-
-    profile = _resolve_profile(payload)
-    resolved_payload = {**PROFILE_DEFAULTS.get(profile, {}), **payload}
-    backend_payload = resolved_payload.get("backends", {}) if isinstance(resolved_payload, dict) else {}
-
-    fidelity = _build_fidelity_settings(profile, resolved_payload)
-    surrogate_payload, gp_payload, local_kernel_payload, hist_gbdt_payload = _build_surrogate_model_payloads(resolved_payload)
-    surrogate = _build_surrogate_settings(surrogate_payload, gp_payload, local_kernel_payload, hist_gbdt_payload)
-
-    settings = JouleSettings(
+def _build_core_settings(
+    project_root: Path,
+    profile: str,
+    resolved_payload: dict[str, Any],
+    backend_payload: dict[str, Any],
+    fidelity: FidelitySettings,
+    surrogate: SurrogateSettings,
+) -> JouleSettings:
+    return JouleSettings(
         project_root=project_root,
         profile=profile,
         seed=int(resolved_payload.get("seed", 1337)),
@@ -475,5 +478,40 @@ def load_settings(path: str | Path) -> JouleSettings:
         ),
         fidelity=fidelity,
         surrogate=surrogate,
+        # New configurations
+        optimization_time_budget_s=(
+            float(resolved_payload["optimization_time_budget_s"])
+            if resolved_payload.get("optimization_time_budget_s") is not None
+            else None
+        ),
+        discovery_lines_weight=float(resolved_payload.get("discovery_lines_weight", 0.3)),
+        discovery_loop_density_weight=float(resolved_payload.get("discovery_loop_density_weight", 20.0)),
+        discovery_loop_count_weight=float(resolved_payload.get("discovery_loop_count_weight", 2.0)),
+        discovery_call_weight=float(resolved_payload.get("discovery_call_weight", 0.8)),
+        discovery_nesting_weight=float(resolved_payload.get("discovery_nesting_weight", 2.0)),
     )
-    return settings
+
+
+def load_settings(path: str | Path) -> JouleSettings:
+    """Load and validate JouleSettings from pyproject.toml configuration."""
+    project_root = find_project_root(Path(path))
+    payload = _load_raw_payload(project_root)
+    _reject_legacy_surrogate_keys(payload)
+
+    profile = _resolve_profile(payload)
+    resolved_payload = {**PROFILE_DEFAULTS.get(profile, {}), **payload}
+    backend_payload = resolved_payload.get("backends", {}) if isinstance(resolved_payload, dict) else {}
+
+    fidelity = _build_fidelity_settings(profile, resolved_payload)
+    surrogate_payload, gp_payload, local_kernel_payload, hist_gbdt_payload = _build_surrogate_model_payloads(resolved_payload)
+    surrogate = _build_surrogate_settings(surrogate_payload, gp_payload, local_kernel_payload, hist_gbdt_payload)
+
+    return _build_core_settings(
+        project_root=project_root,
+        profile=profile,
+        resolved_payload=resolved_payload,
+        backend_payload=backend_payload,
+        fidelity=fidelity,
+        surrogate=surrogate,
+    )
+

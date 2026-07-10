@@ -75,10 +75,19 @@ def discover_targets(settings: JouleSettings, path: Path) -> list[DiscoveryResul
     profiler = StaticProfiler()
     # Use hotspot_limit for target discovery (how many functions to surface),
     # not workload_discovery_limit (which controls workloads per target).
-    results = profiler.discover(root, limit=settings.hotspot_limit)
+    results = profiler.discover(
+        root,
+        limit=settings.hotspot_limit,
+        lines_weight=settings.discovery_lines_weight,
+        loop_density_weight=settings.discovery_loop_density_weight,
+        loop_count_weight=settings.discovery_loop_count_weight,
+        call_weight=settings.discovery_call_weight,
+        nesting_weight=settings.discovery_nesting_weight,
+    )
     for result in results:
         result.workloads = discover_pytest_workloads(root, result.target, limit=3)
     return results
+
 
 
 def _find_root(path: Path) -> Path:
