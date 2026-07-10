@@ -8,6 +8,8 @@ from joule.metadata import CandidateMetadata, ImprovementSummary, SurrogateDecis
 from joule.models import CandidateEvaluation, FrontierState, SearchContext, SearchPhase, TransformationResult
 from joule.utils.metrics import improvement_ratio
 from joule.utils.reporting import improvement_summary
+from joule.transformers.smell_tagger import tag_source_with_evidence
+
 
 
 @dataclass(slots=True)
@@ -110,6 +112,12 @@ def build_correctness_rejection_evaluation(
         composition_hops=int(proposal.metadata.get("composition_hops", 0) or 0),
         dependency_policy_state=dependency_policy["dependency_policy_state"],
         dependency_policy_reason=dependency_policy["dependency_policy_reason"],
+        extra={
+            "smell_evidence": {
+                k: v.to_record()
+                for k, v in tag_source_with_evidence(proposal.candidate_source).items()
+            }
+        },
     ).to_record()
     return CandidateEvaluation(
         candidate_id=candidate_id,
@@ -170,5 +178,11 @@ def build_candidate_metadata(
         composition_hops=int(proposal.metadata.get("composition_hops", 0) or 0),
         dependency_policy_state=dependency_policy["dependency_policy_state"],
         dependency_policy_reason=dependency_policy["dependency_policy_reason"],
+        extra={
+            "smell_evidence": {
+                k: v.to_record()
+                for k, v in tag_source_with_evidence(proposal.candidate_source).items()
+            }
+        },
     )
     return metadata.to_record()

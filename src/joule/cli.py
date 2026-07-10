@@ -17,6 +17,7 @@ from joule.cli_commands.doctor import run_doctor
 from joule.cli_commands.inspect import run_inspect
 from joule.cli_commands.parse_json import run_parse_json
 from joule.cli_commands.resume import run_resume
+from joule.cli_commands.scaffold import run_scaffold_operator
 from joule.cli_commands.transformations import run_transformations
 from joule.cli_commands.ui import run_ui
 from joule.config import JouleSettings, load_settings
@@ -134,8 +135,9 @@ def doctor(
     backend: str | None = typer.Option(None, "--backend", help="Backend to validate"),
     verbose: bool = typer.Option(False, "--verbose", help="Print detailed checks"),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
+    plugin_check: bool = typer.Option(False, "--plugin-check", help="Validate all registered operator plugins"),
 ):
-    run_doctor(path, backend, verbose, quiet, console=console, bootstrap_fn=_bootstrap)
+    run_doctor(path, backend, verbose, quiet, console=console, bootstrap_fn=_bootstrap, plugin_check=plugin_check)
 
 
 @app.command("transformations")
@@ -381,6 +383,29 @@ def ui(
     quiet: bool = typer.Option(False, "--quiet", help="Reduce terminal output"),
 ):
     run_ui(path, host, port, backend_only, frontend_only, verbose, quiet)
+
+
+@app.command("scaffold-operator")
+def scaffold_operator(
+    name: str = typer.Argument(..., help="Operator name in snake_case, e.g. my_optimizer"),
+    tier: str = typer.Option("M", "--tier", help="Tier: L (syntactic), M (semantic), H (algorithmic)"),
+    smells: list[str] = typer.Option([], "--smell", help="Smell category codes this operator targets (repeatable: --smell C3 --smell C10)"),
+    output: Path = typer.Option(Path("."), "--output", help="Directory to write scaffold files"),
+    package: str = typer.Option("my_package", "--package", help="Python package name for entry-point registration"),
+):
+    """Scaffold a new JOULE operator plugin.
+
+    Generates an operator skeleton, test file, and pyproject.toml
+    entry-point snippet.  Use --smell to tag which Energy-Smell categories
+    the operator targets (repeatable flag).
+    """
+    run_scaffold_operator(
+        name=name,
+        tier=tier,
+        smells=list(smells),
+        output=output / name,
+        package=package,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

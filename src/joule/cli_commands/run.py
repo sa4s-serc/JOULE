@@ -20,6 +20,8 @@ from joule.utils.analysis import (
 from joule.utils.artifacts import write_artifact
 from joule.utils.metrics import objective_score
 from joule.utils.reporting import workload_provenance_records
+from joule.utils.pareto_chart import build_pareto_summary
+
 
 
 def run_optimize(
@@ -158,11 +160,23 @@ def run_optimize(
             }
         )
 
+    pareto_points_payload = [
+        {
+            "candidate_id": point.candidate_id,
+            "metrics": point.metrics.to_record(),
+            "parent_id": point.parent_id,
+            "generation_depth": point.generation_depth,
+            "operator_name": point.operator_name,
+            "active": point.active,
+        }
+        for point in pareto.points()
+    ]
     summary = {
         "run_id": context.run_id,
         "baseline": baseline_report.to_record(),
         "best_candidate": best_candidate_payload,
         "pareto": [point.candidate_id for point in pareto.points()],
+        "pareto_summary": build_pareto_summary(pareto_points_payload, baseline_report.aggregate.to_record()),
         "workload_provenance": workload_provenance_records(context.bundle),
         "analysis": optimization_analysis,
         "candidates": summary_candidates,

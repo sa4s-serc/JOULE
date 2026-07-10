@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from joule.cli_helpers.output import resolve_output_mode
@@ -12,6 +13,8 @@ from joule.utils.analysis import (
     summarize_inspect_payload,
 )
 from joule.utils.reporting import workload_provenance_records
+from joule.utils.pareto_chart import render_pareto_ascii
+
 
 
 def _run_filesystem_artifacts(run_dir: Path) -> list[str]:
@@ -120,3 +123,22 @@ def run_inspect(
         echo(json_pretty(payload))
     else:
         reporter.console.print(human_inspect_summary(payload))
+        # Render the ASCII Pareto Front
+        checkpoint = db.get_latest_checkpoint(run_id)
+        if checkpoint:
+            try:
+                pareto_points = json.loads(str(checkpoint.get("pareto_front_json", "[]")))
+                baseline_report = checkpoint.get("metadata", {}).get("baseline_report", {})
+                baseline_aggregate = baseline_report.get("aggregate", {})
+                if pareto_points and baseline_aggregate:
+                    reporter.console.print("\n[bold]Pareto Front Projection (Energy vs Latency)[/bold]")
+                    chart = render_pareto_ascii(
+                        pareto_points,
+                        baseline_aggregate,
+                        x_metric="mean_energy_j",
+                        y_metric="mean_wall_time_s",
+                    )
+                    reporter.console.print(chart)
+            except Exception as exc:
+                reporter.console.print(f"\n[yellow]Could not render Pareto chart: {exc}[/yellow]")
+
