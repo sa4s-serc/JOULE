@@ -33,6 +33,13 @@ from joule.orchestrator.internal.mfbo_flow import (
     dependency_policy_metadata,
     generated_candidate_detail,
 )
+from joule.orchestrator.internal.checkpoints import save_checkpoint, restore_checkpoint, load_accepted_evaluations
+from joule.orchestrator.internal.compositions import (
+    proposal_generation_delta,
+    merge_feature_hints,
+    augment_with_compositions,
+)
+
 from joule.orchestrator.pareto import ParetoFront, ParetoPoint
 from joule.surrogate import ObjectiveSurrogate, SurrogateMetricTargets, SurrogateObservation, SurrogateQuery
 from joule.transformers.protocols import OperatorSelectorProtocol
@@ -137,7 +144,7 @@ class OptimizationOrchestrator:
         target_key = self._target_key(target)
         self._warm_start_surrogate(target_key=target_key, fresh_start=fresh_surrogate)
 
-        restored = self._restore_checkpoint(run_id=resume or run_id, target=target)
+        restored = restore_checkpoint(db=self.db, settings=self.settings, run_id=resume or run_id, target=target)
         if restored:
             baseline = restored["baseline"]
             pareto = restored["pareto"]
@@ -147,7 +154,7 @@ class OptimizationOrchestrator:
             escape_used = restored["escape_used"]
             if budget is not None:
                 state.total_budget = max(state.measured, budget)
-            accepted_evaluations = self._load_accepted_evaluations(run_id)
+            accepted_evaluations = load_accepted_evaluations(self.db, run_id)
             if self.reporter:
                 self.reporter.info(
                     "resume",
@@ -341,13 +348,16 @@ class OptimizationOrchestrator:
                 if pareto.expansion_count(parent_id) >= state.max_parent_expansions:
                     pareto.mark_exhausted(parent_id)
                 continue
-            proposals = self._augment_with_compositions(
+            proposals = augment_with_compositions(
                 proposals=proposals,
                 target=target,
                 parent_id=parent_id,
                 parent=parent,
                 parent_context=parent_context,
                 phase=phase,
+                settings=self.settings,
+                registry=self.registry,
+                target_with_source_fn=self._target_with_source,
             )
             ranked_proposals = sorted(proposals, key=lambda item: item.proposal_rank)[: self.settings.search_branching_factor]
             for proposal in ranked_proposals:
@@ -360,7 +370,7 @@ class OptimizationOrchestrator:
 
                 candidate_id = uuid.uuid4().hex[:8]
                 source_hash = candidate_source_hash(proposal.candidate_source)
-                generation_delta = self._proposal_generation_delta(proposal)
+                generation_delta = proposal_generation_delta(proposal)
                 next_depth = min(self.settings.search_max_generations, parent.generation_depth + generation_delta)
                 self._record_event(
                     run_id,
@@ -796,243 +806,14 @@ class OptimizationOrchestrator:
             )
         return baseline, pareto, best_candidate
 
-    def _save_checkpoint(
-        self,
-        *,
-        run_id: str,
-        candidate_id: str,
-        baseline: MeasurementReport,
-        pareto: ParetoFront,
-        parent_snapshots: dict[str, _ParentSnapshot],
-        seen_sources: dict[str, str],
-        state: OptimizationState,
-        escape_used: bool,
-        accepted_candidate_ids: set[str],
-        checkpoint_path: Path | None,
-    ) -> None:
-        pareto_payload = [
-            {
-                "candidate_id": point.candidate_id,
-                "metrics": point.metrics.to_record(),
-                "parent_id": point.parent_id,
-                "generation_depth": point.generation_depth,
-                "operator_name": point.operator_name,
-                "active": point.active,
-            }
-            for point in pareto.points()
-        ]
-        metadata = {
-            "schema_version": 2,
-            "baseline_report": baseline.to_record(),
-            "state": {
-                "measured": state.measured,
-                "total_budget": state.total_budget,
-                "no_frontier_gain": state.no_frontier_gain,
-                "max_parent_expansions": state.max_parent_expansions,
-            },
-            "seen_sources": seen_sources,
-            "parent_snapshots": {
-                key: {
-                    "candidate_id": item.candidate_id,
-                    "source": item.source,
-                    "operator_name": item.operator_name,
-                    "generation_depth": item.generation_depth,
-                    "rejection_history": item.rejection_history,
-                }
-                for key, item in parent_snapshots.items()
-            },
-            "accepted_candidate_ids": sorted(accepted_candidate_ids),
-            "escape_used": escape_used,
-            "expansion_counts": pareto.expansion_counts(),
-        }
-        self.db.save_checkpoint(
-            run_id=run_id,
-            generation=state.measured,
-            candidate_id=candidate_id,
-            pareto_front_json=json.dumps(pareto_payload),
-            metadata_json=json.dumps(metadata),
-        )
-        if checkpoint_path is None:
-            return
-        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint_path.write_text(
-            json.dumps(
-                {
-                    "run_id": run_id,
-                    "generation": state.measured,
-                    "candidate_id": candidate_id,
-                    "pareto": pareto_payload,
-                    "metadata": metadata,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+    def _save_checkpoint(self, *args: Any, **kwargs: Any) -> None:
+        save_checkpoint(db=self.db, *args, **kwargs)
 
-    def _restore_checkpoint(self, *, run_id: str, target: TargetSpec | None = None) -> dict[str, Any] | None:
-        checkpoint = self.db.get_latest_checkpoint(run_id)
-        if checkpoint is None:
-            return None
-        metadata = checkpoint.get("metadata", {}) if isinstance(checkpoint, dict) else {}
-        if not isinstance(metadata, dict) or int(metadata.get("schema_version", 0)) < 2:
-            raise ValueError(
-                "Detected incompatible checkpoint schema. Remove .joule/ and rerun to initialize the clean multi-surrogate state."
-            )
-        baseline_payload = metadata.get("baseline_report") if isinstance(metadata, dict) else None
-        if not isinstance(baseline_payload, dict):
-            return None
-        baseline = MeasurementReport.from_record(baseline_payload)
+    def _restore_checkpoint(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return restore_checkpoint(db=self.db, settings=self.settings, *args, **kwargs)
 
-        pareto = ParetoFront(
-            weights=(
-                self.settings.pareto_weights.energy,
-                self.settings.pareto_weights.latency,
-                self.settings.pareto_weights.memory,
-            )
-        )
-        try:
-            pareto_payload = json.loads(str(checkpoint.get("pareto_front_json", "[]")))
-        except json.JSONDecodeError:
-            pareto_payload = []
-        for point in pareto_payload:
-            if not isinstance(point, dict):
-                continue
-            metrics_payload = point.get("metrics")
-            if not isinstance(metrics_payload, dict):
-                continue
-            pareto.add(
-                ParetoPoint(
-                    candidate_id=str(point.get("candidate_id", "")),
-                    metrics=AggregateMetrics.from_record(metrics_payload),
-                    parent_id=point.get("parent_id"),
-                    generation_depth=int(point.get("generation_depth", 0)),
-                    operator_name=str(point.get("operator_name", "baseline")),
-                    active=bool(point.get("active", True)),
-                )
-            )
-        if not pareto.points():
-            pareto.add(
-                ParetoPoint(
-                    candidate_id="baseline",
-                    metrics=baseline.aggregate,
-                    parent_id=None,
-                    generation_depth=0,
-                    operator_name="baseline",
-                    active=True,
-                )
-            )
-
-        expansion_counts = metadata.get("expansion_counts", {}) if isinstance(metadata, dict) else {}
-        if isinstance(expansion_counts, dict):
-            pareto.load_expansion_counts({str(key): int(value) for key, value in expansion_counts.items()})
-
-        parent_payload = metadata.get("parent_snapshots", {}) if isinstance(metadata, dict) else {}
-        parent_snapshots: dict[str, _ParentSnapshot] = {}
-        if isinstance(parent_payload, dict):
-            for key, payload in parent_payload.items():
-                if not isinstance(payload, dict):
-                    continue
-                parent_snapshots[str(key)] = _ParentSnapshot(
-                    candidate_id=str(payload.get("candidate_id", key)),
-                    source=str(payload.get("source", "")),
-                    operator_name=str(payload.get("operator_name", "baseline")),
-                    generation_depth=int(payload.get("generation_depth", 0)),
-                    rejection_history=[str(item) for item in payload.get("rejection_history", [])],
-                )
-
-        if "baseline" not in parent_snapshots:
-            # Recover baseline source from the live target spec if available,
-            # otherwise fall back to the stored baseline report metadata.
-            fallback_source = (target.source if target is not None else "") or str(
-                metadata.get("baseline_source", "")
-            )
-            parent_snapshots["baseline"] = _ParentSnapshot(
-                candidate_id="baseline",
-                source=fallback_source,
-                operator_name="baseline",
-                generation_depth=0,
-            )
-
-        seen_sources_payload = metadata.get("seen_sources", {}) if isinstance(metadata, dict) else {}
-        if isinstance(seen_sources_payload, dict):
-            seen_sources = {str(key): str(value) for key, value in seen_sources_payload.items()}
-        else:
-            seen_sources = {}
-        baseline_source = parent_snapshots["baseline"].source
-        if baseline_source:
-            seen_sources.setdefault(candidate_source_hash(baseline_source), "baseline")
-
-        state_payload = metadata.get("state", {}) if isinstance(metadata, dict) else {}
-        if not isinstance(state_payload, dict):
-            state_payload = {}
-        state = OptimizationState(
-            total_budget=max(1, int(state_payload.get("total_budget", self.settings.optimization_budget))),
-            max_parent_expansions=max(
-                1,
-                int(
-                    state_payload.get(
-                        "max_parent_expansions",
-                        max(1, self.settings.search_branching_factor) * max(1, len(self.registry.operators)),
-                    )
-                ),
-            ),
-            measured=max(0, int(state_payload.get("measured", checkpoint.get("generation", 0)))),
-            no_frontier_gain=max(0, int(state_payload.get("no_frontier_gain", 0))),
-        )
-        return {
-            "baseline": baseline,
-            "pareto": pareto,
-            "parent_snapshots": parent_snapshots,
-            "seen_sources": seen_sources,
-            "state": state,
-            "escape_used": bool(metadata.get("escape_used", False)) if isinstance(metadata, dict) else False,
-        }
-
-    def _load_accepted_evaluations(self, run_id: str) -> dict[str, CandidateEvaluation]:
-        candidates = [item for item in self.db.get_candidates(run_id) if item["status"] == "accepted"]
-        if not candidates:
-            return {}
-
-        measurements = self.db.get_measurements(run_id)
-        reports_by_candidate: dict[str, MeasurementReport] = {}
-        fidelity_rank = {Fidelity.F1: 1, Fidelity.F2: 2, Fidelity.F3: 3}
-        for payload in measurements:
-            candidate_id = payload.get("candidate_id")
-            if not candidate_id:
-                continue
-            report = MeasurementReport.from_record(payload)
-            existing = reports_by_candidate.get(candidate_id)
-            if existing is None or fidelity_rank[report.fidelity] >= fidelity_rank[existing.fidelity]:
-                reports_by_candidate[candidate_id] = report
-
-        evaluations: dict[str, CandidateEvaluation] = {}
-        for item in candidates:
-            metadata = dict(item.get("metadata", {}))
-            parsed_metadata = parse_candidate_metadata(metadata)
-            frontier_raw = parsed_metadata.frontier_state or FrontierState.FRONTIER_ACTIVE.value
-            try:
-                frontier_state = FrontierState(frontier_raw)
-            except ValueError:
-                frontier_state = FrontierState.FRONTIER_ACTIVE
-            acquisition_score = float(parsed_metadata.surrogate.acquisition_score)
-
-            evaluations[item["candidate_id"]] = CandidateEvaluation(
-                candidate_id=item["candidate_id"],
-                operator_name=item["operator_name"],
-                reasoning=item["reasoning"],
-                source=item["source_code"],
-                dependencies=item["dependencies"],
-                parent_id=item["parent_id"] or "baseline",
-                generation_depth=int(parsed_metadata.generation_depth),
-                frontier_state=frontier_state,
-                accepted=True,
-                score=float(item["score"]),
-                acquisition_score=acquisition_score,
-                dominance_summary=dict(parsed_metadata.extra.get("dominance_summary", {})),
-                report=reports_by_candidate.get(item["candidate_id"]),
-                metadata=metadata,
-            )
-        return evaluations
+    def _load_accepted_evaluations(self, *args: Any, **kwargs: Any) -> dict[str, CandidateEvaluation]:
+        return load_accepted_evaluations(self.db, *args, **kwargs)
 
     def _record_candidate(self, run_id: str, evaluation: CandidateEvaluation, *, status: str) -> None:
         self.db.record_candidate(
@@ -1194,7 +975,7 @@ class OptimizationOrchestrator:
             operator_tier=proposal.operator_tier.value,
             operator_tier_descriptor=proposal.metadata.get("operator_tier_descriptor", ""),
             proposal_rank=proposal.proposal_rank,
-            generation_delta=self._proposal_generation_delta(proposal),
+            generation_delta=proposal_generation_delta(proposal),
             composed_operator_chain=list(proposal.metadata.get("composed_operator_chain", [])),
             composition_hops=int(proposal.metadata.get("composition_hops", 0) or 0),
             dependency_policy_state=dependency_policy["dependency_policy_state"],
@@ -1216,126 +997,7 @@ class OptimizationOrchestrator:
             metadata=metadata,
         )
         self._record_candidate(run_id, evaluation, status=status)
-    def _proposal_generation_delta(self, proposal: TransformationResult) -> int:
-        raw = proposal.metadata.get("generation_delta", 1)
-        try:
-            return max(1, int(raw))
-        except (TypeError, ValueError):
-            return 1
 
-    def _merge_feature_hints(
-        self,
-        first: dict[str, float],
-        second: dict[str, float],
-    ) -> dict[str, float]:
-        merged: dict[str, float] = {}
-        for payload in (first, second):
-            for key, value in payload.items():
-                try:
-                    merged[key] = float(merged.get(key, 0.0)) + float(value)
-                except (TypeError, ValueError):
-                    continue
-        return merged
-
-    def _augment_with_compositions(
-        self,
-        *,
-        proposals: list[TransformationResult],
-        target: TargetSpec,
-        parent_id: str,
-        parent: _ParentSnapshot,
-        parent_context: SearchContext,
-        phase: SearchPhase,
-    ) -> list[TransformationResult]:
-        if not self.settings.search_composition_enabled:
-            return proposals
-
-        width = max(1, int(self.settings.search_composition_width))
-        max_hops = max(1, int(self.settings.search_composition_max_hops))
-        ranked = sorted(proposals, key=lambda item: item.proposal_rank)[:width]
-        composed: list[TransformationResult] = []
-
-        for base_proposal in ranked:
-            current_proposal = base_proposal
-            current_depth = parent.generation_depth + self._proposal_generation_delta(current_proposal)
-            chained_names = [current_proposal.operator_name]
-            chained_reasoning = [current_proposal.reasoning]
-            chained_delta = self._proposal_generation_delta(current_proposal)
-
-            for hop in range(1, max_hops + 1):
-                if current_depth >= self.settings.search_max_generations:
-                    break
-
-                intermediate_target = self._target_with_source(target, current_proposal.candidate_source, parent_id=parent_id)
-                intermediate_context = SearchContext(
-                    parent_id=parent_id,
-                    parent_source=current_proposal.candidate_source,
-                    parent_operator_name=current_proposal.operator_name,
-                    generation_depth=current_depth,
-                    phase=phase,
-                    rejection_history=parent_context.rejection_history[-5:],
-                    search_metadata={
-                        **dict(parent_context.search_metadata),
-                        "composition_hops": hop,
-                        "composed_from_operator": current_proposal.operator_name,
-                    },
-                )
-                ops = self.registry.select_operators_for_candidate(
-                    target=intermediate_target,
-                    context=intermediate_context,
-                    phase=phase,
-                    parent_generation=current_depth,
-                    top_k=1,
-                )
-                next_operator = ops[0] if ops else None
-                if next_operator is None:
-                    break
-                next_proposals = next_operator.generate(intermediate_target, intermediate_context)
-                if not next_proposals:
-                    break
-                next_proposal = sorted(next_proposals, key=lambda item: item.proposal_rank)[0]
-                
-                if next_proposal.candidate_source == current_proposal.candidate_source:
-                    break
-                
-                next_delta = self._proposal_generation_delta(next_proposal)
-                current_depth += next_delta
-                chained_names.append(next_proposal.operator_name)
-                chained_reasoning.append(next_proposal.reasoning)
-                chained_delta += next_delta
-                
-                merged_hints = self._merge_feature_hints(current_proposal.feature_hints, next_proposal.feature_hints)
-                
-                new_proposal = TransformationResult(
-                    operator_name=next_proposal.operator_name,
-                    candidate_source=next_proposal.candidate_source,
-                    reasoning=" -> ".join(chained_reasoning).strip(),
-                    dependencies=sorted(set([*current_proposal.dependencies, *next_proposal.dependencies])),
-                    operator_family=next_proposal.operator_family,
-                    operator_tier=next_proposal.operator_tier,
-                    # Composed proposals are intentionally ranked after base proposals
-                    # (multiplied by 1000) so they are only evaluated when the base
-                    # proposals have been exhausted within the branching factor budget.
-                    proposal_rank=(base_proposal.proposal_rank * 1000) + next_proposal.proposal_rank + (hop * 500),
-                    feature_hints=merged_hints,
-                    metadata={
-                        **dict(next_proposal.metadata),
-                        "composed_operator_chain": list(chained_names),
-                        "composition_hops": hop,
-                        "generation_delta": chained_delta,
-                        "composed_from_operator": base_proposal.operator_name,
-                        "composed_from_reasoning": base_proposal.reasoning,
-                    },
-                )
-                composed.append(new_proposal)
-                current_proposal = new_proposal
-
-        if not composed:
-            return proposals
-        merged: dict[str, TransformationResult] = {}
-        for proposal in [*proposals, *composed]:
-            merged.setdefault(proposal.candidate_source, proposal)
-        return list(merged.values())
 
     def _target_key(self, target: TargetSpec) -> str:
         return f"{target.module}:{target.qualname}"
